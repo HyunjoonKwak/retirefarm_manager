@@ -1,0 +1,379 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 사용자 ====================
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  retirementGoal    RetirementGoal?
+  realEstateAssets  RealEstateAsset[]
+  setupCostItems    SetupCostItem[]
+  fundingSources    FundingSource[]
+  farmingLogs       FarmingLog[]
+  crops             Crop[]
+  transactions      FinancialTransaction[]
+  inventory         InventoryItem[]
+  priceWatchlist    PriceWatchlist[]
+  priceAlerts       PriceAlert[]
+}
+
+// ==================== 은퇴 계획 ====================
+model RetirementGoal {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  targetDate           DateTime
+  targetAmount         Decimal  @db.Decimal(15, 0)
+  monthlyLivingExpense Decimal  @db.Decimal(12, 0)
+  lifeExpectancy       Int      @default(85)
+  inflationRate        Decimal  @db.Decimal(4, 2) @default(2.5)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== 부동산 자산 ====================
+model RealEstateAsset {
+  id                String      @id @default(cuid())
+  userId            String
+  name              String
+  propertyType      PropertyType
+  address           String
+  area              Decimal     @db.Decimal(10, 2)
+  acquisitionDate   DateTime
+  acquisitionPrice  Decimal     @db.Decimal(15, 0)
+  currentPrice      Decimal     @db.Decimal(15, 0)
+  expectedSalePrice Decimal     @db.Decimal(15, 0)
+  mortgageBalance   Decimal     @db.Decimal(15, 0) @default(0)
+  monthlyRent       Decimal?    @db.Decimal(12, 0)
+  status            AssetStatus @default(HOLDING)
+  plannedSaleDate   DateTime?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fundingSource FundingSource?
+}
+
+enum PropertyType {
+  APARTMENT
+  OFFICETEL
+  LAND
+  COMMERCIAL
+  HOUSE
+  OTHER
+}
+
+enum AssetStatus {
+  HOLDING
+  LISTING
+  CONTRACT
+  SOLD
+}
+
+// ==================== 설립 비용 ====================
+model SetupCostCategory {
+  id            String                @id @default(cuid())
+  name          String
+  order         Int                   @default(0)
+  subcategories SetupCostSubcategory[]
+}
+
+model SetupCostSubcategory {
+  id         String            @id @default(cuid())
+  categoryId String
+  name       String
+  order      Int               @default(0)
+
+  category SetupCostCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  items    SetupCostItem[]
+}
+
+model SetupCostItem {
+  id               String     @id @default(cuid())
+  userId           String
+  subcategoryId    String
+  name             String
+  description      String?
+  estimatedCost    Decimal    @db.Decimal(15, 0)
+  actualCost       Decimal?   @db.Decimal(15, 0)
+  quantity         Int        @default(1)
+  unit             String     @default("개")
+  isGovernmentSubsidy Boolean @default(false)
+  subsidyAmount    Decimal?   @db.Decimal(15, 0)
+  subsidyRate      Decimal?   @db.Decimal(5, 2)
+  priority         Priority   @default(ESSENTIAL)
+  status           ItemStatus @default(PLANNED)
+  notes            String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subcategory SetupCostSubcategory @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
+}
+
+enum Priority {
+  ESSENTIAL
+  IMPORTANT
+  OPTIONAL
+}
+
+enum ItemStatus {
+  PLANNED
+  QUOTED
+  ORDERED
+  DELIVERED
+  INSTALLED
+}
+
+// ==================== 자금 조달 ====================
+model FundingSource {
+  id            String        @id @default(cuid())
+  userId        String
+  type          FundingType
+  name          String
+  amount        Decimal       @db.Decimal(15, 0)
+  expectedDate  DateTime
+  linkedAssetId String?       @unique
+  status        FundingStatus @default(PLANNED)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedAsset RealEstateAsset? @relation(fields: [linkedAssetId], references: [id])
+}
+
+enum FundingType {
+  REAL_ESTATE_SALE
+  SAVINGS
+  LOAN
+  GOVERNMENT_SUBSIDY
+  OTHER
+}
+
+enum FundingStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+// ==================== 영농일지 ====================
+model FarmingLog {
+  id          String         @id @default(cuid())
+  userId      String
+  date        DateTime       @db.Date
+  temperature Decimal?       @db.Decimal(4, 1)
+  humidity    Int?
+  rainfall    Decimal?       @db.Decimal(5, 1)
+  weather     String?
+  notes       String?
+  photos      String[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activities FarmActivity[]
+
+  @@unique([userId, date])
+}
+
+model FarmActivity {
+  id          String       @id @default(cuid())
+  logId       String
+  type        ActivityType
+  cropId      String?
+  plotId      String?
+  description String
+  quantity    Decimal?     @db.Decimal(10, 2)
+  unit        String?
+  duration    Int?
+  workers     Int?
+  createdAt   DateTime     @default(now())
+
+  log            FarmingLog           @relation(fields: [logId], references: [id], onDelete: Cascade)
+  crop           Crop?                @relation(fields: [cropId], references: [id])
+  materialUsages MaterialUsage[]
+}
+
+enum ActivityType {
+  SEEDING
+  TRANSPLANTING
+  WATERING
+  FERTILIZING
+  PEST_CONTROL
+  PRUNING
+  HARVESTING
+  PACKING
+  SHIPPING
+  MAINTENANCE
+  OTHER
+}
+
+model MaterialUsage {
+  id         String   @id @default(cuid())
+  activityId String
+  itemId     String
+  quantity   Decimal  @db.Decimal(10, 2)
+
+  activity FarmActivity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  item     InventoryItem @relation(fields: [itemId], references: [id])
+}
+
+// ==================== 작물 ====================
+model Crop {
+  id                  String      @id @default(cuid())
+  userId              String
+  name                String
+  variety             String?
+  plantingDate        DateTime
+  expectedHarvestDate DateTime
+  plotId              String?
+  status              CropStatus  @default(GROWING)
+  growthStage         GrowthStage @default(SEEDING)
+  notes               String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activities   FarmActivity[]
+  transactions FinancialTransaction[]
+}
+
+enum CropStatus {
+  GROWING
+  HARVESTING
+  COMPLETED
+  FAILED
+}
+
+enum GrowthStage {
+  SEEDING
+  GERMINATION
+  SEEDLING
+  VEGETATIVE
+  FLOWERING
+  FRUITING
+  HARVEST
+}
+
+// ==================== 재무 ====================
+model FinancialTransaction {
+  id            String          @id @default(cuid())
+  userId        String
+  date          DateTime
+  type          TransactionType
+  category      String
+  subcategory   String?
+  amount        Decimal         @db.Decimal(12, 0)
+  description   String
+  relatedCropId String?
+  paymentMethod String?
+  receiptUrl    String?
+  createdAt     DateTime        @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  crop Crop? @relation(fields: [relatedCropId], references: [id])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+// ==================== 재고 ====================
+model InventoryItem {
+  id               String            @id @default(cuid())
+  userId           String
+  name             String
+  category         InventoryCategory
+  currentQuantity  Decimal           @db.Decimal(10, 2)
+  unit             String
+  minimumQuantity  Decimal           @db.Decimal(10, 2) @default(0)
+  lastPurchaseDate DateTime?
+  lastPurchasePrice Decimal?         @db.Decimal(12, 0)
+  location         String?
+  expirationDate   DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   InventoryTransaction[]
+  materialUsages MaterialUsage[]
+}
+
+enum InventoryCategory {
+  SEED
+  FERTILIZER
+  PESTICIDE
+  TOOL
+  PACKAGING
+  OTHER
+}
+
+model InventoryTransaction {
+  id       String   @id @default(cuid())
+  itemId   String
+  type     String   // "IN" | "OUT"
+  quantity Decimal  @db.Decimal(10, 2)
+  date     DateTime
+  reason   String
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+// ==================== 시세 정보 ====================
+model PriceWatchlist {
+  id       String @id @default(cuid())
+  userId   String
+  itemCode String
+  itemName String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemCode])
+}
+
+model PriceAlert {
+  id          String  @id @default(cuid())
+  userId      String
+  itemCode    String
+  itemName    String
+  condition   String  // "ABOVE" | "BELOW"
+  targetPrice Decimal @db.Decimal(12, 0)
+  isActive    Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MarketPriceCache {
+  id            String   @id @default(cuid())
+  itemCode      String
+  itemName      String
+  marketCode    String
+  marketName    String
+  date          DateTime @db.Date
+  avgPrice      Decimal  @db.Decimal(12, 0)
+  maxPrice      Decimal  @db.Decimal(12, 0)
+  minPrice      Decimal  @db.Decimal(12, 0)
+  tradingVolume Decimal  @db.Decimal(15, 2)
+  unit          String
+  fetchedAt     DateTime @default(now())
+
+  @@unique([itemCode, marketCode, date])
+  @@index([itemCode, date])
+}
