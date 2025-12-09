@@ -91,3 +91,10 @@ export function calculateDDay(targetDate: Date | string): { text: string; days: 
     return { text: `D+${Math.abs(days)}`, days, isOverdue: true };
   }
 }
+
+/**
+ * D-Day 텍스트 포맷팅
+ */
+export function formatDDay(targetDate: Date | string): string {
+  return calculateDDay(targetDate).text;
+}
