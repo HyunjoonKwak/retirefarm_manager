@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Building2, Loader2, ExternalLink, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
+import { Building2, Loader2, ExternalLink, TrendingUp, TrendingDown, RefreshCw, Banknote } from "lucide-react";
 import { formatLargeNumber, formatPercent, formatDate } from "@/lib/utils/format";
 
 // 외부 포트폴리오 자산 타입 (클라이언트용)
@@ -17,11 +17,13 @@ interface ExternalPortfolioAsset {
   purchasePrice: string;
   currentPrice: string;
   loanAmount?: string;
+  deposit?: string;
   hasLoan: boolean;
   tradeType: "OWNED" | "FOR_SALE" | "SOLD";
   expectedSaleDate?: string;
   unrealizedGain: string;
   unrealizedGainRate: number;
+  estimatedNetProceeds?: string; // 실현가능수익금 (현재시세 - 대출금 - 보증금)
 }
 
 interface ExternalPortfolioSummary {
@@ -308,10 +310,36 @@ export function AssetList() {
                       </div>
                     </div>
 
-                    {asset.hasLoan && asset.loanAmount && (
+                    {(asset.hasLoan || Number(asset.deposit || "0") > 0) && (
+                      <div className="pt-2 border-t grid grid-cols-2 gap-2">
+                        {asset.hasLoan && asset.loanAmount && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">대출 잔액</p>
+                            <p className="font-medium text-red-600">-{formatLargeNumber(asset.loanAmount)}</p>
+                          </div>
+                        )}
+                        {Number(asset.deposit || "0") > 0 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">보증금</p>
+                            <p className="font-medium text-orange-600">-{formatLargeNumber(asset.deposit || "0")}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 실현가능수익금 */}
+                    {asset.estimatedNetProceeds && (
                       <div className="pt-2 border-t">
-                        <p className="text-xs text-muted-foreground">대출 잔액</p>
-                        <p className="font-medium text-red-600">-{formatLargeNumber(asset.loanAmount)}</p>
+                        <div className="flex items-center gap-1">
+                          <Banknote className="h-3 w-3 text-blue-500" />
+                          <p className="text-xs text-muted-foreground">실현가능수익금</p>
+                        </div>
+                        <p className={`font-bold text-lg ${Number(asset.estimatedNetProceeds) >= 0 ? "text-blue-600" : "text-red-600"}`}>
+                          {formatLargeNumber(asset.estimatedNetProceeds)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          (현재시세 - 대출금 - 보증금)
+                        </p>
                       </div>
                     )}
 
