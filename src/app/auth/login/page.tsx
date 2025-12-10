@@ -40,12 +40,14 @@ function LoginForm() {
   // SSO 토큰 처리
   useEffect(() => {
     const ssoToken = searchParams.get("sso_token");
+    console.log("[SSO] Token from URL:", ssoToken ? `${ssoToken.substring(0, 20)}...` : "none");
     if (ssoToken) {
       handleSSOLogin(ssoToken);
     }
   }, [searchParams]);
 
   async function handleSSOLogin(token: string) {
+    console.log("[SSO] Starting SSO login...");
     setIsSSOLoading(true);
     try {
       const result = await signIn("credentials", {
@@ -53,19 +55,24 @@ function LoginForm() {
         redirect: false,
       });
 
+      console.log("[SSO] SignIn result:", result);
+
       // URL에서 sso_token 제거
       const url = new URL(window.location.href);
       url.searchParams.delete("sso_token");
       window.history.replaceState({}, document.title, url.pathname);
 
       if (result?.error) {
+        console.log("[SSO] Error:", result.error);
         toast.error(result.error);
       } else {
+        console.log("[SSO] Success!");
         toast.success("SSO 로그인 성공!");
         router.push("/");
         router.refresh();
       }
-    } catch {
+    } catch (err) {
+      console.error("[SSO] Exception:", err);
       toast.error("SSO 로그인 중 오류가 발생했습니다.");
     } finally {
       setIsSSOLoading(false);

@@ -7,18 +7,32 @@ const MY_PORTAL_API = process.env.MY_PORTAL_API_URL || "https://portal.specialri
 
 // My Portal API로 토큰 검증
 async function verifyPortalToken(token: string) {
+  console.log("[SSO Server] verifyPortalToken called");
+  console.log("[SSO Server] API URL:", MY_PORTAL_API);
+  console.log("[SSO Server] Token prefix:", token.substring(0, 30) + "...");
+
   try {
-    const response = await fetch(`${MY_PORTAL_API}/auth/verify`, {
+    const url = `${MY_PORTAL_API}/auth/verify`;
+    console.log("[SSO Server] Fetching:", url);
+
+    const response = await fetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    console.log("[SSO Server] Response status:", response.status);
+
     if (response.ok) {
       const data = await response.json();
+      console.log("[SSO Server] Response data:", JSON.stringify(data));
       return { valid: true, user: data.user };
     }
+
+    const errorText = await response.text();
+    console.log("[SSO Server] Error response:", errorText);
     return { valid: false };
-  } catch {
+  } catch (error) {
+    console.error("[SSO Server] Exception:", error);
     return { valid: false };
   }
 }
@@ -33,19 +47,29 @@ export const authOptions: NextAuthOptions = {
         ssoToken: { label: "SSO Token", type: "text" },
       },
       async authorize(credentials) {
+        console.log("[SSO Server] authorize called");
+        console.log("[SSO Server] credentials keys:", credentials ? Object.keys(credentials) : "none");
+        console.log("[SSO Server] has ssoToken:", !!credentials?.ssoToken);
+        console.log("[SSO Server] has email:", !!credentials?.email);
+
         if (!credentials?.email && !credentials?.ssoToken) {
+          console.log("[SSO Server] No email or ssoToken provided");
           throw new Error("이메일 또는 SSO 토큰이 필요합니다.");
         }
 
         // SSO 로그인 처리
         if (credentials.ssoToken) {
+          console.log("[SSO Server] Processing SSO token...");
           const portalData = await verifyPortalToken(credentials.ssoToken);
+          console.log("[SSO Server] Portal verification result:", JSON.stringify(portalData));
 
           if (!portalData.valid || !portalData.user) {
+            console.log("[SSO Server] Invalid SSO token");
             throw new Error("유효하지 않은 SSO 토큰입니다.");
           }
 
           // 사용자 찾기 또는 생성
+          console.log("[SSO Server] Looking for user:", portalData.user.email);
           let user = await prisma.user.findFirst({
             where: {
               OR: [
@@ -56,6 +80,7 @@ export const authOptions: NextAuthOptions = {
           });
 
           if (!user) {
+            console.log("[SSO Server] Creating new SSO user...");
             user = await prisma.user.create({
               data: {
                 email: portalData.user.email,
@@ -66,8 +91,12 @@ export const authOptions: NextAuthOptions = {
                 ssoEnabled: true,
               },
             });
+            console.log("[SSO Server] Created user:", user.id);
+          } else {
+            console.log("[SSO Server] Found existing user:", user.id);
           }
 
+          console.log("[SSO Server] SSO login successful for:", user.email);
           return {
             id: user.id,
             email: user.email,
