@@ -67,11 +67,8 @@ export function AssetList() {
   useEffect(() => {
     async function fetchAssets() {
       try {
-        // 클라이언트에서 직접 외부 API 호출 (SSO 쿠키 자동 전송)
-        const response = await fetch(
-          `${EXTERNAL_API_URL}/api/portfolio?tradeType=${activeTab}`,
-          { credentials: "include" }
-        );
+        // 자체 API route를 통해 서버사이드에서 외부 API 호출
+        const response = await fetch(`/api/assets/external?tradeType=${activeTab}`);
 
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
@@ -80,12 +77,14 @@ export function AssetList() {
         const result = await response.json();
 
         // API 응답 구조에 맞게 데이터 처리
-        const assets = result.data || result.assets || result || [];
+        const assets = result.assets || [];
+        const summary = result.summary || calculateSummary(assets);
 
-        // 요약 계산
-        const summary = calculateSummary(Array.isArray(assets) ? assets : []);
-
-        setData({ assets: Array.isArray(assets) ? assets : [], summary });
+        setData({
+          assets: Array.isArray(assets) ? assets : [],
+          summary,
+          error: result.error
+        });
       } catch (err) {
         console.error("Failed to fetch external assets:", err);
         setData({
@@ -98,7 +97,7 @@ export function AssetList() {
             totalUnrealizedGain: "0",
             averageYieldRate: 0,
           },
-          error: "외부 포트폴리오 서비스에 연결할 수 없습니다. SSO 로그인이 필요할 수 있습니다.",
+          error: "외부 포트폴리오 서비스에 연결할 수 없습니다.",
         });
       } finally {
         setLoading(false);

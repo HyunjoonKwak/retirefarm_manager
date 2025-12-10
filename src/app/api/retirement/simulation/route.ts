@@ -26,12 +26,13 @@ export async function GET() {
     }
 
     // 외부 포트폴리오에서 현재 자산 가치 가져오기
+    const userId = session.user.id;
     let currentAssets = 0;
     let externalAssetsAvailable = false;
     let externalAssetsSummary = null;
 
     try {
-      const summary = await externalPortfolioClient.getSummary();
+      const summary = await externalPortfolioClient.getSummary(userId);
       currentAssets = Number(summary.totalValue) - Number(summary.totalLoanAmount);
       externalAssetsAvailable = true;
       externalAssetsSummary = {
@@ -62,7 +63,7 @@ export async function GET() {
     let expectedProceeds = null;
     if (externalAssetsAvailable) {
       try {
-        expectedProceeds = await externalPortfolioClient.getExpectedProceeds();
+        expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userId);
       } catch {
         console.log("Failed to get expected proceeds");
       }

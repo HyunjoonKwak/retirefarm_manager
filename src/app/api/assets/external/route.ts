@@ -12,25 +12,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
+    const userId = session.user.id;
     const { searchParams } = new URL(request.url);
     const tradeType = searchParams.get("tradeType");
 
     let assets;
     switch (tradeType) {
       case "OWNED":
-        assets = await externalPortfolioClient.getOwnedAssets();
+        assets = await externalPortfolioClient.getOwnedAssets(userId);
         break;
       case "FOR_SALE":
-        assets = await externalPortfolioClient.getForSaleAssets();
+        assets = await externalPortfolioClient.getForSaleAssets(userId);
         break;
       case "SOLD":
-        assets = await externalPortfolioClient.getSoldAssets();
+        assets = await externalPortfolioClient.getSoldAssets(userId);
         break;
       default:
-        assets = await externalPortfolioClient.getAllAssets();
+        assets = await externalPortfolioClient.getAllAssets(userId);
     }
 
-    const summary = await externalPortfolioClient.getSummary();
+    const summary = await externalPortfolioClient.getSummary(userId);
 
     return NextResponse.json({
       assets,
