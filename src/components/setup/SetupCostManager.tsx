@@ -225,14 +225,6 @@ export function SetupCostManager() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
   // 서브카테고리 목록 생성
   const allSubcategories = categories.flatMap((cat) =>
     cat.subcategories.map((sub) => ({
@@ -266,8 +258,18 @@ export function SetupCostManager() {
 
   // 카테고리 변경 시 평수 계산 모드 초기화
   useEffect(() => {
-    // selectedSubcategory 변경 시에만 실행
-    const subInfo = allSubcategories.find((s) => s.id === selectedSubcategory);
+    if (!selectedSubcategory) return;
+
+    // categories에서 직접 찾기
+    let subInfo: { categoryName: string; subcategoryName: string } | null = null;
+    for (const cat of categories) {
+      const sub = cat.subcategories.find((s) => s.id === selectedSubcategory);
+      if (sub) {
+        subInfo = { categoryName: cat.name, subcategoryName: sub.name };
+        break;
+      }
+    }
+
     const isLandOrFacility =
       subInfo?.categoryName === "토지 및 시설" ||
       subInfo?.subcategoryName?.includes("토지") ||
@@ -281,8 +283,15 @@ export function SetupCostManager() {
       setAreaInPyeong("");
       setPricePerPyeong("");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSubcategory]);
+  }, [selectedSubcategory, categories]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
