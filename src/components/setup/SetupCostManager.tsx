@@ -97,6 +97,11 @@ export function SetupCostManager() {
   const [newItemPriority, setNewItemPriority] = useState<"ESSENTIAL" | "IMPORTANT" | "OPTIONAL">("ESSENTIAL");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 평수/평단가 입력용 상태
+  const [useAreaCalculation, setUseAreaCalculation] = useState(false);
+  const [areaInPyeong, setAreaInPyeong] = useState("");
+  const [pricePerPyeong, setPricePerPyeong] = useState("");
+
   async function fetchData() {
     try {
       const [categoriesRes, summaryRes] = await Promise.all([
@@ -168,6 +173,9 @@ export function SetupCostManager() {
         setNewItemName("");
         setNewItemCost("");
         setNewItemPriority("ESSENTIAL");
+        setAreaInPyeong("");
+        setPricePerPyeong("");
+        setUseAreaCalculation(false);
         fetchData();
       }
     } catch {
@@ -230,8 +238,42 @@ export function SetupCostManager() {
     cat.subcategories.map((sub) => ({
       id: sub.id,
       name: `${cat.name} > ${sub.name}`,
+      categoryName: cat.name,
+      subcategoryName: sub.name,
     }))
   );
+
+  // 토지나 시설/건축물 카테고리인지 확인
+  const selectedSubcategoryInfo = allSubcategories.find((s) => s.id === selectedSubcategory);
+  const isLandOrFacilityCategory =
+    selectedSubcategoryInfo?.categoryName === "토지 및 시설" ||
+    selectedSubcategoryInfo?.subcategoryName?.includes("토지") ||
+    selectedSubcategoryInfo?.subcategoryName?.includes("시설") ||
+    selectedSubcategoryInfo?.subcategoryName?.includes("건축");
+
+  // 평수 * 평단가 계산
+  const calculatedCost =
+    areaInPyeong && pricePerPyeong
+      ? (Number(areaInPyeong) * Number(pricePerPyeong)).toString()
+      : "";
+
+  // 평수 계산 모드일 때 비용 자동 설정
+  useEffect(() => {
+    if (useAreaCalculation && calculatedCost) {
+      setNewItemCost(calculatedCost);
+    }
+  }, [calculatedCost, useAreaCalculation]);
+
+  // 카테고리 변경 시 평수 계산 모드 초기화
+  useEffect(() => {
+    if (isLandOrFacilityCategory) {
+      setUseAreaCalculation(true);
+    } else {
+      setUseAreaCalculation(false);
+      setAreaInPyeong("");
+      setPricePerPyeong("");
+    }
+  }, [selectedSubcategory, isLandOrFacilityCategory]);
 
   return (
     <div className="space-y-6">
@@ -330,6 +372,44 @@ export function SetupCostManager() {
                   onChange={(e) => setNewItemName(e.target.value)}
                 />
               </div>
+              {/* 토지/시설 카테고리일 때 평수 계산 UI */}
+              {isLandOrFacilityCategory && (
+                <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">평수 기반 계산</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>면적 (평)</Label>
+                      <Input
+                        type="number"
+                        placeholder="3000"
+                        value={areaInPyeong}
+                        onChange={(e) => setAreaInPyeong(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>평단가 (원)</Label>
+                      <Input
+                        type="number"
+                        placeholder="400000"
+                        value={pricePerPyeong}
+                        onChange={(e) => setPricePerPyeong(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {areaInPyeong && pricePerPyeong && (
+                    <div className="text-sm text-muted-foreground">
+                      계산: {Number(areaInPyeong).toLocaleString()}평 × {Number(pricePerPyeong).toLocaleString()}원 ={" "}
+                      <span className="font-semibold text-foreground">
+                        {formatLargeNumber(calculatedCost)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>예상 비용 (원)</Label>
                 <Input
@@ -337,7 +417,14 @@ export function SetupCostManager() {
                   placeholder="50000000"
                   value={newItemCost}
                   onChange={(e) => setNewItemCost(e.target.value)}
+                  readOnly={useAreaCalculation && !!calculatedCost}
+                  className={useAreaCalculation && calculatedCost ? "bg-muted" : ""}
                 />
+                {useAreaCalculation && calculatedCost && (
+                  <p className="text-xs text-muted-foreground">
+                    평수 계산에서 자동 입력됨
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>우선순위</Label>

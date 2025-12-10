@@ -45,13 +45,15 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  Briefcase,
+  HandCoins,
 } from "lucide-react";
 import { formatLargeNumber, formatPercent, formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
 
 interface FundingSource {
   id: string;
-  type: "REAL_ESTATE_SALE" | "SAVINGS" | "LOAN" | "GOVERNMENT_SUBSIDY" | "OTHER";
+  type: "REAL_ESTATE_SALE" | "SAVINGS" | "LOAN" | "GOVERNMENT_SUBSIDY" | "RETIREMENT_PAY" | "SEVERANCE_PAY" | "OTHER";
   name: string;
   amount: string;
   expectedDate: string;
@@ -84,6 +86,8 @@ const FUNDING_TYPE_CONFIG = {
   SAVINGS: { label: "저축", icon: PiggyBank, color: "bg-green-100 text-green-800" },
   LOAN: { label: "대출", icon: CreditCard, color: "bg-yellow-100 text-yellow-800" },
   GOVERNMENT_SUBSIDY: { label: "정부지원", icon: Gift, color: "bg-purple-100 text-purple-800" },
+  RETIREMENT_PAY: { label: "퇴직금", icon: Briefcase, color: "bg-orange-100 text-orange-800" },
+  SEVERANCE_PAY: { label: "위로금", icon: HandCoins, color: "bg-teal-100 text-teal-800" },
   OTHER: { label: "기타", icon: HelpCircle, color: "bg-gray-100 text-gray-800" },
 };
 
