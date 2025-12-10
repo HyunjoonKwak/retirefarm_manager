@@ -81,6 +81,29 @@ interface MonthlyFlow {
   amount: string;
 }
 
+// 외부 포트폴리오 자산 (부동산)
+interface ExternalAsset {
+  id: string;
+  propertyType: string;
+  propertyName: string;
+  address: string;
+  currentPrice: string;
+  loanAmount?: string;
+  hasLoan: boolean;
+}
+
+const PROPERTY_TYPE_LABELS: Record<string, string> = {
+  APARTMENT: "아파트",
+  OFFICETEL: "오피스텔",
+  VILLA: "빌라",
+  BUILDING: "건물",
+  COMMERCIAL: "상가",
+  LAND: "토지",
+  FACTORY: "공장",
+  STUDIO: "원룸",
+  OTHER: "기타",
+};
+
 const FUNDING_TYPE_CONFIG = {
   REAL_ESTATE_SALE: { label: "부동산 매각", icon: Building2, color: "bg-blue-100 text-blue-800" },
   SAVINGS: { label: "저축", icon: PiggyBank, color: "bg-green-100 text-green-800" },
@@ -103,6 +126,10 @@ export function FundingPlanManager() {
   const [monthlyFlow, setMonthlyFlow] = useState<MonthlyFlow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 외부 부동산 자산
+  const [externalAssets, setExternalAssets] = useState<ExternalAsset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+
   // 등록 다이얼로그
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,6 +139,7 @@ export function FundingPlanManager() {
     amount: "",
     expectedDate: "",
     notes: "",
+    selectedAssetId: "", // 선택된 부동산 자산 ID
   });
 
   // 금액을 한국어로 변환하는 함수
@@ -162,6 +190,49 @@ export function FundingPlanManager() {
     fetchData();
   }, []);
 
+  // 부동산 매각 유형 선택 시 외부 자산 불러오기
+  useEffect(() => {
+    if (newSource.type === "REAL_ESTATE_SALE" && isAddDialogOpen) {
+      fetchExternalAssets();
+    }
+  }, [newSource.type, isAddDialogOpen]);
+
+  async function fetchExternalAssets() {
+    setLoadingAssets(true);
+    try {
+      const response = await fetch("/api/assets/external?tradeType=OWNED");
+      if (response.ok) {
+        const result = await response.json();
+        setExternalAssets(result.assets || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch external assets:", error);
+    } finally {
+      setLoadingAssets(false);
+    }
+  }
+
+  // 자산 선택 시 자동 입력
+  function handleAssetSelect(assetId: string) {
+    const asset = externalAssets.find((a) => a.id === assetId);
+    if (asset) {
+      // 순자산 = 현재가 - 대출금
+      const netValue = Number(asset.currentPrice) - Number(asset.loanAmount || "0");
+      setNewSource((prev) => ({
+        ...prev,
+        selectedAssetId: assetId,
+        name: `${asset.propertyName} 매각`,
+        amount: netValue.toString(),
+        notes: asset.address,
+      }));
+    } else {
+      setNewSource((prev) => ({
+        ...prev,
+        selectedAssetId: "",
+      }));
+    }
+  }
+
   async function handleAddSource() {
     if (!newSource.name || !newSource.amount || !newSource.expectedDate) {
       toast.error("필수 항목을 입력해주세요.");
@@ -193,6 +264,7 @@ export function FundingPlanManager() {
           amount: "",
           expectedDate: "",
           notes: "",
+          selectedAssetId: "",
         });
         fetchData();
       }
@@ -342,7 +414,16 @@ export function FundingPlanManager() {
                 <Label>유형</Label>
                 <Select
                   value={newSource.type}
-                  onValueChange={(v) => setNewSource((p) => ({ ...p, type: v as FundingSource["type"] }))}
+                  onValueChange={(v) => {
+                    setNewSource((p) => ({
+                      ...p,
+                      type: v as FundingSource["type"],
+                      selectedAssetId: "",
+                      name: "",
+                      amount: "",
+                      notes: "",
+                    }));
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -356,6 +437,57 @@ export function FundingPlanManager() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* 부동산 매각 선택 시 보유 자산 목록 표시 */}
+              {newSource.type === "REAL_ESTATE_SALE" && (
+                <div className="space-y-2">
+                  <Label>보유 부동산 선택</Label>
+                  {loadingAssets ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      불러오는 중...
+                    </div>
+                  ) : externalAssets.length > 0 ? (
+                    <Select
+                      value={newSource.selectedAssetId}
+                      onValueChange={handleAssetSelect}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="부동산을 선택하세요" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">직접 입력</SelectItem>
+                        {externalAssets.map((asset) => {
+                          const netValue = Number(asset.currentPrice) - Number(asset.loanAmount || "0");
+                          return (
+                            <SelectItem key={asset.id} value={asset.id}>
+                              <div className="flex flex-col">
+                                <span>{asset.propertyName}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {PROPERTY_TYPE_LABELS[asset.propertyType] || asset.propertyType} · 순자산 {formatLargeNumber(netValue.toString())}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-2">
+                      보유 중인 부동산이 없습니다.{" "}
+                      <a
+                        href="https://assets.specialrisk.me/portfolio"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline"
+                      >
+                        자산 등록하기
+                      </a>
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>이름</Label>
                 <Input
