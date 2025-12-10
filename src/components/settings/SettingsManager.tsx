@@ -35,7 +35,9 @@ import {
   LogOut,
   Calendar,
   Mail,
+  HardDrive,
 } from "lucide-react";
+import { BackupManager } from "./BackupManager";
 import { toast } from "sonner";
 import { formatDate } from "@/lib/utils/format";
 
@@ -232,7 +234,7 @@ export function SettingsManager() {
   return (
     <div className="space-y-6">
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             프로필
@@ -244,6 +246,10 @@ export function SettingsManager() {
           <TabsTrigger value="data" className="flex items-center gap-2">
             <Database className="h-4 w-4" />
             데이터
+          </TabsTrigger>
+          <TabsTrigger value="backup" className="flex items-center gap-2">
+            <HardDrive className="h-4 w-4" />
+            백업
           </TabsTrigger>
         </TabsList>
 
@@ -348,6 +354,11 @@ export function SettingsManager() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* 백업 탭 */}
+        <TabsContent value="backup">
+          <BackupManager />
         </TabsContent>
       </Tabs>
 
