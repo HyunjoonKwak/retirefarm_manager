@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Menu, LogOut, User, Settings } from "lucide-react";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -54,6 +55,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         </div>
 
         <div className="ml-auto flex items-center gap-4">
+          {session && <NotificationBell />}
           {session ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
