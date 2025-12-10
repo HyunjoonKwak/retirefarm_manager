@@ -68,8 +68,8 @@ function LoginForm() {
       } else {
         console.log("[SSO] Success!");
         toast.success("SSO 로그인 성공!");
-        router.push("/");
-        router.refresh();
+        // router.push + refresh 대신 window.location으로 전체 페이지 새로고침
+        window.location.href = "/";
       }
     } catch (err) {
       console.error("[SSO] Exception:", err);
