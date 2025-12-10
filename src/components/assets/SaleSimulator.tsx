@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,9 +39,36 @@ import {
   Target,
   BarChart3,
   ArrowRight,
+  Building2,
 } from "lucide-react";
 import { formatLargeNumber, formatPercent } from "@/lib/utils/format";
 import { toast } from "sonner";
+
+// 외부 포트폴리오 자산
+interface ExternalAsset {
+  id: string;
+  propertyType: string;
+  propertyName: string;
+  address: string;
+  purchasePrice: string;
+  currentPrice: string;
+  loanAmount?: string;
+  deposit?: string;
+  hasLoan: boolean;
+  estimatedNetProceeds?: string;
+}
+
+const EXTERNAL_PROPERTY_TYPE_MAP: Record<string, SaleAsset["propertyType"]> = {
+  APARTMENT: "HOUSE",
+  VILLA: "HOUSE",
+  OFFICETEL: "OFFICETEL_RESIDENTIAL",
+  COMMERCIAL: "COMMERCIAL",
+  LAND: "LAND",
+  BUILDING: "COMMERCIAL",
+  FACTORY: "COMMERCIAL",
+  STUDIO: "OFFICETEL_RESIDENTIAL",
+  OTHER: "COMMERCIAL",
+};
 
 interface SaleAsset {
   id: string;
@@ -105,14 +132,72 @@ export function SaleSimulator() {
   const [result, setResult] = useState<OptimalResult | null>(null);
   const [selectedStrategy, setSelectedStrategy] = useState<"byNetProceeds" | "byTaxEfficiency" | "byTaxRate">("byNetProceeds");
 
+  // 외부 포트폴리오 자산
+  const [externalAssets, setExternalAssets] = useState<ExternalAsset[]>([]);
+  const [loadingExternal, setLoadingExternal] = useState(false);
+
   // 자산 추가 다이얼로그
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [selectedExternalAssetId, setSelectedExternalAssetId] = useState<string>("");
   const [newAsset, setNewAsset] = useState<Partial<SaleAsset>>({
     propertyType: "HOUSE",
     ownershipShare: 100,
     isOnlyHouse: false,
     hasResided: false,
   });
+
+  // 다이얼로그 열릴 때 외부 자산 불러오기
+  useEffect(() => {
+    if (isAddDialogOpen) {
+      fetchExternalAssets();
+    }
+  }, [isAddDialogOpen]);
+
+  async function fetchExternalAssets() {
+    setLoadingExternal(true);
+    try {
+      const response = await fetch("/api/assets/external?tradeType=OWNED");
+      if (response.ok) {
+        const result = await response.json();
+        setExternalAssets(result.assets || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch external assets:", error);
+    } finally {
+      setLoadingExternal(false);
+    }
+  }
+
+  // 외부 자산 선택 시 폼 자동 채우기
+  function handleExternalAssetSelect(assetId: string) {
+    setSelectedExternalAssetId(assetId);
+
+    if (assetId === "manual") {
+      setNewAsset({
+        propertyType: "HOUSE",
+        ownershipShare: 100,
+        isOnlyHouse: false,
+        hasResided: false,
+      });
+      return;
+    }
+
+    const asset = externalAssets.find((a) => a.id === assetId);
+    if (asset) {
+      const propertyType = EXTERNAL_PROPERTY_TYPE_MAP[asset.propertyType] || "HOUSE";
+      setNewAsset({
+        name: asset.propertyName,
+        propertyType,
+        purchasePrice: Number(asset.purchasePrice),
+        currentPrice: Number(asset.currentPrice),
+        ownershipShare: 100,
+        isOnlyHouse: propertyType === "HOUSE",
+        hasResided: false,
+        holdingPeriodYears: 0,
+        acquisitionExpenses: 0,
+      });
+    }
+  }
 
   function handleAddAsset() {
     if (!newAsset.name || !newAsset.purchasePrice || !newAsset.currentPrice) {
@@ -140,6 +225,7 @@ export function SaleSimulator() {
       isOnlyHouse: false,
       hasResided: false,
     });
+    setSelectedExternalAssetId("");
     setIsAddDialogOpen(false);
     setResult(null);
     toast.success("자산이 추가되었습니다.");
@@ -216,13 +302,55 @@ export function SaleSimulator() {
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
+                  {/* 보유 자산에서 선택 */}
                   <div className="space-y-2">
-                    <Label>자산명</Label>
-                    <Input
-                      placeholder="예: 강남 아파트"
-                      value={newAsset.name || ""}
-                      onChange={(e) => setNewAsset((p) => ({ ...p, name: e.target.value }))}
-                    />
+                    <Label className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4" />
+                      보유 자산에서 선택
+                    </Label>
+                    {loadingExternal ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        불러오는 중...
+                      </div>
+                    ) : externalAssets.length > 0 ? (
+                      <Select
+                        value={selectedExternalAssetId}
+                        onValueChange={handleExternalAssetSelect}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="보유 자산을 선택하세요" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="manual">직접 입력</SelectItem>
+                          {externalAssets.map((asset) => (
+                            <SelectItem key={asset.id} value={asset.id}>
+                              <div className="flex flex-col">
+                                <span>{asset.propertyName}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  현재시세 {formatLargeNumber(asset.currentPrice)}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-2">
+                        보유 중인 자산이 없습니다. 직접 입력해주세요.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="space-y-2">
+                      <Label>자산명</Label>
+                      <Input
+                        placeholder="예: 강남 아파트"
+                        value={newAsset.name || ""}
+                        onChange={(e) => setNewAsset((p) => ({ ...p, name: e.target.value }))}
+                      />
+                    </div>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
