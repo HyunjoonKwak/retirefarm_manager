@@ -39,10 +39,15 @@ export async function GET() {
     });
 
     // 외부 포트폴리오에서 현재 자산 가치 가져오기
+    // email 기반 조회 - userId가 변경되어도 연동 유지
+    const userEmail = session.user.email;
     let externalAssetsSummary = null;
 
     try {
-      const summary = await externalPortfolioClient.getSummary(userId);
+      if (!userEmail) {
+        throw new Error("User email not found in session");
+      }
+      const summary = await externalPortfolioClient.getSummary(userEmail);
       const netValue = Number(summary.totalValue) - Number(summary.totalLoanAmount);
       externalAssetsSummary = {
         totalAssets: summary.totalAssets,
@@ -57,7 +62,9 @@ export async function GET() {
     // 매도 예정 자산 정보 가져오기
     let expectedProceeds = null;
     try {
-      expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userId);
+      if (userEmail) {
+        expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userEmail);
+      }
     } catch {
       console.log("Failed to get expected proceeds");
     }

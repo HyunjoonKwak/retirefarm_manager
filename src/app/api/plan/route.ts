@@ -36,12 +36,17 @@ export async function GET() {
     });
 
     // 4. 외부 포트폴리오 조회 (try-catch로 실패해도 진행)
+    // email 기반 조회 - userId가 변경되어도 연동 유지
+    const userEmail = session.user.email;
     let externalAssets = null;
     let expectedProceeds = null;
     try {
+      if (!userEmail) {
+        throw new Error("User email not found in session");
+      }
       const [assets, proceeds] = await Promise.all([
-        externalPortfolioClient.getOwnedAssets(userId),
-        externalPortfolioClient.getExpectedProceeds(userId),
+        externalPortfolioClient.getOwnedAssets(userEmail),
+        externalPortfolioClient.getExpectedProceeds(userEmail),
       ]);
 
       if (assets.length > 0) {

@@ -8,30 +8,30 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
 
-    if (!session?.user?.id) {
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const email = session.user.email;
     const { searchParams } = new URL(request.url);
     const tradeType = searchParams.get("tradeType");
 
     let assets;
     switch (tradeType) {
       case "OWNED":
-        assets = await externalPortfolioClient.getOwnedAssets(userId);
+        assets = await externalPortfolioClient.getOwnedAssets(email);
         break;
       case "FOR_SALE":
-        assets = await externalPortfolioClient.getForSaleAssets(userId);
+        assets = await externalPortfolioClient.getForSaleAssets(email);
         break;
       case "SOLD":
-        assets = await externalPortfolioClient.getSoldAssets(userId);
+        assets = await externalPortfolioClient.getSoldAssets(email);
         break;
       default:
-        assets = await externalPortfolioClient.getAllAssets(userId);
+        assets = await externalPortfolioClient.getAllAssets(email);
     }
 
-    const summary = await externalPortfolioClient.getSummary(userId);
+    const summary = await externalPortfolioClient.getSummary(email);
 
     return NextResponse.json({
       assets,

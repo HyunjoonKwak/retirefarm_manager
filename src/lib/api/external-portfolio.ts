@@ -76,6 +76,21 @@ class ExternalPortfolioClient {
 
   /**
    * 특정 사용자의 자산 목록 조회 (서비스 API 사용)
+   * email 파라미터로 조회 (userId가 변경되어도 연동 유지)
+   */
+  async getAssetsByEmail(email: string, tradeType?: string): Promise<ExternalPortfolioAsset[]> {
+    const params = new URLSearchParams({ email });
+    if (tradeType) params.append("tradeType", tradeType);
+
+    const result = await this.fetchService<{ data: { portfolios: ExternalPortfolioAsset[] } }>(
+      `/api/portfolio/service?${params.toString()}`
+    );
+
+    return result.data?.portfolios || [];
+  }
+
+  /**
+   * @deprecated Use getAssetsByEmail instead
    */
   async getAssetsByUserId(userId: string, tradeType?: string): Promise<ExternalPortfolioAsset[]> {
     const params = new URLSearchParams({ userId });
@@ -91,36 +106,36 @@ class ExternalPortfolioClient {
   /**
    * 보유 중인 자산 목록 조회
    */
-  async getOwnedAssets(userId: string): Promise<ExternalPortfolioAsset[]> {
-    return this.getAssetsByUserId(userId, "OWNED");
+  async getOwnedAssets(email: string): Promise<ExternalPortfolioAsset[]> {
+    return this.getAssetsByEmail(email, "OWNED");
   }
 
   /**
    * 매물 등록된 자산 목록 조회
    */
-  async getForSaleAssets(userId: string): Promise<ExternalPortfolioAsset[]> {
-    return this.getAssetsByUserId(userId, "FOR_SALE");
+  async getForSaleAssets(email: string): Promise<ExternalPortfolioAsset[]> {
+    return this.getAssetsByEmail(email, "FOR_SALE");
   }
 
   /**
    * 매도 완료된 자산 목록 조회
    */
-  async getSoldAssets(userId: string): Promise<ExternalPortfolioAsset[]> {
-    return this.getAssetsByUserId(userId, "SOLD");
+  async getSoldAssets(email: string): Promise<ExternalPortfolioAsset[]> {
+    return this.getAssetsByEmail(email, "SOLD");
   }
 
   /**
    * 전체 자산 목록 조회
    */
-  async getAllAssets(userId: string): Promise<ExternalPortfolioAsset[]> {
-    return this.getAssetsByUserId(userId);
+  async getAllAssets(email: string): Promise<ExternalPortfolioAsset[]> {
+    return this.getAssetsByEmail(email);
   }
 
   /**
    * 포트폴리오 요약 정보 계산
    */
-  async getSummary(userId: string): Promise<ExternalPortfolioSummary> {
-    const assets = await this.getOwnedAssets(userId);
+  async getSummary(email: string): Promise<ExternalPortfolioSummary> {
+    const assets = await this.getOwnedAssets(email);
 
     const summary: ExternalPortfolioSummary = {
       totalAssets: assets.length,
@@ -161,7 +176,7 @@ class ExternalPortfolioClient {
    * 매도 예정 자산의 예상 순수익 계산
    * 은퇴 자금 마련을 위한 자금 유입 예측에 사용
    */
-  async getExpectedProceeds(userId: string): Promise<{
+  async getExpectedProceeds(email: string): Promise<{
     assets: Array<{
       id: string;
       propertyName: string;
@@ -173,7 +188,7 @@ class ExternalPortfolioClient {
     }>;
     totalExpectedProceeds: string;
   }> {
-    const forSaleAssets = await this.getForSaleAssets(userId);
+    const forSaleAssets = await this.getForSaleAssets(email);
 
     const assets = forSaleAssets
       .filter(asset => asset.expectedSaleDate && asset.expectedSalePrice)
