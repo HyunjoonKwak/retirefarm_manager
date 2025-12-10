@@ -233,26 +233,6 @@ export function AssetList() {
         </Button>
       </div>
 
-      {/* 연동 안내 */}
-      {data?.error && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardContent className="py-4">
-            <p className="text-sm text-orange-800">
-              {data.error}{" "}
-              <a
-                href="https://assets.specialrisk.me/portfolio"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline font-medium hover:text-orange-900"
-              >
-                외부 포트폴리오 서비스
-              </a>
-              가 실행 중인지 확인하세요.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       {/* 탭 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
