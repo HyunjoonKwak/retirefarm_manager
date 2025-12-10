@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Building2, Loader2, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
+import { Building2, Loader2, ExternalLink, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
 import { formatLargeNumber, formatPercent, formatDate } from "@/lib/utils/format";
 
 // 외부 포트폴리오 자산 타입 (클라이언트용)
@@ -63,47 +63,56 @@ export function AssetList() {
   const [data, setData] = useState<AssetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("OWNED");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchAssets = async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      }
+      // 자체 API route를 통해 서버사이드에서 외부 API 호출
+      const response = await fetch(`/api/assets/external?tradeType=${activeTab}`);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // API 응답 구조에 맞게 데이터 처리
+      const assets = result.assets || [];
+      const summary = result.summary || calculateSummary(assets);
+
+      setData({
+        assets: Array.isArray(assets) ? assets : [],
+        summary,
+        error: result.error
+      });
+    } catch (err) {
+      console.error("Failed to fetch external assets:", err);
+      setData({
+        assets: [],
+        summary: {
+          totalAssets: 0,
+          totalValue: "0",
+          totalAcquisitionCost: "0",
+          totalLoanAmount: "0",
+          totalUnrealizedGain: "0",
+          averageYieldRate: 0,
+        },
+        error: "외부 포트폴리오 서비스에 연결할 수 없습니다.",
+      });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    fetchAssets(true);
+  };
 
   useEffect(() => {
-    async function fetchAssets() {
-      try {
-        // 자체 API route를 통해 서버사이드에서 외부 API 호출
-        const response = await fetch(`/api/assets/external?tradeType=${activeTab}`);
-
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const result = await response.json();
-
-        // API 응답 구조에 맞게 데이터 처리
-        const assets = result.assets || [];
-        const summary = result.summary || calculateSummary(assets);
-
-        setData({
-          assets: Array.isArray(assets) ? assets : [],
-          summary,
-          error: result.error
-        });
-      } catch (err) {
-        console.error("Failed to fetch external assets:", err);
-        setData({
-          assets: [],
-          summary: {
-            totalAssets: 0,
-            totalValue: "0",
-            totalAcquisitionCost: "0",
-            totalLoanAmount: "0",
-            totalUnrealizedGain: "0",
-            averageYieldRate: 0,
-          },
-          error: "외부 포트폴리오 서비스에 연결할 수 없습니다.",
-        });
-      } finally {
-        setLoading(false);
-      }
-    }
-
     setLoading(true);
     fetchAssets();
   }, [activeTab]);
@@ -209,12 +218,34 @@ export function AssetList() {
         </div>
       )}
 
+      {/* 리프레시 버튼 */}
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={refreshing}
+        >
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "새로고침 중..." : "새로고침"}
+        </Button>
+      </div>
+
       {/* 연동 안내 */}
       {data?.error && (
         <Card className="border-orange-200 bg-orange-50">
           <CardContent className="py-4">
             <p className="text-sm text-orange-800">
-              {data.error} 외부 포트폴리오 서비스(nas_naver_crawler)가 실행 중인지 확인하세요.
+              {data.error}{" "}
+              <a
+                href="https://assets.specialrisk.me/portfolio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-medium hover:text-orange-900"
+              >
+                외부 포트폴리오 서비스
+              </a>
+              가 실행 중인지 확인하세요.
             </p>
           </CardContent>
         </Card>
