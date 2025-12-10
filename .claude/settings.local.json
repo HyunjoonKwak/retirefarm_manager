@@ -7,7 +7,9 @@
       "Bash(npx prisma generate:*)",
       "Bash(npm uninstall:*)",
       "Bash(npm install:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: useEffect 의존성 수정으로 React 무한 루프 에러 해결\n\nselectedSubcategory만 의존성으로 사용하여 렌더링 중\n계산되는 값으로 인한 무한 루프 방지\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

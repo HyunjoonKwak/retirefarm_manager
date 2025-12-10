@@ -266,14 +266,23 @@ export function SetupCostManager() {
 
   // 카테고리 변경 시 평수 계산 모드 초기화
   useEffect(() => {
-    if (isLandOrFacilityCategory) {
+    // selectedSubcategory 변경 시에만 실행
+    const subInfo = allSubcategories.find((s) => s.id === selectedSubcategory);
+    const isLandOrFacility =
+      subInfo?.categoryName === "토지 및 시설" ||
+      subInfo?.subcategoryName?.includes("토지") ||
+      subInfo?.subcategoryName?.includes("시설") ||
+      subInfo?.subcategoryName?.includes("건축");
+
+    if (isLandOrFacility) {
       setUseAreaCalculation(true);
     } else {
       setUseAreaCalculation(false);
       setAreaInPyeong("");
       setPricePerPyeong("");
     }
-  }, [selectedSubcategory, isLandOrFacilityCategory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSubcategory]);
 
   return (
     <div className="space-y-6">
