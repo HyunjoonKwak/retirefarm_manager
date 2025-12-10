@@ -90,6 +90,7 @@ interface ExternalAsset {
   currentPrice: string;
   loanAmount?: string;
   hasLoan: boolean;
+  estimatedNetProceeds?: string; // 실현가능수익금 (현재시세 - 대출금 - 보증금)
 }
 
 const PROPERTY_TYPE_LABELS: Record<string, string> = {
@@ -216,13 +217,16 @@ export function FundingPlanManager() {
   function handleAssetSelect(assetId: string) {
     const asset = externalAssets.find((a) => a.id === assetId);
     if (asset) {
-      // 순자산 = 현재가 - 대출금
-      const netValue = Number(asset.currentPrice) - Number(asset.loanAmount || "0");
+      // 실현가능수익금 사용 (현재시세 - 대출금 - 보증금)
+      // API에서 제공하지 않으면 현재가 - 대출금으로 계산
+      const realizableAmount = asset.estimatedNetProceeds
+        ? Number(asset.estimatedNetProceeds)
+        : Number(asset.currentPrice) - Number(asset.loanAmount || "0");
       setNewSource((prev) => ({
         ...prev,
         selectedAssetId: assetId,
         name: `${asset.propertyName} 매각`,
-        amount: netValue.toString(),
+        amount: realizableAmount.toString(),
         notes: asset.address,
       }));
     } else {
@@ -458,13 +462,16 @@ export function FundingPlanManager() {
                       <SelectContent>
                         <SelectItem value="manual">직접 입력</SelectItem>
                         {externalAssets.map((asset) => {
-                          const netValue = Number(asset.currentPrice) - Number(asset.loanAmount || "0");
+                          // 실현가능수익금 (현재시세 - 대출금 - 보증금)
+                          const realizableAmount = asset.estimatedNetProceeds
+                            ? Number(asset.estimatedNetProceeds)
+                            : Number(asset.currentPrice) - Number(asset.loanAmount || "0");
                           return (
                             <SelectItem key={asset.id} value={asset.id}>
                               <div className="flex flex-col">
                                 <span>{asset.propertyName}</span>
                                 <span className="text-xs text-muted-foreground">
-                                  {PROPERTY_TYPE_LABELS[asset.propertyType] || asset.propertyType} · 순자산 {formatLargeNumber(netValue.toString())}
+                                  {PROPERTY_TYPE_LABELS[asset.propertyType] || asset.propertyType} · 실현가능수익금 {formatLargeNumber(realizableAmount.toString())}
                                 </span>
                               </div>
                             </SelectItem>

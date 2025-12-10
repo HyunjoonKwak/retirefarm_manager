@@ -30,6 +30,7 @@ export interface ExternalPortfolioAsset {
   unrealizedGain: string;
   unrealizedGainRate: number;
   estimatedCapitalGainsTax?: string;
+  estimatedNetProceeds?: string; // 실현가능수익금 (현재시세 - 대출금 - 보증금)
   memo?: string;
   tags?: string[];
 }
