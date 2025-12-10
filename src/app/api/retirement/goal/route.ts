@@ -3,9 +3,9 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
-import { retirementGoalSchema } from "@/lib/validations/retirement";
+import { smartFarmPlanSchema } from "@/lib/validations/plan";
 
-// GET: 은퇴 목표 조회
+// GET: 스마트팜 준비 목표 조회
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -24,10 +24,13 @@ export async function GET() {
 
     return NextResponse.json({
       goal: {
-        ...goal,
-        targetAmount: goal.targetAmount.toString(),
-        monthlyLivingExpense: goal.monthlyLivingExpense.toString(),
-        inflationRate: Number(goal.inflationRate),
+        id: goal.id,
+        targetDate: goal.targetDate.toISOString(),
+        estimatedRetirementPay: goal.estimatedRetirementPay?.toString() || null,
+        estimatedSeverancePay: goal.estimatedSeverancePay?.toString() || null,
+        monthlyLivingExpense: goal.monthlyLivingExpense?.toString() || null,
+        bufferMonths: goal.bufferMonths,
+        initialLivingBuffer: goal.initialLivingBuffer?.toString() || null,
       },
     });
   } catch (error) {
@@ -39,7 +42,7 @@ export async function GET() {
   }
 }
 
-// POST: 은퇴 목표 설정 (생성 또는 수정)
+// POST: 스마트팜 준비 목표 설정 (생성 또는 수정)
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -49,34 +52,42 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const validatedData = retirementGoalSchema.parse(body);
+    const validatedData = smartFarmPlanSchema.parse(body);
+
+    // 초기 생활비 버퍼 계산
+    const initialLivingBuffer = (validatedData.monthlyLivingExpense || 0) * validatedData.bufferMonths;
 
     const goal = await prisma.retirementGoal.upsert({
       where: { userId: session.user.id },
       create: {
         userId: session.user.id,
         targetDate: new Date(validatedData.targetDate),
-        targetAmount: validatedData.targetAmount,
-        monthlyLivingExpense: validatedData.monthlyLivingExpense,
-        lifeExpectancy: validatedData.lifeExpectancy,
-        inflationRate: validatedData.inflationRate,
+        estimatedRetirementPay: validatedData.estimatedRetirementPay || null,
+        estimatedSeverancePay: validatedData.estimatedSeverancePay || null,
+        monthlyLivingExpense: validatedData.monthlyLivingExpense || null,
+        bufferMonths: validatedData.bufferMonths,
+        initialLivingBuffer: initialLivingBuffer || null,
       },
       update: {
         targetDate: new Date(validatedData.targetDate),
-        targetAmount: validatedData.targetAmount,
-        monthlyLivingExpense: validatedData.monthlyLivingExpense,
-        lifeExpectancy: validatedData.lifeExpectancy,
-        inflationRate: validatedData.inflationRate,
+        estimatedRetirementPay: validatedData.estimatedRetirementPay || null,
+        estimatedSeverancePay: validatedData.estimatedSeverancePay || null,
+        monthlyLivingExpense: validatedData.monthlyLivingExpense || null,
+        bufferMonths: validatedData.bufferMonths,
+        initialLivingBuffer: initialLivingBuffer || null,
       },
     });
 
     return NextResponse.json({
-      message: "은퇴 목표가 저장되었습니다.",
+      message: "목표가 저장되었습니다.",
       goal: {
-        ...goal,
-        targetAmount: goal.targetAmount.toString(),
-        monthlyLivingExpense: goal.monthlyLivingExpense.toString(),
-        inflationRate: Number(goal.inflationRate),
+        id: goal.id,
+        targetDate: goal.targetDate.toISOString(),
+        estimatedRetirementPay: goal.estimatedRetirementPay?.toString() || null,
+        estimatedSeverancePay: goal.estimatedSeverancePay?.toString() || null,
+        monthlyLivingExpense: goal.monthlyLivingExpense?.toString() || null,
+        bufferMonths: goal.bufferMonths,
+        initialLivingBuffer: goal.initialLivingBuffer?.toString() || null,
       },
     });
   } catch (error) {

@@ -83,7 +83,7 @@ export async function GET() {
       }),
     ]);
 
-    // 은퇴 목표 계산
+    // 스마트팜 준비 계획
     let retirementData = null;
     if (retirementGoal) {
       const targetDate = new Date(retirementGoal.targetDate);
@@ -91,9 +91,15 @@ export async function GET() {
       const monthsRemaining = Math.ceil(daysRemaining / 30);
       const yearsRemaining = Math.floor(daysRemaining / 365);
 
+      // 퇴직금 합계
+      const totalRetirementFunds =
+        Number(retirementGoal.estimatedRetirementPay || 0) +
+        Number(retirementGoal.estimatedSeverancePay || 0);
+
       retirementData = {
         targetDate: retirementGoal.targetDate.toISOString(),
-        targetAmount: retirementGoal.targetAmount.toString(),
+        estimatedRetirementPay: retirementGoal.estimatedRetirementPay?.toString() || null,
+        totalRetirementFunds: totalRetirementFunds.toString(),
         daysRemaining: Math.max(0, daysRemaining),
         monthsRemaining: Math.max(0, monthsRemaining),
         yearsRemaining: Math.max(0, yearsRemaining),

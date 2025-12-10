@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
-import { calculateRetirementSimulation } from "@/lib/validations/retirement";
+import { calculateSmartFarmPlanSummary } from "@/lib/validations/plan";
 import { externalPortfolioClient } from "@/lib/api/external-portfolio";
 
-// GET: 은퇴 시뮬레이션 결과
+// GET: 스마트팜 준비 시뮬레이션 결과
+// 이 API는 하위 호환을 위해 유지하며, /api/plan으로 마이그레이션을 권장합니다.
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -14,65 +15,90 @@ export async function GET() {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
+    const userId = session.user.id;
+
     const goal = await prisma.retirementGoal.findUnique({
-      where: { userId: session.user.id },
+      where: { userId },
     });
 
     if (!goal) {
       return NextResponse.json(
-        { error: "은퇴 목표가 설정되지 않았습니다." },
+        { error: "목표가 설정되지 않았습니다." },
         { status: 404 }
       );
     }
 
+    // 설립 비용 조회
+    const setupCosts = await prisma.setupCostItem.findMany({
+      where: { userId },
+    });
+
+    // 자금 조달 조회
+    const fundingSources = await prisma.fundingSource.findMany({
+      where: { userId },
+    });
+
     // 외부 포트폴리오에서 현재 자산 가치 가져오기
-    const userId = session.user.id;
-    let currentAssets = 0;
-    let externalAssetsAvailable = false;
     let externalAssetsSummary = null;
 
     try {
       const summary = await externalPortfolioClient.getSummary(userId);
-      currentAssets = Number(summary.totalValue) - Number(summary.totalLoanAmount);
-      externalAssetsAvailable = true;
+      const netValue = Number(summary.totalValue) - Number(summary.totalLoanAmount);
       externalAssetsSummary = {
         totalAssets: summary.totalAssets,
         totalValue: summary.totalValue,
         totalLoanAmount: summary.totalLoanAmount,
-        netValue: currentAssets.toString(),
+        netValue: netValue.toString(),
       };
     } catch {
-      // 외부 API 연결 실패 시 무시
       console.log("External portfolio API not available");
     }
 
-    // 시뮬레이션 계산
-    const simulation = calculateRetirementSimulation(
-      {
-        targetDate: goal.targetDate,
-        targetAmount: Number(goal.targetAmount),
-        monthlyLivingExpense: Number(goal.monthlyLivingExpense),
-        lifeExpectancy: goal.lifeExpectancy,
-        inflationRate: Number(goal.inflationRate),
-      },
-      45, // 기본 현재 나이 (TODO: 사용자 설정에서 가져오기)
-      currentAssets
-    );
-
     // 매도 예정 자산 정보 가져오기
     let expectedProceeds = null;
-    if (externalAssetsAvailable) {
-      try {
-        expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userId);
-      } catch {
-        console.log("Failed to get expected proceeds");
-      }
+    try {
+      expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userId);
+    } catch {
+      console.log("Failed to get expected proceeds");
     }
+
+    // 요약 계산
+    const summary = calculateSmartFarmPlanSummary({
+      goal: {
+        targetDate: goal.targetDate,
+        estimatedRetirementPay: goal.estimatedRetirementPay ? Number(goal.estimatedRetirementPay) : undefined,
+        estimatedSeverancePay: goal.estimatedSeverancePay ? Number(goal.estimatedSeverancePay) : undefined,
+        monthlyLivingExpense: goal.monthlyLivingExpense ? Number(goal.monthlyLivingExpense) : undefined,
+        bufferMonths: goal.bufferMonths || undefined,
+      },
+      setupCosts: setupCosts.map((item) => ({
+        estimatedCost: Number(item.estimatedCost),
+        subsidyAmount: item.subsidyAmount ? Number(item.subsidyAmount) : undefined,
+      })),
+      fundingSources: fundingSources.map((source) => ({
+        amount: Number(source.amount),
+        status: source.status,
+      })),
+    });
 
     return NextResponse.json({
       simulation: {
-        ...simulation,
-        targetDate: simulation.targetDate.toISOString(),
+        targetDate: goal.targetDate.toISOString(),
+        daysRemaining: summary.daysRemaining,
+        monthsRemaining: summary.monthsRemaining,
+        yearsRemaining: summary.yearsRemaining,
+        estimatedRetirementPay: summary.estimatedRetirementPay,
+        estimatedSeverancePay: summary.estimatedSeverancePay,
+        totalRetirementFunds: summary.totalRetirementFunds,
+        totalSetupCost: summary.totalSetupCost,
+        totalSubsidyAmount: summary.totalSubsidyAmount,
+        netSetupCost: summary.netSetupCost,
+        totalFundingPlanned: summary.totalFundingPlanned,
+        fundingGap: summary.fundingGap,
+        fundingProgress: summary.fundingProgress,
+        initialLivingBuffer: summary.initialLivingBuffer,
+        totalRequiredFunds: summary.totalRequiredFunds,
+        readinessScore: summary.readinessScore,
       },
       externalAssets: externalAssetsSummary,
       expectedProceeds,

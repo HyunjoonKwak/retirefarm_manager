@@ -28,16 +28,11 @@ const navigation = [
     ],
   },
   {
-    title: "은퇴 준비",
+    title: "스마트팜 준비",
     items: [
-      { name: "은퇴 플래너", href: "/retirement", icon: Target },
+      { name: "준비 플래너", href: "/plan", icon: Target },
+      { name: "설립 비용", href: "/setup", icon: Hammer },
       { name: "부동산 자산", href: "/assets", icon: Building2 },
-    ],
-  },
-  {
-    title: "스마트팜 설립",
-    items: [
-      { name: "설립 비용 계획", href: "/setup", icon: Hammer },
     ],
   },
   {
