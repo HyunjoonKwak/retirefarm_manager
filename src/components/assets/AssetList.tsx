@@ -74,7 +74,7 @@ export function AssetList() {
     );
   }
 
-  const externalApiUrl = process.env.NEXT_PUBLIC_EXTERNAL_PORTFOLIO_URL || "http://localhost:3001";
+  const externalApiUrl = process.env.NEXT_PUBLIC_EXTERNAL_PORTFOLIO_URL || "https://assets.specialrisk.me";
 
   return (
     <div className="space-y-6">
