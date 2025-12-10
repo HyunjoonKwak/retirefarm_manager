@@ -102,6 +102,30 @@ export function SetupCostManager() {
   const [areaInPyeong, setAreaInPyeong] = useState("");
   const [pricePerPyeong, setPricePerPyeong] = useState("");
 
+  // 금액을 한국어로 변환하는 함수
+  function formatKoreanCurrency(value: string): string {
+    const num = Number(value);
+    if (isNaN(num) || num === 0) return "";
+
+    const eok = Math.floor(num / 100000000);
+    const man = Math.floor((num % 100000000) / 10000);
+    const won = num % 10000;
+
+    const parts: string[] = [];
+    if (eok > 0) parts.push(`${eok.toLocaleString()}억`);
+    if (man > 0) parts.push(`${man.toLocaleString()}만`);
+    if (won > 0 && num < 100000000) parts.push(`${won.toLocaleString()}`);
+
+    return parts.length > 0 ? `${parts.join(" ")}원` : "";
+  }
+
+  // 숫자 입력값을 포맷팅된 문자열로 변환
+  function formatNumberWithCommas(value: string): string {
+    const num = Number(value);
+    if (isNaN(num)) return value;
+    return num.toLocaleString();
+  }
+
   async function fetchData() {
     try {
       const [categoriesRes, summaryRes] = await Promise.all([
@@ -406,6 +430,11 @@ export function SetupCostManager() {
                         value={areaInPyeong}
                         onChange={(e) => setAreaInPyeong(e.target.value)}
                       />
+                      {areaInPyeong && (
+                        <p className="text-xs text-muted-foreground">
+                          {formatNumberWithCommas(areaInPyeong)}평
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label>평단가 (원)</Label>
@@ -415,6 +444,11 @@ export function SetupCostManager() {
                         value={pricePerPyeong}
                         onChange={(e) => setPricePerPyeong(e.target.value)}
                       />
+                      {pricePerPyeong && (
+                        <p className="text-xs text-muted-foreground">
+                          {formatNumberWithCommas(pricePerPyeong)}원 ({formatKoreanCurrency(pricePerPyeong) || "0원"})
+                        </p>
+                      )}
                     </div>
                   </div>
                   {areaInPyeong && pricePerPyeong && (
@@ -438,6 +472,11 @@ export function SetupCostManager() {
                   readOnly={useAreaCalculation && !!calculatedCost}
                   className={useAreaCalculation && calculatedCost ? "bg-muted" : ""}
                 />
+                {newItemCost && (
+                  <p className="text-xs text-blue-600 font-medium">
+                    {formatNumberWithCommas(newItemCost)}원 = {formatKoreanCurrency(newItemCost) || "0원"}
+                  </p>
+                )}
                 {useAreaCalculation && calculatedCost && (
                   <p className="text-xs text-muted-foreground">
                     평수 계산에서 자동 입력됨

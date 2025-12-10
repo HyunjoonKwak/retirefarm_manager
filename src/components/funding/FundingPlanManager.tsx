@@ -114,6 +114,30 @@ export function FundingPlanManager() {
     notes: "",
   });
 
+  // 금액을 한국어로 변환하는 함수
+  function formatKoreanCurrency(value: string): string {
+    const num = Number(value);
+    if (isNaN(num) || num === 0) return "";
+
+    const eok = Math.floor(num / 100000000);
+    const man = Math.floor((num % 100000000) / 10000);
+    const won = num % 10000;
+
+    const parts: string[] = [];
+    if (eok > 0) parts.push(`${eok.toLocaleString()}억`);
+    if (man > 0) parts.push(`${man.toLocaleString()}만`);
+    if (won > 0 && num < 100000000) parts.push(`${won.toLocaleString()}`);
+
+    return parts.length > 0 ? `${parts.join(" ")}원` : "";
+  }
+
+  // 숫자 입력값을 포맷팅된 문자열로 변환
+  function formatNumberWithCommas(value: string): string {
+    const num = Number(value);
+    if (isNaN(num)) return value;
+    return num.toLocaleString();
+  }
+
   async function fetchData() {
     try {
       const [sourcesRes, summaryRes] = await Promise.all([
@@ -348,6 +372,11 @@ export function FundingPlanManager() {
                   value={newSource.amount}
                   onChange={(e) => setNewSource((p) => ({ ...p, amount: e.target.value }))}
                 />
+                {newSource.amount && (
+                  <p className="text-xs text-blue-600 font-medium">
+                    {formatNumberWithCommas(newSource.amount)}원 = {formatKoreanCurrency(newSource.amount) || "0원"}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label>예상 조달일</Label>
