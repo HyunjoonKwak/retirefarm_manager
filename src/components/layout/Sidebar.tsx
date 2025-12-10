@@ -17,6 +17,7 @@ import {
   Calendar,
   Wallet,
   Package,
+  BarChart3,
 } from "lucide-react";
 
 const navigation = [
@@ -52,6 +53,12 @@ const navigation = [
     title: "시세 정보",
     items: [
       { name: "농산물 시세", href: "/market", icon: TrendingUp },
+    ],
+  },
+  {
+    title: "분석",
+    items: [
+      { name: "리포트", href: "/reports", icon: BarChart3 },
     ],
   },
   {
