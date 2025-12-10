@@ -5,7 +5,7 @@ import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
 
 const updateFundingSchema = z.object({
-  type: z.enum(["REAL_ESTATE_SALE", "SAVINGS", "LOAN", "GOVERNMENT_SUBSIDY", "OTHER"]).optional(),
+  type: z.enum(["REAL_ESTATE_SALE", "SAVINGS", "LOAN", "GOVERNMENT_SUBSIDY", "RETIREMENT_PAY", "SEVERANCE_PAY", "OTHER"]).optional(),
   name: z.string().min(1).optional(),
   amount: z.number().min(0).optional(),
   expectedDate: z.string().refine((val) => !isNaN(Date.parse(val))).optional(),
