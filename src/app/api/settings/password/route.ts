@@ -45,6 +45,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "사용자를 찾을 수 없습니다." }, { status: 404 });
     }
 
+    // SSO 사용자 체크 (비밀번호 없음)
+    if (!user.password) {
+      return NextResponse.json(
+        { error: "SSO 계정은 비밀번호를 변경할 수 없습니다." },
+        { status: 400 }
+      );
+    }
+
     // 현재 비밀번호 확인
     const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
 

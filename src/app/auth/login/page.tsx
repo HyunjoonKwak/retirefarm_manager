@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,7 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, KeyRound } from "lucide-react";
+
+const MY_PORTAL_URL = process.env.NEXT_PUBLIC_MY_PORTAL_URL || "http://192.168.219.175:3100";
 
 const loginSchema = z.object({
   email: z.string().email("유효한 이메일을 입력해주세요."),
@@ -21,9 +23,11 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
+  const [isSSOLoading, setIsSSOLoading] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -32,6 +36,41 @@ export default function LoginPage() {
       password: "",
     },
   });
+
+  // SSO 토큰 처리
+  useEffect(() => {
+    const ssoToken = searchParams.get("sso_token");
+    if (ssoToken) {
+      handleSSOLogin(ssoToken);
+    }
+  }, [searchParams]);
+
+  async function handleSSOLogin(token: string) {
+    setIsSSOLoading(true);
+    try {
+      const result = await signIn("credentials", {
+        ssoToken: token,
+        redirect: false,
+      });
+
+      // URL에서 sso_token 제거
+      const url = new URL(window.location.href);
+      url.searchParams.delete("sso_token");
+      window.history.replaceState({}, document.title, url.pathname);
+
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("SSO 로그인 성공!");
+        router.push("/");
+        router.refresh();
+      }
+    } catch {
+      toast.error("SSO 로그인 중 오류가 발생했습니다.");
+    } finally {
+      setIsSSOLoading(false);
+    }
+  }
 
   async function onSubmit(data: LoginFormValues) {
     setIsLoading(true);
@@ -104,12 +143,40 @@ export default function LoginPage() {
                 </FormItem>
               )}
             />
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full" disabled={isLoading || isSSOLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               로그인
             </Button>
           </form>
         </Form>
+
+        {/* SSO 로그인 섹션 */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card px-2 text-muted-foreground">또는</span>
+          </div>
+        </div>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          disabled={isLoading || isSSOLoading}
+          onClick={() => window.location.href = MY_PORTAL_URL}
+        >
+          {isSSOLoading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <KeyRound className="mr-2 h-4 w-4" />
+          )}
+          My Portal로 로그인
+        </Button>
+
+        <p className="text-xs text-center text-muted-foreground mt-3">
+          My Portal에 로그인 후 RetireFarm 카드를 클릭하면 자동 로그인됩니다.
+        </p>
       </CardContent>
       <CardFooter className="flex justify-center">
         <p className="text-sm text-muted-foreground">
@@ -120,5 +187,19 @@ export default function LoginPage() {
         </p>
       </CardFooter>
     </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <Card>
+        <CardContent className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

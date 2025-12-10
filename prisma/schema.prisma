@@ -14,9 +14,14 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String?
-  password      String
+  password      String?   // SSO 사용자는 비밀번호 없음
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+
+  // SSO 관련 필드
+  isSsoUser     Boolean   @default(false)
+  portalEmail   String?   @unique  // My Portal 계정 연동용
+  ssoEnabled    Boolean   @default(true)
 
   retirementGoal    RetirementGoal?
   realEstateAssets  RealEstateAsset[]

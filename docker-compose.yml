@@ -13,6 +13,8 @@ services:
       - NEXTAUTH_URL=${NEXTAUTH_URL}
       - KAMIS_API_KEY=${KAMIS_API_KEY}
       - KAMIS_API_ID=${KAMIS_API_ID}
+      - MY_PORTAL_API_URL=${MY_PORTAL_API_URL}
+      - NEXT_PUBLIC_MY_PORTAL_URL=${NEXT_PUBLIC_MY_PORTAL_URL}
     depends_on:
       db:
         condition: service_healthy
