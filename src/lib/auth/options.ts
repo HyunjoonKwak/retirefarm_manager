@@ -3,7 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
 
-const MY_PORTAL_API = process.env.MY_PORTAL_API_URL || "http://192.168.219.175:3100/api";
+const MY_PORTAL_API = process.env.MY_PORTAL_API_URL || "https://portal.specialrisk.me/api";
 
 // My Portal API로 토큰 검증
 async function verifyPortalToken(token: string) {

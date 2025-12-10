@@ -14,7 +14,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { toast } from "sonner";
 import { Loader2, KeyRound } from "lucide-react";
 
-const MY_PORTAL_URL = process.env.NEXT_PUBLIC_MY_PORTAL_URL || "http://192.168.219.175:3100";
+const MY_PORTAL_URL = process.env.NEXT_PUBLIC_MY_PORTAL_URL || "https://portal.specialrisk.me";
 
 const loginSchema = z.object({
   email: z.string().email("유효한 이메일을 입력해주세요."),
