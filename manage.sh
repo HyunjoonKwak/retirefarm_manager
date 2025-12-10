@@ -108,10 +108,10 @@ status() {
     # 헬스체크
     if command -v curl &> /dev/null; then
         log_info "헬스체크 중..."
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3100 2>/dev/null || echo "000")
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3024 2>/dev/null || echo "000")
         if [ "$HTTP_STATUS" = "200" ]; then
             log_success "애플리케이션이 정상 응답합니다. (HTTP $HTTP_STATUS)"
-            log_info "접속 URL: http://localhost:3100"
+            log_info "접속 URL: http://localhost:3024"
         else
             log_warning "애플리케이션 응답 없음 또는 오류 (HTTP $HTTP_STATUS)"
         fi

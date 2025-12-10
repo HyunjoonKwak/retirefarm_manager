@@ -6,7 +6,7 @@ services:
     container_name: retirefarm-app
     restart: unless-stopped
     ports:
-      - "3100:3000"
+      - "3024:3000"
     environment:
       - DATABASE_URL=postgresql://postgres:${DB_PASSWORD}@db:5432/retirefarm
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
