@@ -229,13 +229,13 @@ export function DashboardOverview() {
                   </div>
                   <div className="p-4 rounded-lg bg-muted">
                     <p className="text-3xl font-bold text-primary">
-                      {data.retirement.monthsRemaining % 12}
+                      {data.retirement.monthsRemaining}
                     </p>
                     <p className="text-sm text-muted-foreground">개월</p>
                   </div>
                   <div className="p-4 rounded-lg bg-muted">
                     <p className="text-3xl font-bold text-primary">
-                      {data.retirement.daysRemaining % 30}
+                      {data.retirement.daysRemaining}
                     </p>
                     <p className="text-sm text-muted-foreground">일</p>
                   </div>

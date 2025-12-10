@@ -87,9 +87,39 @@ export async function GET() {
     let retirementData = null;
     if (retirementGoal) {
       const targetDate = new Date(retirementGoal.targetDate);
-      const daysRemaining = Math.ceil((targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      const monthsRemaining = Math.ceil(daysRemaining / 30);
-      const yearsRemaining = Math.floor(daysRemaining / 365);
+
+      // 정확한 연/월/일 차이 계산
+      let years = targetDate.getFullYear() - now.getFullYear();
+      let months = targetDate.getMonth() - now.getMonth();
+      let days = targetDate.getDate() - now.getDate();
+
+      // 일수가 음수면 이전 달에서 빌려옴
+      if (days < 0) {
+        months--;
+        // 이전 달의 마지막 날 구하기
+        const prevMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 0);
+        days += prevMonth.getDate();
+      }
+
+      // 월수가 음수면 이전 년에서 빌려옴
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+
+      // 목표일이 이미 지났으면 모두 0
+      const isPast = targetDate.getTime() < now.getTime();
+      if (isPast) {
+        years = 0;
+        months = 0;
+        days = 0;
+      }
+
+      // 총 남은 일수 (D-Day 표시용)
+      const totalDaysRemaining = Math.max(
+        0,
+        Math.ceil((targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      );
 
       // 퇴직금 합계
       const totalRetirementFunds =
@@ -100,9 +130,10 @@ export async function GET() {
         targetDate: retirementGoal.targetDate.toISOString(),
         estimatedRetirementPay: retirementGoal.estimatedRetirementPay?.toString() || null,
         totalRetirementFunds: totalRetirementFunds.toString(),
-        daysRemaining: Math.max(0, daysRemaining),
-        monthsRemaining: Math.max(0, monthsRemaining),
-        yearsRemaining: Math.max(0, yearsRemaining),
+        daysRemaining: days,           // 정확한 일수 (0-30)
+        monthsRemaining: months,       // 정확한 월수 (0-11)
+        yearsRemaining: years,         // 정확한 연수
+        totalDaysRemaining,            // 총 남은 일수 (D-Day용)
       };
     }
 
