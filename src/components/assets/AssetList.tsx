@@ -7,7 +7,31 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Building2, Loader2, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
 import { formatLargeNumber, formatPercent, formatDate } from "@/lib/utils/format";
-import type { ExternalPortfolioAsset, ExternalPortfolioSummary } from "@/lib/api/external-portfolio";
+
+// 외부 포트폴리오 자산 타입 (클라이언트용)
+interface ExternalPortfolioAsset {
+  id: string;
+  propertyType: string;
+  propertyName: string;
+  address: string;
+  purchasePrice: string;
+  currentPrice: string;
+  loanAmount?: string;
+  hasLoan: boolean;
+  tradeType: "OWNED" | "FOR_SALE" | "SOLD";
+  expectedSaleDate?: string;
+  unrealizedGain: string;
+  unrealizedGainRate: number;
+}
+
+interface ExternalPortfolioSummary {
+  totalAssets: number;
+  totalValue: string;
+  totalAcquisitionCost: string;
+  totalLoanAmount: string;
+  totalUnrealizedGain: string;
+  averageYieldRate: number;
+}
 
 const PROPERTY_TYPE_LABELS: Record<string, string> = {
   APARTMENT: "아파트",
@@ -33,6 +57,8 @@ interface AssetData {
   error?: string;
 }
 
+const EXTERNAL_API_URL = process.env.NEXT_PUBLIC_EXTERNAL_PORTFOLIO_URL || "https://assets.specialrisk.me";
+
 export function AssetList() {
   const [data, setData] = useState<AssetData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,10 +67,27 @@ export function AssetList() {
   useEffect(() => {
     async function fetchAssets() {
       try {
-        const response = await fetch(`/api/assets/external?tradeType=${activeTab}`);
+        // 클라이언트에서 직접 외부 API 호출 (SSO 쿠키 자동 전송)
+        const response = await fetch(
+          `${EXTERNAL_API_URL}/api/portfolio?tradeType=${activeTab}`,
+          { credentials: "include" }
+        );
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
         const result = await response.json();
-        setData(result);
+
+        // API 응답 구조에 맞게 데이터 처리
+        const assets = result.data || result.assets || result || [];
+
+        // 요약 계산
+        const summary = calculateSummary(Array.isArray(assets) ? assets : []);
+
+        setData({ assets: Array.isArray(assets) ? assets : [], summary });
       } catch (err) {
+        console.error("Failed to fetch external assets:", err);
         setData({
           assets: [],
           summary: {
@@ -55,7 +98,7 @@ export function AssetList() {
             totalUnrealizedGain: "0",
             averageYieldRate: 0,
           },
-          error: "데이터를 불러올 수 없습니다.",
+          error: "외부 포트폴리오 서비스에 연결할 수 없습니다. SSO 로그인이 필요할 수 있습니다.",
         });
       } finally {
         setLoading(false);
@@ -66,6 +109,43 @@ export function AssetList() {
     fetchAssets();
   }, [activeTab]);
 
+  // 자산 목록에서 요약 정보 계산
+  function calculateSummary(assets: ExternalPortfolioAsset[]): ExternalPortfolioSummary {
+    if (assets.length === 0) {
+      return {
+        totalAssets: 0,
+        totalValue: "0",
+        totalAcquisitionCost: "0",
+        totalLoanAmount: "0",
+        totalUnrealizedGain: "0",
+        averageYieldRate: 0,
+      };
+    }
+
+    let totalValue = BigInt(0);
+    let totalAcquisitionCost = BigInt(0);
+    let totalLoanAmount = BigInt(0);
+    let totalUnrealizedGain = BigInt(0);
+    let totalYieldRate = 0;
+
+    for (const asset of assets) {
+      totalValue += BigInt(asset.currentPrice || "0");
+      totalAcquisitionCost += BigInt(asset.purchasePrice || "0");
+      totalLoanAmount += BigInt(asset.loanAmount || "0");
+      totalUnrealizedGain += BigInt(asset.unrealizedGain || "0");
+      totalYieldRate += asset.unrealizedGainRate || 0;
+    }
+
+    return {
+      totalAssets: assets.length,
+      totalValue: totalValue.toString(),
+      totalAcquisitionCost: totalAcquisitionCost.toString(),
+      totalLoanAmount: totalLoanAmount.toString(),
+      totalUnrealizedGain: totalUnrealizedGain.toString(),
+      averageYieldRate: totalYieldRate / assets.length,
+    };
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -74,7 +154,7 @@ export function AssetList() {
     );
   }
 
-  const externalApiUrl = process.env.NEXT_PUBLIC_EXTERNAL_PORTFOLIO_URL || "https://assets.specialrisk.me";
+  const externalApiUrl = EXTERNAL_API_URL;
 
   return (
     <div className="space-y-6">
