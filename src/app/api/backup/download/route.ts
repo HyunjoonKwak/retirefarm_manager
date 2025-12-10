@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth/options";
 import fs from "fs/promises";
 import path from "path";
 
-const BACKUP_DIR = process.env.BACKUP_DIR || "/app/backups";
+const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
 
 // GET: 백업 파일 다운로드
 export async function GET(request: NextRequest) {

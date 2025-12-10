@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth/options";
 import fs from "fs/promises";
 import path from "path";
 
-const CONFIG_DIR = process.env.CONFIG_DIR || "/app/config";
+const CONFIG_DIR = process.env.CONFIG_DIR || "/backups/config";
 const SCHEDULE_FILE = path.join(CONFIG_DIR, "backup-schedule.json");
 
 interface BackupSchedule {

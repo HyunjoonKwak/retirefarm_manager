@@ -8,7 +8,7 @@ import path from "path";
 
 const execAsync = promisify(exec);
 
-const BACKUP_DIR = process.env.BACKUP_DIR || "/app/backups";
+const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
 const DB_HOST = process.env.DATABASE_HOST || "db";
 const DB_PORT = process.env.DATABASE_PORT || "5432";
 const DB_NAME = process.env.DATABASE_NAME || "retirefarm";

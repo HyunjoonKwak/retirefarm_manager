@@ -15,6 +15,14 @@ services:
       - KAMIS_API_ID=${KAMIS_API_ID}
       - MY_PORTAL_API_URL=${MY_PORTAL_API_URL}
       - NEXT_PUBLIC_MY_PORTAL_URL=${NEXT_PUBLIC_MY_PORTAL_URL}
+      - BACKUP_DIR=/backups
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=retirefarm
+      - DATABASE_USER=postgres
+      - DATABASE_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - ${BACKUP_PATH:-./backups}:/backups
     depends_on:
       db:
         condition: service_healthy
