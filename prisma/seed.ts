@@ -92,23 +92,52 @@ const DEFAULT_CATEGORIES = [
 async function main() {
   console.log("Seeding database...");
 
-  // Create setup cost categories
+  // Upsert setup cost categories (기존 데이터 유지, 새 항목만 추가)
   for (const category of DEFAULT_CATEGORIES) {
-    const createdCategory = await prisma.setupCostCategory.create({
-      data: {
-        name: category.name,
-        order: category.order,
-      },
+    const existingCategory = await prisma.setupCostCategory.findFirst({
+      where: { name: category.name },
     });
 
-    for (const subcategory of category.subcategories) {
-      await prisma.setupCostSubcategory.create({
+    let categoryId: string;
+
+    if (existingCategory) {
+      console.log(`Category "${category.name}" already exists, updating...`);
+      categoryId = existingCategory.id;
+      await prisma.setupCostCategory.update({
+        where: { id: existingCategory.id },
+        data: { order: category.order },
+      });
+    } else {
+      console.log(`Creating category "${category.name}"...`);
+      const createdCategory = await prisma.setupCostCategory.create({
         data: {
-          categoryId: createdCategory.id,
-          name: subcategory.name,
-          order: subcategory.order,
+          name: category.name,
+          order: category.order,
         },
       });
+      categoryId = createdCategory.id;
+    }
+
+    for (const subcategory of category.subcategories) {
+      const existingSubcategory = await prisma.setupCostSubcategory.findFirst({
+        where: {
+          categoryId: categoryId,
+          name: subcategory.name,
+        },
+      });
+
+      if (existingSubcategory) {
+        console.log(`  Subcategory "${subcategory.name}" already exists, skipping...`);
+      } else {
+        console.log(`  Creating subcategory "${subcategory.name}"...`);
+        await prisma.setupCostSubcategory.create({
+          data: {
+            categoryId: categoryId,
+            name: subcategory.name,
+            order: subcategory.order,
+          },
+        });
+      }
     }
   }
 
