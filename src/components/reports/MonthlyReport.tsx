@@ -34,6 +34,7 @@ import {
   Download,
 } from "lucide-react";
 import { formatLargeNumber } from "@/lib/utils/format";
+import { DailyFinanceAreaChart, IncomePieChart, ExpensePieChart } from "@/components/charts";
 
 interface MonthlyReportData {
   period: {
@@ -287,7 +288,7 @@ export function MonthlyReport() {
         </Card>
       </div>
 
-      {/* 상세 분석 */}
+      {/* 상세 분석 - 파이 차트 */}
       <div className="grid gap-4 md:grid-cols-2">
         {/* 수입 분석 */}
         <Card>
@@ -297,22 +298,7 @@ export function MonthlyReport() {
           </CardHeader>
           <CardContent>
             {data.finance.incomeByCategory.length > 0 ? (
-              <div className="space-y-3">
-                {data.finance.incomeByCategory.map((item) => {
-                  const percentage = Number(data.finance.income) > 0
-                    ? (Number(item.amount) / Number(data.finance.income)) * 100
-                    : 0;
-                  return (
-                    <div key={item.category} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span>{item.category}</span>
-                        <span className="font-medium">{formatLargeNumber(item.amount)}</span>
-                      </div>
-                      <Progress value={percentage} className="h-2" />
-                    </div>
-                  );
-                })}
-              </div>
+              <IncomePieChart data={data.finance.incomeByCategory} height={280} />
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">수입 내역이 없습니다.</p>
             )}
@@ -327,22 +313,7 @@ export function MonthlyReport() {
           </CardHeader>
           <CardContent>
             {data.finance.expenseByCategory.length > 0 ? (
-              <div className="space-y-3">
-                {data.finance.expenseByCategory.map((item) => {
-                  const percentage = Number(data.finance.expense) > 0
-                    ? (Number(item.amount) / Number(data.finance.expense)) * 100
-                    : 0;
-                  return (
-                    <div key={item.category} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span>{item.category}</span>
-                        <span className="font-medium">{formatLargeNumber(item.amount)}</span>
-                      </div>
-                      <Progress value={percentage} className="h-2" />
-                    </div>
-                  );
-                })}
-              </div>
+              <ExpensePieChart data={data.finance.expenseByCategory} height={280} />
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">지출 내역이 없습니다.</p>
             )}
@@ -350,33 +321,13 @@ export function MonthlyReport() {
         </Card>
       </div>
 
-      {/* 일별 추이 */}
+      {/* 일별 추이 - Area Chart */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">일별 수입/지출 추이</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[200px] flex items-end gap-1">
-            {data.daily.map((day) => {
-              const incomeHeight = maxDailyValue > 0 ? (Number(day.income) / maxDailyValue) * 100 : 0;
-              const expenseHeight = maxDailyValue > 0 ? (Number(day.expense) / maxDailyValue) * 100 : 0;
-              return (
-                <div key={day.day} className="flex-1 flex flex-col items-center gap-1" title={`${day.day}일`}>
-                  <div className="w-full flex gap-0.5 items-end h-[160px]">
-                    <div
-                      className="flex-1 bg-green-500 rounded-t"
-                      style={{ height: `${incomeHeight}%`, minHeight: incomeHeight > 0 ? "2px" : 0 }}
-                    />
-                    <div
-                      className="flex-1 bg-red-400 rounded-t"
-                      style={{ height: `${expenseHeight}%`, minHeight: expenseHeight > 0 ? "2px" : 0 }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">{day.day}</span>
-                </div>
-              );
-            })}
-          </div>
+          <DailyFinanceAreaChart data={data.daily} height={250} />
           <div className="flex justify-center gap-4 mt-4">
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 bg-green-500 rounded" />

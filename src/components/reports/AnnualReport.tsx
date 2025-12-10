@@ -32,6 +32,12 @@ import {
   Calendar,
 } from "lucide-react";
 import { formatLargeNumber } from "@/lib/utils/format";
+import {
+  MonthlyFinanceBarChart,
+  MonthlyProfitLineChart,
+  QuarterlyFinanceChart,
+  CropProfitBarChart,
+} from "@/components/charts";
 
 interface AnnualReportData {
   period: {
@@ -230,74 +236,33 @@ export function AnnualReport() {
         </Card>
       </div>
 
-      {/* 월별 추이 */}
+      {/* 월별 추이 - Bar Chart */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">월별 수입/지출 추이</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[250px] flex items-end gap-2">
-            {data.monthly.map((month) => {
-              const incomeHeight = maxMonthlyValue > 0 ? (Number(month.income) / maxMonthlyValue) * 100 : 0;
-              const expenseHeight = maxMonthlyValue > 0 ? (Number(month.expense) / maxMonthlyValue) * 100 : 0;
-              return (
-                <div key={month.month} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="w-full flex gap-1 items-end h-[200px]">
-                    <div
-                      className="flex-1 bg-green-500 rounded-t"
-                      style={{ height: `${incomeHeight}%`, minHeight: incomeHeight > 0 ? "4px" : 0 }}
-                    />
-                    <div
-                      className="flex-1 bg-red-400 rounded-t"
-                      style={{ height: `${expenseHeight}%`, minHeight: expenseHeight > 0 ? "4px" : 0 }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">{MONTHS[month.month - 1]}</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex justify-center gap-6 mt-4">
-            <div className="flex items-center gap-2 text-sm">
-              <div className="w-3 h-3 bg-green-500 rounded" />
-              <span>수입</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <div className="w-3 h-3 bg-red-400 rounded" />
-              <span>지출</span>
-            </div>
-          </div>
+          <MonthlyFinanceBarChart data={data.monthly} height={300} />
         </CardContent>
       </Card>
 
-      {/* 분기별 실적 */}
+      {/* 월별 순이익 추이 - Line Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">월별 손익 추이</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MonthlyProfitLineChart data={data.monthly} height={300} />
+        </CardContent>
+      </Card>
+
+      {/* 분기별 실적 - Chart */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">분기별 실적</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>분기</TableHead>
-                <TableHead className="text-right">수입</TableHead>
-                <TableHead className="text-right">지출</TableHead>
-                <TableHead className="text-right">순이익</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.quarterly.map((q) => (
-                <TableRow key={q.quarter}>
-                  <TableCell className="font-medium">{q.quarter}분기</TableCell>
-                  <TableCell className="text-right text-green-600">{formatLargeNumber(q.income)}</TableCell>
-                  <TableCell className="text-right text-red-600">{formatLargeNumber(q.expense)}</TableCell>
-                  <TableCell className={`text-right font-medium ${Number(q.profit) >= 0 ? "text-blue-600" : "text-red-600"}`}>
-                    {Number(q.profit) >= 0 ? "+" : ""}{formatLargeNumber(q.profit)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <QuarterlyFinanceChart data={data.quarterly} height={280} />
         </CardContent>
       </Card>
 
