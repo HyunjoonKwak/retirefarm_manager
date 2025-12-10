@@ -73,35 +73,35 @@ class ExternalPortfolioClient {
    * 보유 중인 자산 목록 조회
    */
   async getOwnedAssets(): Promise<ExternalPortfolioAsset[]> {
-    return this.fetch<ExternalPortfolioAsset[]>("/portfolio?tradeType=OWNED");
+    return this.fetch<ExternalPortfolioAsset[]>("/api/portfolio?tradeType=OWNED");
   }
 
   /**
    * 매물 등록된 자산 목록 조회
    */
   async getForSaleAssets(): Promise<ExternalPortfolioAsset[]> {
-    return this.fetch<ExternalPortfolioAsset[]>("/portfolio?tradeType=FOR_SALE");
+    return this.fetch<ExternalPortfolioAsset[]>("/api/portfolio?tradeType=FOR_SALE");
   }
 
   /**
    * 매도 완료된 자산 목록 조회
    */
   async getSoldAssets(): Promise<ExternalPortfolioAsset[]> {
-    return this.fetch<ExternalPortfolioAsset[]>("/portfolio?tradeType=SOLD");
+    return this.fetch<ExternalPortfolioAsset[]>("/api/portfolio?tradeType=SOLD");
   }
 
   /**
    * 전체 자산 목록 조회
    */
   async getAllAssets(): Promise<ExternalPortfolioAsset[]> {
-    return this.fetch<ExternalPortfolioAsset[]>("/portfolio");
+    return this.fetch<ExternalPortfolioAsset[]>("/api/portfolio");
   }
 
   /**
    * 개별 자산 상세 조회
    */
   async getAssetById(id: string): Promise<ExternalPortfolioAsset> {
-    return this.fetch<ExternalPortfolioAsset>(`/portfolio/${id}`);
+    return this.fetch<ExternalPortfolioAsset>(`/api/portfolio/${id}`);
   }
 
   /**
