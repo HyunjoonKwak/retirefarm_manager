@@ -94,7 +94,10 @@ export function Header({ onMenuClick }: HeaderProps) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="cursor-pointer text-red-600"
-                  onClick={() => signOut({ callbackUrl: "/auth/login" })}
+                  onClick={() => {
+                    const callbackUrl = `${window.location.origin}/auth/login`;
+                    signOut({ callbackUrl });
+                  }}
                 >
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>로그아웃</span>
