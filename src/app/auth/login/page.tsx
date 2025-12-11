@@ -171,7 +171,13 @@ function LoginForm() {
           variant="outline"
           className="w-full"
           disabled={isLoading || isSSOLoading}
-          onClick={() => window.location.href = MY_PORTAL_URL}
+          onClick={() => {
+            const currentUrl = window.location.origin + "/auth/login";
+            const portalUrl = new URL(MY_PORTAL_URL);
+            portalUrl.searchParams.set("redirect_uri", currentUrl);
+            portalUrl.searchParams.set("app", "retirefarm");
+            window.location.href = portalUrl.toString();
+          }}
         >
           {isSSOLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
