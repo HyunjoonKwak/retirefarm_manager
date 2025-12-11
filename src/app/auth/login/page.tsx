@@ -173,10 +173,8 @@ function LoginForm() {
           disabled={isLoading || isSSOLoading}
           onClick={() => {
             const currentUrl = window.location.origin + "/auth/login";
-            const portalUrl = new URL(MY_PORTAL_URL);
-            portalUrl.searchParams.set("redirect_uri", currentUrl);
-            portalUrl.searchParams.set("app", "retirefarm");
-            window.location.href = portalUrl.toString();
+            const ssoUrl = `${MY_PORTAL_URL}/sso-redirect?redirect_uri=${encodeURIComponent(currentUrl)}`;
+            window.location.href = ssoUrl;
           }}
         >
           {isSSOLoading ? (
