@@ -69,6 +69,7 @@ start() {
     if [ $? -eq 0 ]; then
         log_success "$APP_NAME이(가) 시작되었습니다."
         status
+        healthcheck 15 3  # 최대 15회, 3초 간격 (최대 45초 대기)
     else
         log_error "시작에 실패했습니다."
         exit 1
@@ -104,18 +105,39 @@ status() {
     echo ""
     docker-compose -f "$DOCKER_COMPOSE_FILE" ps 2>/dev/null || echo "컨테이너가 실행 중이지 않습니다."
     echo ""
+}
 
-    # 헬스체크
-    if command -v curl &> /dev/null; then
-        log_info "헬스체크 중..."
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3024 2>/dev/null || echo "000")
-        if [ "$HTTP_STATUS" = "200" ]; then
+# 헬스체크 (재시도 포함)
+healthcheck() {
+    local max_attempts=${1:-10}
+    local wait_seconds=${2:-3}
+
+    if ! command -v curl &> /dev/null; then
+        log_warning "curl이 설치되어 있지 않아 헬스체크를 건너뜁니다."
+        return 0
+    fi
+
+    log_info "헬스체크 중... (최대 ${max_attempts}회 시도, ${wait_seconds}초 간격)"
+
+    for i in $(seq 1 $max_attempts); do
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:3024 2>/dev/null || echo "000")
+
+        if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "307" ]; then
             log_success "애플리케이션이 정상 응답합니다. (HTTP $HTTP_STATUS)"
             log_info "접속 URL: http://localhost:3024"
-        else
-            log_warning "애플리케이션 응답 없음 또는 오류 (HTTP $HTTP_STATUS)"
+            return 0
         fi
-    fi
+
+        if [ $i -lt $max_attempts ]; then
+            echo -ne "\r  시도 $i/$max_attempts - 대기 중... (HTTP $HTTP_STATUS)"
+            sleep $wait_seconds
+        fi
+    done
+
+    echo ""
+    log_warning "애플리케이션이 아직 준비되지 않았습니다. (HTTP $HTTP_STATUS)"
+    log_info "잠시 후 다시 확인하거나 '$0 logs'로 로그를 확인하세요."
+    return 1
 }
 
 # 로그 보기
@@ -278,6 +300,7 @@ show_help() {
     echo "  migrate   - Prisma 마이그레이션 실행"
     echo "  shell     - 컨테이너 셸 접속"
     echo "  cleanup   - Docker 리소스 정리"
+    echo "  health    - 애플리케이션 헬스체크"
     echo "  help      - 이 도움말 표시"
     echo ""
     echo "예시:"
@@ -326,6 +349,9 @@ case "$1" in
         ;;
     cleanup)
         cleanup
+        ;;
+    healthcheck|health)
+        healthcheck 10 3
         ;;
     help|--help|-h)
         show_help
