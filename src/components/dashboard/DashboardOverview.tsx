@@ -206,12 +206,12 @@ export function DashboardOverview() {
 
           {/* 은퇴 카운트다운 */}
           {data?.retirement ? (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-blue-500" />
+            <div className="flex flex-wrap items-center gap-2 md:gap-4">
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <Target className="h-5 w-5 text-blue-500 shrink-0" />
                 <span className="text-sm text-muted-foreground">은퇴까지</span>
               </div>
-              <div className="flex items-baseline gap-1">
+              <div className="flex items-baseline gap-1 whitespace-nowrap">
                 <span className="text-2xl font-bold text-primary">{data.retirement.yearsRemaining}</span>
                 <span className="text-sm text-muted-foreground">년</span>
                 <span className="text-2xl font-bold text-primary ml-1">{data.retirement.monthsRemaining}</span>
@@ -219,7 +219,7 @@ export function DashboardOverview() {
                 <span className="text-2xl font-bold text-primary ml-1">{data.retirement.daysRemaining}</span>
                 <span className="text-sm text-muted-foreground">일</span>
               </div>
-              <Badge variant="outline" className="text-base font-bold text-primary">
+              <Badge variant="outline" className="text-base font-bold text-primary whitespace-nowrap">
                 D-{data.retirement.totalDaysRemaining}
               </Badge>
             </div>
