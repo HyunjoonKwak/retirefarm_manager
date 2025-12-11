@@ -175,8 +175,87 @@ export function DashboardOverview() {
 
   const hasAlerts = data && data.lowStockAlerts.length > 0;
 
+  // 오늘 날짜/시간 + 은퇴 카운트다운 컴포넌트 (모바일 최상단용)
+  const TodayAndRetirementSection = () => (
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* 오늘 날짜/시간 */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">오늘</span>
+            </div>
+            <div className="text-right">
+              <p className="font-medium">
+                {currentTime.toLocaleDateString("ko-KR", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  weekday: "short",
+                })}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {currentTime.toLocaleTimeString("ko-KR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 은퇴 카운트다운 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Target className="h-5 w-5 text-blue-500" />
+              <span className="text-base">은퇴까지</span>
+            </div>
+            {data?.retirement && (
+              <Badge variant="outline" className="text-lg font-bold text-primary">
+                D-{data.retirement.totalDaysRemaining}
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data?.retirement ? (
+            <div className="space-y-3">
+              <div className="flex items-baseline justify-center gap-1 text-center">
+                <span className="text-3xl font-bold text-primary">{data.retirement.yearsRemaining}</span>
+                <span className="text-sm text-muted-foreground">년</span>
+                <span className="text-3xl font-bold text-primary ml-2">{data.retirement.monthsRemaining}</span>
+                <span className="text-sm text-muted-foreground">개월</span>
+                <span className="text-3xl font-bold text-primary ml-2">{data.retirement.daysRemaining}</span>
+                <span className="text-sm text-muted-foreground">일</span>
+              </div>
+              <div className="text-center text-sm text-muted-foreground">
+                목표일: {formatDate(data.retirement.targetDate)}
+              </div>
+              <Progress value={Math.min(100, 100 - (data.retirement.totalDaysRemaining / 3650) * 100)} className="h-2" />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-4 text-center">
+              <Target className="h-8 w-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground mb-2">은퇴 목표를 설정해주세요</p>
+              <Link href="/retirement/goal" className="text-sm text-primary hover:underline">
+                목표 설정하기 →
+              </Link>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
+      {/* 모바일: 오늘 + 은퇴까지 최상단 */}
+      <TodayAndRetirementSection />
+
       {/* 알림 배너 */}
       {hasAlerts && (
         <Card className="border-yellow-500/50 bg-yellow-500/5">
@@ -218,79 +297,8 @@ export function DashboardOverview() {
         ))}
       </div>
 
-      {/* 오늘 날짜/시간 */}
-      <Card className="mb-2">
-        <CardContent className="py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">오늘</span>
-            </div>
-            <div className="text-right">
-              <p className="font-medium">
-                {currentTime.toLocaleDateString("ko-KR", {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                  weekday: "short",
-                })}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {currentTime.toLocaleTimeString("ko-KR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* 메인 대시보드 */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {/* 은퇴 카운트다운 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-blue-500" />
-                <span className="text-base">은퇴까지</span>
-              </div>
-              {data?.retirement && (
-                <Badge variant="outline" className="text-lg font-bold text-primary">
-                  D-{data.retirement.totalDaysRemaining}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data?.retirement ? (
-              <div className="space-y-3">
-                <div className="flex items-baseline justify-center gap-1 text-center">
-                  <span className="text-3xl font-bold text-primary">{data.retirement.yearsRemaining}</span>
-                  <span className="text-sm text-muted-foreground">년</span>
-                  <span className="text-3xl font-bold text-primary ml-2">{data.retirement.monthsRemaining}</span>
-                  <span className="text-sm text-muted-foreground">개월</span>
-                  <span className="text-3xl font-bold text-primary ml-2">{data.retirement.daysRemaining}</span>
-                  <span className="text-sm text-muted-foreground">일</span>
-                </div>
-                <div className="text-center text-sm text-muted-foreground">
-                  목표일: {formatDate(data.retirement.targetDate)}
-                </div>
-                <Progress value={Math.min(100, 100 - (data.retirement.totalDaysRemaining / 3650) * 100)} className="h-2" />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-4 text-center">
-                <Target className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground mb-2">은퇴 목표를 설정해주세요</p>
-                <Link href="/retirement/goal" className="text-sm text-primary hover:underline">
-                  목표 설정하기 →
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* 자산 현황 */}
         <Card>
           <CardHeader>
