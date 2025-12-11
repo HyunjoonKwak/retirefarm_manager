@@ -17,7 +17,14 @@ import {
   Target,
   PiggyBank,
   AlertCircle,
+  X,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatLargeNumber, formatDate, calculateDDay } from "@/lib/utils/format";
 import { RetirementGoalForm } from "./RetirementGoalForm";
 import { FundingTimeline } from "./FundingTimeline";
@@ -56,6 +63,15 @@ interface PlanData {
     total: number;
     totalAmount: number;
     totalSubsidy: number;
+    items: Array<{
+      id: string;
+      category: string;
+      subcategory: string;
+      name: string;
+      estimatedCost: string;
+      subsidyAmount: string | null;
+      notes: string | null;
+    }>;
   };
   fundingSources: {
     total: number;
@@ -94,6 +110,8 @@ export function SmartFarmPlanDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showGoalForm, setShowGoalForm] = useState(false);
+  const [showFundingDialog, setShowFundingDialog] = useState(false);
+  const [showSetupCostDialog, setShowSetupCostDialog] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -189,24 +207,30 @@ export function SmartFarmPlanDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setShowFundingDialog(true)}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">예상 퇴직금</CardTitle>
+            <CardTitle className="text-sm font-medium">확보계획자금</CardTitle>
             <PiggyBank className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {summary.totalRetirementFunds > 0
-                ? formatLargeNumber(summary.totalRetirementFunds)
+              {summary.totalFundingPlanned > 0
+                ? formatLargeNumber(summary.totalFundingPlanned)
                 : "-"}
             </div>
             <p className="text-xs text-muted-foreground">
-              {summary.estimatedRetirementPay > 0 && `DC 퇴직금 ${formatLargeNumber(summary.estimatedRetirementPay)}`}
+              {fundingSources.total}개 항목 · 클릭하여 상세보기
             </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card
+          className="cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => setShowSetupCostDialog(true)}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">필요 설립비용</CardTitle>
             <Calculator className="h-4 w-4 text-muted-foreground" />
@@ -215,11 +239,9 @@ export function SmartFarmPlanDashboard() {
             <div className="text-2xl font-bold">
               {summary.netSetupCost > 0 ? formatLargeNumber(summary.netSetupCost) : "-"}
             </div>
-            {summary.totalSubsidyAmount > 0 && (
-              <p className="text-xs text-green-600">
-                보조금 {formatLargeNumber(summary.totalSubsidyAmount)} 차감
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              {setupCosts.total}개 항목 · 클릭하여 상세보기
+            </p>
           </CardContent>
         </Card>
 
@@ -426,6 +448,146 @@ export function SmartFarmPlanDashboard() {
           퇴직 목표 수정
         </Button>
       </div>
+
+      {/* 확보계획자금 상세 Dialog */}
+      <Dialog open={showFundingDialog} onOpenChange={setShowFundingDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PiggyBank className="h-5 w-5" />
+              확보계획자금 상세내역
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* 요약 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">총 계획 자금</p>
+                <p className="text-lg font-bold">{formatLargeNumber(summary.totalFundingPlanned)}</p>
+              </div>
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">확보 완료</p>
+                <p className="text-lg font-bold text-green-600">{formatLargeNumber(summary.totalFundingSecured)}</p>
+              </div>
+            </div>
+
+            {/* 항목 목록 */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-muted-foreground">항목별 내역</p>
+              {fundingSources.items.length > 0 ? (
+                <div className="space-y-2">
+                  {fundingSources.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {getFundingTypeLabel(item.type)} · {formatDate(item.expectedDate)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold">{formatLargeNumber(item.amount)}</p>
+                        <Badge variant={item.status === "SECURED" ? "default" : "secondary"}>
+                          {item.status === "SECURED" ? "확보완료" : "계획중"}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-muted-foreground py-4">등록된 자금 조달 계획이 없습니다.</p>
+              )}
+            </div>
+
+            {/* 바로가기 버튼 */}
+            <Button asChild className="w-full">
+              <Link href="/setup?tab=funding">자금 조달 관리 바로가기</Link>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 필요 설립비용 상세 Dialog */}
+      <Dialog open={showSetupCostDialog} onOpenChange={setShowSetupCostDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calculator className="h-5 w-5" />
+              필요 설립비용 상세내역
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* 요약 */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">총 비용</p>
+                <p className="text-lg font-bold">{formatLargeNumber(summary.totalSetupCost)}</p>
+              </div>
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">보조금</p>
+                <p className="text-lg font-bold text-green-600">-{formatLargeNumber(summary.totalSubsidyAmount)}</p>
+              </div>
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">순 필요</p>
+                <p className="text-lg font-bold text-primary">{formatLargeNumber(summary.netSetupCost)}</p>
+              </div>
+            </div>
+
+            {/* 항목 목록 */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-muted-foreground">항목별 내역</p>
+              {setupCosts.items.length > 0 ? (
+                <div className="space-y-2">
+                  {setupCosts.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {item.category} {item.subcategory && `> ${item.subcategory}`}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold">{formatLargeNumber(item.estimatedCost)}</p>
+                        {item.subsidyAmount && Number(item.subsidyAmount) > 0 && (
+                          <p className="text-xs text-green-600">
+                            보조금 -{formatLargeNumber(item.subsidyAmount)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-center text-muted-foreground py-4">등록된 설립비용 항목이 없습니다.</p>
+              )}
+            </div>
+
+            {/* 바로가기 버튼 */}
+            <Button asChild className="w-full">
+              <Link href="/setup">설립비용 관리 바로가기</Link>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+// 자금 조달 유형 라벨
+function getFundingTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    REAL_ESTATE_SALE: "부동산 매도",
+    SAVINGS: "저축",
+    LOAN: "대출",
+    GOVERNMENT_SUBSIDY: "정부 보조금",
+    RETIREMENT_PAY: "퇴직금",
+    SEVERANCE_PAY: "퇴직수당",
+    OTHER: "기타",
+  };
+  return labels[type] || type;
 }

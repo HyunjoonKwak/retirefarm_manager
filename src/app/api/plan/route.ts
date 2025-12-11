@@ -28,6 +28,13 @@ export async function GET() {
     // 2. 설립 비용 조회
     const setupCosts = await prisma.setupCostItem.findMany({
       where: { userId },
+      include: {
+        subcategory: {
+          include: {
+            category: true,
+          },
+        },
+      },
     });
 
     // 3. 자금 조달 조회
@@ -106,6 +113,15 @@ export async function GET() {
         total: setupCosts.length,
         totalAmount: summary.totalSetupCost,
         totalSubsidy: summary.totalSubsidyAmount,
+        items: setupCosts.map((item) => ({
+          id: item.id,
+          category: item.subcategory?.category?.name || "기타",
+          subcategory: item.subcategory?.name || "",
+          name: item.name,
+          estimatedCost: item.estimatedCost.toString(),
+          subsidyAmount: item.subsidyAmount?.toString() || null,
+          notes: item.notes,
+        })),
       },
       fundingSources: {
         total: fundingSources.length,
