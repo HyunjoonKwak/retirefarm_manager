@@ -178,23 +178,27 @@ export function FundingTimelineVisual({
           </div>
 
           {/* 마커들 + 상시 라벨 */}
-          <TooltipProvider>
+          <TooltipProvider delayDuration={0}>
             {cumulativeData.map((item, index) => (
               <div
                 key={item.id}
-                className="absolute transform -translate-x-1/2"
-                style={{ left: `${item.position}%`, top: '32px' }}
+                className="absolute transform -translate-x-1/2 group hover:z-50"
+                style={{
+                  left: `${item.position}%`,
+                  top: '32px',
+                  zIndex: cumulativeData.length - index
+                }}
               >
                 {/* 마커 */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div
-                      className={`w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-transform hover:scale-125 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
+                      className={`relative w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-all hover:scale-150 hover:z-50 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
                     >
                       <span className="sr-only">{item.name}</span>
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs">
+                  <TooltipContent side="top" className="max-w-xs z-[100]" sideOffset={5}>
                     <div className="space-y-1">
                       <p className="font-medium">{item.name}</p>
                       <p className="text-xs text-muted-foreground">
@@ -212,7 +216,7 @@ export function FundingTimelineVisual({
                 </Tooltip>
 
                 {/* 상시 표시 라벨 */}
-                <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center ${index % 2 === 0 ? '' : 'mt-10'}`}>
+                <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-10'}`}>
                   <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
                   <p className="text-[9px] text-muted-foreground">누적 {Math.round(item.coveragePercent)}%</p>
                 </div>
