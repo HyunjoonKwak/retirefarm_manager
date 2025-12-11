@@ -15,7 +15,7 @@ import {
   Loader2,
   ArrowRight,
   Sprout,
-  Package,
+  Clock,
 } from "lucide-react";
 import Link from "next/link";
 import { formatLargeNumber, formatDate } from "@/lib/utils/format";
@@ -27,6 +27,7 @@ interface DashboardData {
     daysRemaining: number;
     monthsRemaining: number;
     yearsRemaining: number;
+    totalDaysRemaining: number;
   } | null;
   assets: {
     totalValue: string;
@@ -137,6 +138,15 @@ const GROWTH_STAGE_LABELS: Record<string, string> = {
 export function DashboardOverview() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // 현재 시간 업데이트 (1분마다)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -208,52 +218,73 @@ export function DashboardOverview() {
         ))}
       </div>
 
+      {/* 오늘 날짜/시간 */}
+      <Card className="mb-2">
+        <CardContent className="py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">오늘</span>
+            </div>
+            <div className="text-right">
+              <p className="font-medium">
+                {currentTime.toLocaleDateString("ko-KR", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  weekday: "short",
+                })}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {currentTime.toLocaleTimeString("ko-KR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 메인 대시보드 */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {/* 은퇴 카운트다운 */}
-        <Card className="col-span-full lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-blue-500" />
-              은퇴까지 남은 시간
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Target className="h-5 w-5 text-blue-500" />
+                <span className="text-base">은퇴까지</span>
+              </div>
+              {data?.retirement && (
+                <Badge variant="outline" className="text-lg font-bold text-primary">
+                  D-{data.retirement.totalDaysRemaining}
+                </Badge>
+              )}
             </CardTitle>
-            <CardDescription>목표 달성까지의 진행 상황</CardDescription>
           </CardHeader>
           <CardContent>
             {data?.retirement ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div className="p-4 rounded-lg bg-muted">
-                    <p className="text-3xl font-bold text-primary">{data.retirement.yearsRemaining}</p>
-                    <p className="text-sm text-muted-foreground">년</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted">
-                    <p className="text-3xl font-bold text-primary">
-                      {data.retirement.monthsRemaining}
-                    </p>
-                    <p className="text-sm text-muted-foreground">개월</p>
-                  </div>
-                  <div className="p-4 rounded-lg bg-muted">
-                    <p className="text-3xl font-bold text-primary">
-                      {data.retirement.daysRemaining}
-                    </p>
-                    <p className="text-sm text-muted-foreground">일</p>
-                  </div>
+              <div className="space-y-3">
+                <div className="flex items-baseline justify-center gap-1 text-center">
+                  <span className="text-3xl font-bold text-primary">{data.retirement.yearsRemaining}</span>
+                  <span className="text-sm text-muted-foreground">년</span>
+                  <span className="text-3xl font-bold text-primary ml-2">{data.retirement.monthsRemaining}</span>
+                  <span className="text-sm text-muted-foreground">개월</span>
+                  <span className="text-3xl font-bold text-primary ml-2">{data.retirement.daysRemaining}</span>
+                  <span className="text-sm text-muted-foreground">일</span>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>목표일: {formatDate(data.retirement.targetDate)}</span>
-                    <span>목표 금액: {formatLargeNumber(data.retirement.targetAmount)}</span>
-                  </div>
-                  <Progress value={Math.min(100, 100 - (data.retirement.daysRemaining / 3650) * 100)} />
+                <div className="text-center text-sm text-muted-foreground">
+                  목표일: {formatDate(data.retirement.targetDate)}
                 </div>
+                <Progress value={Math.min(100, 100 - (data.retirement.totalDaysRemaining / 3650) * 100)} className="h-2" />
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Target className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground mb-2">은퇴 목표를 설정하면 카운트다운이 표시됩니다.</p>
+              <div className="flex flex-col items-center justify-center py-4 text-center">
+                <Target className="h-8 w-8 text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground mb-2">은퇴 목표를 설정해주세요</p>
                 <Link href="/retirement/goal" className="text-sm text-primary hover:underline">
-                  은퇴 목표 설정하기 →
+                  목표 설정하기 →
                 </Link>
               </div>
             )}
