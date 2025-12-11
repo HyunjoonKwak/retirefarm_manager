@@ -28,6 +28,7 @@ import {
 import { formatLargeNumber, formatDate, calculateDDay } from "@/lib/utils/format";
 import { RetirementGoalForm } from "./RetirementGoalForm";
 import { FundingTimeline } from "./FundingTimeline";
+import { FundingTimelineVisual } from "./FundingTimelineVisual";
 
 interface PlanData {
   goal: {
@@ -262,7 +263,7 @@ export function SmartFarmPlanDashboard() {
         </Card>
       </div>
 
-      {/* 자금 조달 현황 */}
+      {/* 자금 조달 현황 - 시각적 타임라인 */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -271,69 +272,65 @@ export function SmartFarmPlanDashboard() {
               자금 조달 현황
             </CardTitle>
             <CardDescription>
-              총 필요 자금 {formatLargeNumber(summary.totalRequiredFunds)} 중{" "}
-              {formatLargeNumber(summary.totalFundingPlanned)} 확보 계획
+              오늘부터 퇴직 목표일까지의 자금 유입 계획
             </CardDescription>
           </div>
           <Button variant="outline" size="sm" asChild>
             <Link href="/setup?tab=funding">
-              자세히 보기 <ChevronRight className="ml-1 h-4 w-4" />
+              자금 조달 관리 <ChevronRight className="ml-1 h-4 w-4" />
             </Link>
           </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span>자금 조달 진행률</span>
-              <span className="font-medium">{summary.fundingProgress}%</span>
-            </div>
-            <Progress value={summary.fundingProgress} />
-          </div>
-
-          {summary.fundingGap > 0 && (
-            <div className="flex items-center gap-2 p-3 bg-yellow-50 rounded-lg">
-              <AlertCircle className="h-5 w-5 text-yellow-600" />
-              <p className="text-sm text-yellow-800">
-                <span className="font-medium">{formatLargeNumber(summary.fundingGap)}</span>의 추가 자금 확보가 필요합니다.
-              </p>
-            </div>
-          )}
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="p-3 bg-muted rounded-lg">
-              <p className="text-xs text-muted-foreground">설립 비용</p>
-              <p className="font-semibold">{formatLargeNumber(summary.netSetupCost)}</p>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <p className="text-xs text-muted-foreground">초기 생활비 버퍼 ({summary.bufferMonths}개월)</p>
-              <p className="font-semibold">{formatLargeNumber(summary.initialLivingBuffer)}</p>
-            </div>
-            <div className="p-3 bg-muted rounded-lg">
-              <p className="text-xs text-muted-foreground">확보 계획 자금</p>
-              <p className="font-semibold text-green-600">
-                {formatLargeNumber(summary.totalFundingPlanned)}
-              </p>
-            </div>
-          </div>
+        <CardContent>
+          <FundingTimelineVisual
+            fundingSources={fundingSources.items}
+            targetDate={summary.targetDate}
+            totalRequired={summary.totalRequiredFunds}
+            totalPlanned={summary.totalFundingPlanned}
+          />
         </CardContent>
       </Card>
 
-      {/* 자금 조달 타임라인 & 외부 자산 */}
+      {/* 필요 자금 상세 & 외부 자산 */}
       <div className="grid gap-4 md:grid-cols-2">
-        {/* 타임라인 */}
+        {/* 필요 자금 상세 */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              자금 유입 타임라인
+              <Calculator className="h-5 w-5" />
+              필요 자금 상세
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <FundingTimeline
-              fundingSources={fundingSources.items}
-              expectedProceeds={expectedProceeds?.assets || []}
-              targetDate={summary.targetDate}
-            />
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
+                <div>
+                  <p className="text-sm font-medium">설립 비용</p>
+                  <p className="text-xs text-muted-foreground">보조금 차감 후</p>
+                </div>
+                <p className="font-bold">{formatLargeNumber(summary.netSetupCost)}</p>
+              </div>
+              <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
+                <div>
+                  <p className="text-sm font-medium">초기 생활비 버퍼</p>
+                  <p className="text-xs text-muted-foreground">{summary.bufferMonths}개월 × {formatLargeNumber(summary.monthlyLivingExpense)}</p>
+                </div>
+                <p className="font-bold">{formatLargeNumber(summary.initialLivingBuffer)}</p>
+              </div>
+              <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg border-2 border-primary/20">
+                <p className="font-medium">총 필요 자금</p>
+                <p className="text-xl font-bold text-primary">{formatLargeNumber(summary.totalRequiredFunds)}</p>
+              </div>
+            </div>
+
+            {/* 진행률 바 */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>확보 진행률</span>
+                <span className="font-medium">{summary.fundingProgress}%</span>
+              </div>
+              <Progress value={summary.fundingProgress} className="h-2" />
+            </div>
           </CardContent>
         </Card>
 
