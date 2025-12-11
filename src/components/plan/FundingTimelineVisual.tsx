@@ -3,11 +3,10 @@
 import { useMemo } from "react";
 import { formatLargeNumber, formatDate } from "@/lib/utils/format";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface FundingItem {
   id: string;
@@ -178,51 +177,50 @@ export function FundingTimelineVisual({
           </div>
 
           {/* 마커들 + 상시 라벨 */}
-          <TooltipProvider delayDuration={0}>
-            {cumulativeData.map((item, index) => (
-              <div
-                key={item.id}
-                className="absolute transform -translate-x-1/2 group hover:z-50"
-                style={{
-                  left: `${item.position}%`,
-                  top: '32px',
-                  zIndex: cumulativeData.length - index
-                }}
-              >
-                {/* 마커 */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div
-                      className={`relative w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-all hover:scale-150 hover:z-50 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
-                    >
-                      <span className="sr-only">{item.name}</span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs z-[100]" sideOffset={5}>
-                    <div className="space-y-1">
-                      <p className="font-medium">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {FUNDING_TYPE_LABELS[item.type] || item.type}
+          {cumulativeData.map((item, index) => (
+            <div
+              key={item.id}
+              className="absolute transform -translate-x-1/2"
+              style={{
+                left: `${item.position}%`,
+                top: '32px',
+                zIndex: cumulativeData.length - index
+              }}
+            >
+              {/* 마커 - 클릭 시 Popover */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    className={`relative w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-all hover:scale-150 focus:scale-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
+                    style={{ zIndex: 'inherit' }}
+                  >
+                    <span className="sr-only">{item.name}</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent side="top" className="w-56 p-3" sideOffset={8}>
+                  <div className="space-y-2">
+                    <p className="font-medium text-sm">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {FUNDING_TYPE_LABELS[item.type] || item.type}
+                    </p>
+                    <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(item.expectedDate)}</p>
+                    <div className="pt-2 border-t">
+                      <p className="text-xs">
+                        누적: <span className="font-medium">{formatLargeNumber(item.cumulative)}</span> ({Math.round(item.coveragePercent)}%)
                       </p>
-                      <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
-                      <p className="text-xs">{formatDate(item.expectedDate)}</p>
-                      <div className="pt-1 border-t">
-                        <p className="text-xs">
-                          누적: {formatLargeNumber(item.cumulative)} ({Math.round(item.coveragePercent)}%)
-                        </p>
-                      </div>
                     </div>
-                  </TooltipContent>
-                </Tooltip>
+                  </div>
+                </PopoverContent>
+              </Popover>
 
-                {/* 상시 표시 라벨 */}
-                <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-10'}`}>
-                  <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
-                  <p className="text-[9px] text-muted-foreground">누적 {Math.round(item.coveragePercent)}%</p>
-                </div>
+              {/* 상시 표시 라벨 */}
+              <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-10'}`}>
+                <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
+                <p className="text-[9px] text-muted-foreground">누적 {Math.round(item.coveragePercent)}%</p>
               </div>
-            ))}
-          </TooltipProvider>
+            </div>
+          ))}
 
           {/* 오늘 마커 */}
           <div className="absolute top-8 left-0 w-1 h-5 bg-red-500 rounded-full" />
