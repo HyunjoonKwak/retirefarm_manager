@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { formatLargeNumber, formatDate } from "@/lib/utils/format";
-import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -55,6 +54,24 @@ export function FundingTimelineVisual({
   const today = new Date();
   const target = new Date(targetDate);
   const totalDays = Math.max(1, Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+
+  // 연도 구분선 계산
+  const yearMarkers = useMemo(() => {
+    const markers: { year: number; position: number }[] = [];
+    const startYear = today.getFullYear();
+    const endYear = target.getFullYear();
+
+    for (let year = startYear + 1; year <= endYear; year++) {
+      const yearStart = new Date(year, 0, 1);
+      const daysFromToday = Math.ceil((yearStart.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const position = Math.max(0, Math.min(100, (daysFromToday / totalDays) * 100));
+
+      if (position > 0 && position < 100) {
+        markers.push({ year, position });
+      }
+    }
+    return markers;
+  }, [today, target, totalDays]);
 
   // 타임라인 아이템 계산
   const timelineItems = useMemo(() => {
@@ -133,12 +150,24 @@ export function FundingTimelineVisual({
       {/* 시각적 타임라인 */}
       <div className="space-y-4">
         <div className="flex justify-between text-sm text-muted-foreground">
-          <span>오늘</span>
+          <span>오늘 ({today.getFullYear()})</span>
           <span>퇴직 목표일 ({formatDate(targetDate)})</span>
         </div>
 
         {/* 타임라인 바 */}
-        <div className="relative">
+        <div className="relative pt-8 pb-4">
+          {/* 연도 구분선 */}
+          {yearMarkers.map(({ year, position }) => (
+            <div
+              key={year}
+              className="absolute top-0 flex flex-col items-center transform -translate-x-1/2"
+              style={{ left: `${position}%` }}
+            >
+              <span className="text-xs text-muted-foreground font-medium mb-1">{year}년</span>
+              <div className="w-px h-16 bg-gray-300 border-dashed" style={{ borderLeft: '1px dashed #d1d5db' }} />
+            </div>
+          ))}
+
           {/* 배경 바 */}
           <div className="h-3 bg-muted rounded-full relative overflow-hidden">
             {/* 진행률 표시 (필요 자금 대비 누적 확보 계획) */}
@@ -148,43 +177,58 @@ export function FundingTimelineVisual({
             />
           </div>
 
-          {/* 마커들 */}
+          {/* 마커들 + 상시 라벨 */}
           <TooltipProvider>
             {cumulativeData.map((item, index) => (
-              <Tooltip key={item.id}>
-                <TooltipTrigger asChild>
-                  <div
-                    className={`absolute -top-1 w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transform -translate-x-1/2 transition-transform hover:scale-125 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
-                    style={{ left: `${item.position}%` }}
-                  >
-                    <span className="sr-only">{item.name}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-xs">
-                  <div className="space-y-1">
-                    <p className="font-medium">{item.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {FUNDING_TYPE_LABELS[item.type] || item.type}
-                    </p>
-                    <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
-                    <p className="text-xs">{formatDate(item.expectedDate)}</p>
-                    <div className="pt-1 border-t">
-                      <p className="text-xs">
-                        누적: {formatLargeNumber(item.cumulative)} ({Math.round(item.coveragePercent)}%)
-                      </p>
+              <div
+                key={item.id}
+                className="absolute transform -translate-x-1/2"
+                style={{ left: `${item.position}%`, top: '32px' }}
+              >
+                {/* 마커 */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-transform hover:scale-125 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
+                    >
+                      <span className="sr-only">{item.name}</span>
                     </div>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <div className="space-y-1">
+                      <p className="font-medium">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {FUNDING_TYPE_LABELS[item.type] || item.type}
+                      </p>
+                      <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
+                      <p className="text-xs">{formatDate(item.expectedDate)}</p>
+                      <div className="pt-1 border-t">
+                        <p className="text-xs">
+                          누적: {formatLargeNumber(item.cumulative)} ({Math.round(item.coveragePercent)}%)
+                        </p>
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* 상시 표시 라벨 */}
+                <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center ${index % 2 === 0 ? '' : 'mt-10'}`}>
+                  <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
+                  <p className="text-[9px] text-muted-foreground">누적 {Math.round(item.coveragePercent)}%</p>
+                </div>
+              </div>
             ))}
           </TooltipProvider>
 
           {/* 오늘 마커 */}
-          <div className="absolute -top-1 left-0 w-1 h-5 bg-red-500 rounded-full" />
+          <div className="absolute top-8 left-0 w-1 h-5 bg-red-500 rounded-full" />
 
           {/* 목표일 마커 */}
-          <div className="absolute -top-1 right-0 w-1 h-5 bg-primary rounded-full" />
+          <div className="absolute top-8 right-0 w-1 h-5 bg-primary rounded-full" />
         </div>
+
+        {/* 라벨 공간 확보 */}
+        <div className="h-8" />
 
         {/* 범례 */}
         <div className="flex flex-wrap gap-2 pt-2">
@@ -204,7 +248,7 @@ export function FundingTimelineVisual({
       {/* 자금 유입 목록 */}
       <div className="space-y-2">
         <p className="text-sm font-medium">자금 유입 순서</p>
-        <div className="space-y-2 max-h-60 overflow-y-auto">
+        <div className="space-y-2 max-h-[520px] overflow-y-auto">
           {cumulativeData.map((item, index) => (
             <div
               key={item.id}
