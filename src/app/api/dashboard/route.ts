@@ -96,9 +96,9 @@ export async function GET() {
       // 일수가 음수면 이전 달에서 빌려옴
       if (days < 0) {
         months--;
-        // 이전 달의 마지막 날 구하기
-        const prevMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 0);
-        days += prevMonth.getDate();
+        // 목표월의 이전 달 일수를 더함 (예: 7월 목표면 6월의 일수인 30일)
+        const prevMonthDays = new Date(targetDate.getFullYear(), targetDate.getMonth(), 0).getDate();
+        days += prevMonthDays;
       }
 
       // 월수가 음수면 이전 년에서 빌려옴
