@@ -30,32 +30,39 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # 환경 변수 파일 확인
 check_env() {
     if [ ! -f "$DEPLOY_DIR/.env" ]; then
-        log_error ".env 파일이 없습니다."
+        log_warning ".env 파일이 없습니다."
         echo ""
-        echo "필수 환경 변수:"
-        echo "  GHCR_TOKEN=<GitHub Personal Access Token>"
-        echo "  GHCR_USERNAME=<GitHub Username>"
+        echo "필수 환경 변수 (.env 파일에 설정):"
         echo "  NEXTAUTH_SECRET=<랜덤 시크릿>"
         echo "  NEXTAUTH_URL=http://your-nas-ip:3024"
         echo "  KAMIS_API_KEY=<KAMIS API Key>"
         echo "  KAMIS_API_ID=<KAMIS API ID>"
         echo ""
-        exit 1
+        return 1
     fi
     source "$DEPLOY_DIR/.env"
 }
 
-# GHCR 로그인
+# GHCR 로그인 (대화형)
 ghcr_login() {
-    log_info "GHCR 로그인 중..."
-    check_env
+    log_info "GHCR 로그인"
+    echo ""
+    echo -e "${YELLOW}GitHub Personal Access Token이 필요합니다.${NC}"
+    echo ""
 
-    if [ -z "$GHCR_TOKEN" ]; then
-        log_error "GHCR_TOKEN이 설정되지 않았습니다."
+    read -p "GitHub 사용자명 [$GHCR_USERNAME]: " input_username
+    GHCR_USERNAME="${input_username:-$GHCR_USERNAME}"
+
+    echo -e "${YELLOW}토큰을 입력하세요 (read:packages 권한 필요):${NC}"
+    read -s token
+    echo ""
+
+    if [ -z "$token" ]; then
+        log_error "토큰이 입력되지 않았습니다."
         exit 1
     fi
 
-    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+    echo "$token" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
     if [ $? -eq 0 ]; then
         log_success "GHCR 로그인 성공"
@@ -82,13 +89,14 @@ pull_image() {
 # 배포 (초기 설치)
 deploy() {
     log_info "RetireFarm Manager 배포 중..."
-    check_env
 
     # 필수 디렉토리 생성
     mkdir -p "$BACKUP_DIR"
 
-    # 이미지 pull 및 시작
+    # GHCR 로그인 (대화형)
     ghcr_login
+
+    # 이미지 pull
     pull_image
 
     log_info "컨테이너 시작 중..."
@@ -107,14 +115,12 @@ deploy() {
 # 업데이트 (새 이미지로 교체)
 update() {
     log_info "RetireFarm Manager 업데이트 중..."
-    check_env
 
     # 현재 상태 백업
     log_info "업데이트 전 백업 생성..."
     backup
 
-    # 새 이미지 pull
-    ghcr_login
+    # 새 이미지 pull (로그인 상태 확인 후 필요시 로그인)
     pull_image
 
     # 컨테이너 재시작
@@ -134,7 +140,6 @@ update() {
 # 시작
 start() {
     log_info "$APP_NAME 시작 중..."
-    check_env
     docker-compose -f "$COMPOSE_FILE" up -d
 
     if [ $? -eq 0 ]; then
@@ -270,7 +275,7 @@ show_help() {
     echo "사용법: $0 [명령어]"
     echo ""
     echo "명령어:"
-    echo "  login    - GHCR 로그인"
+    echo "  login    - GHCR 로그인 (대화형, 최초 1회)"
     echo "  pull     - 최신 이미지 다운로드"
     echo "  deploy   - 초기 배포 (로그인 + pull + 시작)"
     echo "  update   - 업데이트 (백업 + pull + 재시작)"
@@ -284,8 +289,7 @@ show_help() {
     echo "  health   - 헬스체크"
     echo "  help     - 도움말"
     echo ""
-    echo "환경 변수 (필수):"
-    echo "  GHCR_TOKEN     - GitHub Personal Access Token"
+    echo "환경 변수:"
     echo "  GHCR_USERNAME  - GitHub Username (기본: hyunjoonkwak)"
     echo "  IMAGE_TAG      - 이미지 태그 (기본: latest)"
     echo ""
