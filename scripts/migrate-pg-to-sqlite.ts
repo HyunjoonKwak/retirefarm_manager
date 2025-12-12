@@ -18,8 +18,8 @@ const POSTGRES_URL =
   process.env.POSTGRES_URL ||
   "postgresql://postgres:password@localhost:5432/retirefarm";
 
-// SQLite 파일 경로
-const SQLITE_PATH = "./prisma/data/retirefarm.db";
+// SQLite 파일 경로 (Docker 컨테이너 내부 또는 로컬)
+const SQLITE_PATH = process.env.SQLITE_PATH || "/app/prisma/data/retirefarm.db";
 
 // PostgreSQL 클라이언트 (동적 URL 설정)
 const pgClient = new PostgresClient({
