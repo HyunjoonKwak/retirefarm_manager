@@ -347,7 +347,7 @@ async function migrateFarmingLogs() {
       formatDecimal(l.rainfall),
       l.weather,
       l.notes,
-      formatArray(l.photos), // String[] → JSON string
+      l.photos, // PostgreSQL에서 이미 String 또는 null
       formatDateTime(l.createdAt),
       formatDateTime(l.updatedAt)
     );
