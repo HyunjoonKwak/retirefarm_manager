@@ -715,6 +715,8 @@ async function main() {
   );
   log.info(`SQLite 파일: ${SQLITE_PATH}`);
 
+  let transactionStarted = false;
+
   try {
     // PostgreSQL 연결 테스트
     log.info("PostgreSQL 연결 테스트 중...");
@@ -723,6 +725,7 @@ async function main() {
 
     // 트랜잭션으로 마이그레이션 실행
     sqlite.exec("BEGIN TRANSACTION");
+    transactionStarted = true;
 
     // 순서대로 마이그레이션 (외래 키 의존성 고려)
     await migrateUsers();
@@ -744,12 +747,19 @@ async function main() {
     await migrateWeatherData();
 
     sqlite.exec("COMMIT");
+    transactionStarted = false;
 
     console.log("\n==========================================");
     log.success("모든 데이터 마이그레이션이 완료되었습니다!");
     console.log("==========================================\n");
   } catch (error) {
-    sqlite.exec("ROLLBACK");
+    if (transactionStarted) {
+      try {
+        sqlite.exec("ROLLBACK");
+      } catch {
+        // ignore rollback error
+      }
+    }
     log.error("마이그레이션 중 오류 발생:");
     console.error(error);
     process.exit(1);
