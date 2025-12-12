@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
-import { exec } from "child_process";
-import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 
-const execAsync = promisify(exec);
-
 const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
-const DB_HOST = process.env.DATABASE_HOST || "db";
-const DB_PORT = process.env.DATABASE_PORT || "5432";
-const DB_NAME = process.env.DATABASE_NAME || "retirefarm";
-const DB_USER = process.env.DATABASE_USER || "postgres";
-const DB_PASSWORD = process.env.DATABASE_PASSWORD || "postgres";
+const SQLITE_PATH = "/app/prisma/data/retirefarm.db";
 
 // GET: 백업 목록 조회
 export async function GET() {
@@ -34,7 +26,7 @@ export async function GET() {
     const files = await fs.readdir(BACKUP_DIR);
     const backups = await Promise.all(
       files
-        .filter((f) => f.endsWith(".sql") || f.endsWith(".sql.gz"))
+        .filter((f) => f.endsWith(".db") || f.endsWith(".db.gz"))
         .map(async (filename) => {
           const filePath = path.join(BACKUP_DIR, filename);
           const stats = await fs.stat(filePath);
@@ -72,15 +64,20 @@ export async function POST() {
       await fs.mkdir(BACKUP_DIR, { recursive: true });
     }
 
+    // SQLite 파일 존재 확인
+    try {
+      await fs.access(SQLITE_PATH);
+    } catch {
+      return NextResponse.json({ error: "데이터베이스 파일을 찾을 수 없습니다." }, { status: 500 });
+    }
+
     // 백업 파일명 생성 (타임스탬프)
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `backup_${timestamp}.sql`;
+    const filename = `backup_${timestamp}.db`;
     const filePath = path.join(BACKUP_DIR, filename);
 
-    // pg_dump 실행
-    const dumpCommand = `PGPASSWORD="${DB_PASSWORD}" pg_dump -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d ${DB_NAME} -F p > "${filePath}"`;
-
-    await execAsync(dumpCommand);
+    // SQLite 파일 복사
+    await fs.copyFile(SQLITE_PATH, filePath);
 
     // 파일 정보 조회
     const stats = await fs.stat(filePath);

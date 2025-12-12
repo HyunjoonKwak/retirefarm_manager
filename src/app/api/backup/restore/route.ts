@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
-import { exec } from "child_process";
-import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 
-const execAsync = promisify(exec);
-
 const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
-const DB_HOST = process.env.DATABASE_HOST || "db";
-const DB_PORT = process.env.DATABASE_PORT || "5432";
-const DB_NAME = process.env.DATABASE_NAME || "retirefarm";
-const DB_USER = process.env.DATABASE_USER || "postgres";
-const DB_PASSWORD = process.env.DATABASE_PASSWORD || "postgres";
+const SQLITE_PATH = "/app/prisma/data/retirefarm.db";
 
 // POST: 백업 복원
 export async function POST(request: NextRequest) {
@@ -43,36 +35,22 @@ export async function POST(request: NextRequest) {
 
     // 복원 전 현재 상태 백업 (안전장치)
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const preRestoreBackup = `pre_restore_${timestamp}.sql`;
+    const preRestoreBackup = `pre_restore_${timestamp}.db`;
     const preRestorePath = path.join(BACKUP_DIR, preRestoreBackup);
 
-    const backupCommand = `PGPASSWORD="${DB_PASSWORD}" pg_dump -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d ${DB_NAME} -F p > "${preRestorePath}"`;
-    await execAsync(backupCommand);
-
-    // 데이터베이스 복원 (기존 데이터 삭제 후 복원)
-    // 1. 연결 종료
-    const terminateCommand = `PGPASSWORD="${DB_PASSWORD}" psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();"`;
-
     try {
-      await execAsync(terminateCommand);
-    } catch {
-      // 연결이 없을 수도 있음
+      await fs.copyFile(SQLITE_PATH, preRestorePath);
+    } catch (err) {
+      console.error("Pre-restore backup failed:", err);
+      // 기존 DB가 없어도 진행
     }
 
-    // 2. 데이터베이스 드롭 및 재생성
-    const dropCommand = `PGPASSWORD="${DB_PASSWORD}" psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME};"`;
-    const createCommand = `PGPASSWORD="${DB_PASSWORD}" psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d postgres -c "CREATE DATABASE ${DB_NAME};"`;
-
-    await execAsync(dropCommand);
-    await execAsync(createCommand);
-
-    // 3. 복원
-    const restoreCommand = `PGPASSWORD="${DB_PASSWORD}" psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER} -d ${DB_NAME} < "${filePath}"`;
-    await execAsync(restoreCommand);
+    // SQLite 파일 복원 (덮어쓰기)
+    await fs.copyFile(filePath, SQLITE_PATH);
 
     return NextResponse.json({
       success: true,
-      message: "데이터베이스가 복원되었습니다.",
+      message: "데이터베이스가 복원되었습니다. 앱을 재시작하면 변경사항이 적용됩니다.",
       preRestoreBackup,
     });
   } catch (error) {
