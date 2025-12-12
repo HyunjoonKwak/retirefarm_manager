@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 데이터베이스 자동 백업 크론 스크립트
+# SQLite 데이터베이스 자동 백업 크론 스크립트
 # 사용법: crontab에 등록하여 주기적으로 실행
 # 예: 0 2 * * 0 /path/to/backup-cron.sh (매주 일요일 새벽 2시)
 
@@ -8,39 +8,17 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="$PROJECT_DIR/data/backup-schedule.json"
-BACKUP_DIR="$PROJECT_DIR/data/backups"
+BACKUP_DIR="$PROJECT_DIR/backups"
 LOG_FILE="$PROJECT_DIR/data/backup.log"
 
-# 환경변수 로드
-if [ -f "$PROJECT_DIR/.env" ]; then
-    export $(cat "$PROJECT_DIR/.env" | grep -v '^#' | xargs)
-fi
-
-if [ -f "$PROJECT_DIR/.env.local" ]; then
-    export $(cat "$PROJECT_DIR/.env.local" | grep -v '^#' | xargs)
-fi
-
-# DATABASE_URL 파싱
-parse_database_url() {
-    local url="$DATABASE_URL"
-
-    # postgresql://user:password@host:port/database 형식 파싱
-    if [[ $url =~ postgresql://([^:]+):([^@]+)@([^:]+):([^/]+)/(.+) ]]; then
-        DB_USER="${BASH_REMATCH[1]}"
-        DB_PASSWORD="${BASH_REMATCH[2]}"
-        DB_HOST="${BASH_REMATCH[3]}"
-        DB_PORT="${BASH_REMATCH[4]}"
-        DB_NAME="${BASH_REMATCH[5]}"
-        # 쿼리 파라미터 제거
-        DB_NAME="${DB_NAME%%\?*}"
-    else
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - ERROR: DATABASE_URL 파싱 실패" >> "$LOG_FILE"
-        exit 1
-    fi
-}
+# Docker 컨테이너 이름
+CONTAINER_NAME="retirefarm-app"
+DB_FILE="retirefarm.db"
+SQLITE_PATH="/app/prisma/data/$DB_FILE"
 
 # 로그 함수
 log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
 }
 
@@ -66,7 +44,7 @@ check_schedule() {
 # 백업 실행
 run_backup() {
     local timestamp=$(date '+%Y%m%d_%H%M%S')
-    local filename="backup_${timestamp}.sql"
+    local filename="backup_${timestamp}.db"
     local filepath="$BACKUP_DIR/$filename"
 
     # 백업 디렉토리 확인
@@ -74,18 +52,19 @@ run_backup() {
 
     log "백업 시작: $filename"
 
-    # pg_dump 실행
-    PGPASSWORD="$DB_PASSWORD" pg_dump \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
-        -U "$DB_USER" \
-        -d "$DB_NAME" \
-        -F p \
-        > "$filepath" 2>> "$LOG_FILE"
+    # 컨테이너에서 SQLite 파일 복사
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        docker cp "${CONTAINER_NAME}:${SQLITE_PATH}" "$filepath" 2>> "$LOG_FILE"
+    else
+        log "ERROR: 컨테이너가 실행 중이지 않습니다."
+        exit 1
+    fi
 
-    if [ $? -eq 0 ]; then
-        local size=$(du -h "$filepath" | cut -f1)
-        log "백업 완료: $filename ($size)"
+    if [ $? -eq 0 ] && [ -f "$filepath" ]; then
+        # 압축
+        gzip "$filepath"
+        local size=$(du -h "${filepath}.gz" | cut -f1)
+        log "백업 완료: ${filename}.gz ($size)"
     else
         log "ERROR: 백업 실패"
         rm -f "$filepath"
@@ -108,9 +87,9 @@ cleanup_old_backups() {
     log "오래된 백업 정리 (보관: ${retention_days}일)"
 
     # 오래된 파일 삭제
-    find "$BACKUP_DIR" -name "backup_*.sql" -type f -mtime +$retention_days -delete 2>> "$LOG_FILE"
+    find "$BACKUP_DIR" -name "backup_*.db.gz" -type f -mtime +$retention_days -delete 2>> "$LOG_FILE"
 
-    local count=$(find "$BACKUP_DIR" -name "backup_*.sql" -type f | wc -l)
+    local count=$(find "$BACKUP_DIR" -name "backup_*.db.gz" -type f | wc -l)
     log "현재 백업 파일 수: $count"
 }
 
@@ -119,7 +98,6 @@ main() {
     log "=== 자동 백업 시작 ==="
 
     check_schedule
-    parse_database_url
     run_backup
     cleanup_old_backups
 
