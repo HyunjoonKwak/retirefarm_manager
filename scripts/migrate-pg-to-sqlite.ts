@@ -50,9 +50,9 @@ function formatDateTime(date: Date | string | null): string | null {
 }
 
 // Decimal을 문자열로 변환
-function formatDecimal(value: any): string | null {
+function formatDecimal(value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  return value.toString();
+  return String(value);
 }
 
 // Boolean을 SQLite 정수로 변환
@@ -60,10 +60,20 @@ function formatBoolean(value: boolean | null): number {
   return value ? 1 : 0;
 }
 
+// PostgreSQL 테이블 존재 여부 확인
+async function tableExists(tableName: string): Promise<boolean> {
+  const { rows } = await pgPool.query(
+    `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)`,
+    [tableName]
+  );
+  return rows[0].exists;
+}
+
+// ==================== User ====================
 async function migrateUsers() {
   log.info("사용자(User) 마이그레이션 중...");
 
-  const { rows: users } = await pgPool.query("SELECT * FROM \"User\"");
+  const { rows: users } = await pgPool.query('SELECT * FROM "User"');
 
   if (users.length === 0) {
     log.warning("마이그레이션할 사용자가 없습니다.");
@@ -94,10 +104,11 @@ async function migrateUsers() {
   log.success(`사용자 ${users.length}건 마이그레이션 완료`);
 }
 
+// ==================== RetirementGoal ====================
 async function migrateRetirementGoals() {
   log.info("퇴직 목표(RetirementGoal) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"RetirementGoal\"");
+  const { rows } = await pgPool.query('SELECT * FROM "RetirementGoal"');
 
   if (rows.length === 0) {
     log.warning("마이그레이션할 퇴직 목표가 없습니다.");
@@ -105,10 +116,11 @@ async function migrateRetirementGoals() {
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO RetirementGoal (id, userId, targetDate, targetAge, monthlyExpense, inflationRate,
-      currentSavings, currentInvestments, expectedPension, expectedSocialSecurity,
-      createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO RetirementGoal (
+      id, userId, targetDate, estimatedRetirementPay, estimatedSeverancePay,
+      initialLivingBuffer, bufferMonths, monthlyLivingExpense, createdAt, updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
@@ -117,13 +129,11 @@ async function migrateRetirementGoals() {
       r.id,
       r.userId,
       formatDateTime(r.targetDate),
-      r.targetAge,
-      formatDecimal(r.monthlyExpense),
-      formatDecimal(r.inflationRate),
-      formatDecimal(r.currentSavings),
-      formatDecimal(r.currentInvestments),
-      formatDecimal(r.expectedPension),
-      formatDecimal(r.expectedSocialSecurity),
+      formatDecimal(r.estimatedRetirementPay),
+      formatDecimal(r.estimatedSeverancePay),
+      formatDecimal(r.initialLivingBuffer),
+      r.bufferMonths,
+      formatDecimal(r.monthlyLivingExpense),
       formatDateTime(r.createdAt),
       formatDateTime(r.updatedAt)
     );
@@ -133,127 +143,180 @@ async function migrateRetirementGoals() {
   log.success(`퇴직 목표 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateAssets() {
-  log.info("자산(Asset) 마이그레이션 중...");
+// ==================== RealEstateAsset ====================
+async function migrateRealEstateAssets() {
+  log.info("부동산 자산(RealEstateAsset) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"Asset\"");
+  if (!(await tableExists("RealEstateAsset"))) {
+    log.warning("RealEstateAsset 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "RealEstateAsset"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 자산이 없습니다.");
+    log.warning("마이그레이션할 부동산 자산이 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO Asset (id, userId, name, type, category, currentValue, purchaseValue,
-      purchaseDate, location, description, isLiquid, expectedReturn, status, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const a = rows[i];
-    stmt.run(
-      a.id,
-      a.userId,
-      a.name,
-      a.type, // Enum → String
-      a.category,
-      formatDecimal(a.currentValue),
-      formatDecimal(a.purchaseValue),
-      formatDateTime(a.purchaseDate),
-      a.location,
-      a.description,
-      formatBoolean(a.isLiquid),
-      formatDecimal(a.expectedReturn),
-      a.status, // Enum → String
-      formatDateTime(a.createdAt),
-      formatDateTime(a.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "Asset");
-  }
-
-  log.success(`자산 ${rows.length}건 마이그레이션 완료`);
-}
-
-async function migrateRealEstates() {
-  log.info("부동산(RealEstate) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"RealEstate\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 부동산이 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO RealEstate (id, assetId, propertyType, address, area, acquisitionTax,
-      propertyTax, maintenanceCost, rentalIncome, mortgageBalance, mortgageRate, mortgageEndDate, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO RealEstateAsset (
+      id, userId, name, propertyType, address, area, acquisitionDate, acquisitionPrice,
+      currentPrice, expectedSalePrice, mortgageBalance, monthlyRent, status,
+      plannedSaleDate, notes, createdAt, updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     stmt.run(
       r.id,
-      r.assetId,
-      r.propertyType, // Enum → String
+      r.userId,
+      r.name,
+      r.propertyType,
       r.address,
       formatDecimal(r.area),
-      formatDecimal(r.acquisitionTax),
-      formatDecimal(r.propertyTax),
-      formatDecimal(r.maintenanceCost),
-      formatDecimal(r.rentalIncome),
+      formatDateTime(r.acquisitionDate),
+      formatDecimal(r.acquisitionPrice),
+      formatDecimal(r.currentPrice),
+      formatDecimal(r.expectedSalePrice),
       formatDecimal(r.mortgageBalance),
-      formatDecimal(r.mortgageRate),
-      formatDateTime(r.mortgageEndDate),
+      formatDecimal(r.monthlyRent),
+      r.status,
+      formatDateTime(r.plannedSaleDate),
+      r.notes,
       formatDateTime(r.createdAt),
       formatDateTime(r.updatedAt)
     );
-    log.progress(i + 1, rows.length, "RealEstate");
+    log.progress(i + 1, rows.length, "RealEstateAsset");
   }
 
-  log.success(`부동산 ${rows.length}건 마이그레이션 완료`);
+  log.success(`부동산 자산 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateFinancialAssets() {
-  log.info("금융자산(FinancialAsset) 마이그레이션 중...");
+// ==================== SetupCostCategory ====================
+async function migrateSetupCostCategories() {
+  log.info("설립 비용 카테고리(SetupCostCategory) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"FinancialAsset\"");
+  if (!(await tableExists("SetupCostCategory"))) {
+    log.warning("SetupCostCategory 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "SetupCostCategory"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 금융자산이 없습니다.");
+    log.warning("마이그레이션할 설립 비용 카테고리가 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO FinancialAsset (id, assetId, financialType, institution, accountNumber,
-      interestRate, maturityDate, taxBenefit, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO SetupCostCategory (id, name, "order")
+    VALUES (?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
-    const f = rows[i];
-    stmt.run(
-      f.id,
-      f.assetId,
-      f.financialType, // Enum → String
-      f.institution,
-      f.accountNumber,
-      formatDecimal(f.interestRate),
-      formatDateTime(f.maturityDate),
-      f.taxBenefit,
-      formatDateTime(f.createdAt),
-      formatDateTime(f.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "FinancialAsset");
+    const c = rows[i];
+    stmt.run(c.id, c.name, c.order);
+    log.progress(i + 1, rows.length, "SetupCostCategory");
   }
 
-  log.success(`금융자산 ${rows.length}건 마이그레이션 완료`);
+  log.success(`설립 비용 카테고리 ${rows.length}건 마이그레이션 완료`);
 }
 
+// ==================== SetupCostSubcategory ====================
+async function migrateSetupCostSubcategories() {
+  log.info("설립 비용 서브카테고리(SetupCostSubcategory) 마이그레이션 중...");
+
+  if (!(await tableExists("SetupCostSubcategory"))) {
+    log.warning("SetupCostSubcategory 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "SetupCostSubcategory"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 설립 비용 서브카테고리가 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO SetupCostSubcategory (id, categoryId, name, "order")
+    VALUES (?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const s = rows[i];
+    stmt.run(s.id, s.categoryId, s.name, s.order);
+    log.progress(i + 1, rows.length, "SetupCostSubcategory");
+  }
+
+  log.success(`설립 비용 서브카테고리 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== SetupCostItem ====================
+async function migrateSetupCostItems() {
+  log.info("설립 비용 항목(SetupCostItem) 마이그레이션 중...");
+
+  if (!(await tableExists("SetupCostItem"))) {
+    log.warning("SetupCostItem 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "SetupCostItem"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 설립 비용 항목이 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO SetupCostItem (
+      id, userId, subcategoryId, name, description, estimatedCost, actualCost,
+      quantity, unit, isGovernmentSubsidy, subsidyAmount, subsidyRate, priority,
+      status, notes, createdAt, updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const item = rows[i];
+    stmt.run(
+      item.id,
+      item.userId,
+      item.subcategoryId,
+      item.name,
+      item.description,
+      formatDecimal(item.estimatedCost),
+      formatDecimal(item.actualCost),
+      item.quantity,
+      item.unit,
+      formatBoolean(item.isGovernmentSubsidy),
+      formatDecimal(item.subsidyAmount),
+      formatDecimal(item.subsidyRate),
+      item.priority,
+      item.status,
+      item.notes,
+      formatDateTime(item.createdAt),
+      formatDateTime(item.updatedAt)
+    );
+    log.progress(i + 1, rows.length, "SetupCostItem");
+  }
+
+  log.success(`설립 비용 항목 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== FundingSource ====================
 async function migrateFundingSources() {
   log.info("자금조달(FundingSource) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"FundingSource\"");
+  if (!(await tableExists("FundingSource"))) {
+    log.warning("FundingSource 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "FundingSource"');
 
   if (rows.length === 0) {
     log.warning("마이그레이션할 자금조달이 없습니다.");
@@ -261,8 +324,10 @@ async function migrateFundingSources() {
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO FundingSource (id, userId, name, type, amount, expectedDate, status,
-      linkedAssetId, notes, createdAt, updatedAt)
+    INSERT OR REPLACE INTO FundingSource (
+      id, userId, type, name, amount, expectedDate, linkedAssetId, status,
+      notes, createdAt, updatedAt
+    )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -271,12 +336,12 @@ async function migrateFundingSources() {
     stmt.run(
       f.id,
       f.userId,
+      f.type,
       f.name,
-      f.type, // Enum → String
       formatDecimal(f.amount),
       formatDateTime(f.expectedDate),
-      f.status, // Enum → String
       f.linkedAssetId,
+      f.status,
       f.notes,
       formatDateTime(f.createdAt),
       formatDateTime(f.updatedAt)
@@ -287,204 +352,16 @@ async function migrateFundingSources() {
   log.success(`자금조달 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateSetupCategories() {
-  log.info("설정 카테고리(SetupCategory) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"SetupCategory\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 설정 카테고리가 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO SetupCategory (id, userId, name, type, description, sortOrder, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const c = rows[i];
-    stmt.run(
-      c.id,
-      c.userId,
-      c.name,
-      c.type, // Enum → String
-      c.description,
-      c.sortOrder,
-      formatDateTime(c.createdAt),
-      formatDateTime(c.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "SetupCategory");
-  }
-
-  log.success(`설정 카테고리 ${rows.length}건 마이그레이션 완료`);
-}
-
-async function migrateSetupItems() {
-  log.info("설정 항목(SetupItem) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"SetupItem\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 설정 항목이 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO SetupItem (id, categoryId, name, brand, quantity, unit, estimatedCost,
-      actualCost, priority, status, purchaseUrl, notes, purchaseDate, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const item = rows[i];
-    stmt.run(
-      item.id,
-      item.categoryId,
-      item.name,
-      item.brand,
-      item.quantity,
-      item.unit,
-      formatDecimal(item.estimatedCost),
-      formatDecimal(item.actualCost),
-      item.priority, // Enum → String
-      item.status, // Enum → String
-      item.purchaseUrl,
-      item.notes,
-      formatDateTime(item.purchaseDate),
-      formatDateTime(item.createdAt),
-      formatDateTime(item.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "SetupItem");
-  }
-
-  log.success(`설정 항목 ${rows.length}건 마이그레이션 완료`);
-}
-
-async function migrateLandParcels() {
-  log.info("토지(LandParcel) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"LandParcel\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 토지가 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO LandParcel (id, userId, name, address, totalArea, usableArea,
-      landCategory, zoning, waterAccess, electricityAccess, roadAccess, soilQuality,
-      slope, notes, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const l = rows[i];
-    stmt.run(
-      l.id,
-      l.userId,
-      l.name,
-      l.address,
-      formatDecimal(l.totalArea),
-      formatDecimal(l.usableArea),
-      l.landCategory,
-      l.zoning,
-      formatBoolean(l.waterAccess),
-      formatBoolean(l.electricityAccess),
-      l.roadAccess,
-      l.soilQuality,
-      l.slope,
-      l.notes,
-      formatDateTime(l.createdAt),
-      formatDateTime(l.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "LandParcel");
-  }
-
-  log.success(`토지 ${rows.length}건 마이그레이션 완료`);
-}
-
-async function migratePlots() {
-  log.info("구획(Plot) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"Plot\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 구획이 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO Plot (id, landParcelId, name, area, soilType, sunExposure,
-      irrigationType, currentUse, notes, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const p = rows[i];
-    stmt.run(
-      p.id,
-      p.landParcelId,
-      p.name,
-      formatDecimal(p.area),
-      p.soilType,
-      p.sunExposure,
-      p.irrigationType,
-      p.currentUse,
-      p.notes,
-      formatDateTime(p.createdAt),
-      formatDateTime(p.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "Plot");
-  }
-
-  log.success(`구획 ${rows.length}건 마이그레이션 완료`);
-}
-
-async function migrateCrops() {
-  log.info("작물(Crop) 마이그레이션 중...");
-
-  const { rows } = await pgPool.query("SELECT * FROM \"Crop\"");
-
-  if (rows.length === 0) {
-    log.warning("마이그레이션할 작물이 없습니다.");
-    return;
-  }
-
-  const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO Crop (id, userId, name, variety, category, plantingDate, harvestDate,
-      growingPeriod, status, expectedYield, actualYield, notes, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < rows.length; i++) {
-    const c = rows[i];
-    stmt.run(
-      c.id,
-      c.userId,
-      c.name,
-      c.variety,
-      c.category,
-      formatDateTime(c.plantingDate),
-      formatDateTime(c.harvestDate),
-      c.growingPeriod,
-      c.status, // Enum → String
-      formatDecimal(c.expectedYield),
-      formatDecimal(c.actualYield),
-      c.notes,
-      formatDateTime(c.createdAt),
-      formatDateTime(c.updatedAt)
-    );
-    log.progress(i + 1, rows.length, "Crop");
-  }
-
-  log.success(`작물 ${rows.length}건 마이그레이션 완료`);
-}
-
+// ==================== FarmingLog ====================
 async function migrateFarmingLogs() {
   log.info("영농일지(FarmingLog) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"FarmingLog\"");
+  if (!(await tableExists("FarmingLog"))) {
+    log.warning("FarmingLog 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "FarmingLog"');
 
   if (rows.length === 0) {
     log.warning("마이그레이션할 영농일지가 없습니다.");
@@ -492,13 +369,20 @@ async function migrateFarmingLogs() {
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO FarmingLog (id, userId, date, temperature, humidity, rainfall,
-      weather, notes, photos, createdAt, updatedAt)
+    INSERT OR REPLACE INTO FarmingLog (
+      id, userId, date, temperature, humidity, rainfall, weather, notes, photos,
+      createdAt, updatedAt
+    )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
     const l = rows[i];
+    // photos 필드: PostgreSQL에서 배열일 수 있음 -> JSON 문자열로 변환
+    let photos = l.photos;
+    if (Array.isArray(photos)) {
+      photos = JSON.stringify(photos);
+    }
     stmt.run(
       l.id,
       l.userId,
@@ -508,7 +392,7 @@ async function migrateFarmingLogs() {
       formatDecimal(l.rainfall),
       l.weather,
       l.notes,
-      l.photos, // Already String or null in new schema
+      photos,
       formatDateTime(l.createdAt),
       formatDateTime(l.updatedAt)
     );
@@ -518,10 +402,16 @@ async function migrateFarmingLogs() {
   log.success(`영농일지 ${rows.length}건 마이그레이션 완료`);
 }
 
+// ==================== FarmActivity ====================
 async function migrateFarmActivities() {
   log.info("영농활동(FarmActivity) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"FarmActivity\"");
+  if (!(await tableExists("FarmActivity"))) {
+    log.warning("FarmActivity 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "FarmActivity"');
 
   if (rows.length === 0) {
     log.warning("마이그레이션할 영농활동이 없습니다.");
@@ -529,7 +419,9 @@ async function migrateFarmActivities() {
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO FarmActivity (id, logId, type, cropId, plotId, description, quantity, unit, duration, workers, createdAt)
+    INSERT OR REPLACE INTO FarmActivity (
+      id, logId, type, cropId, plotId, description, quantity, unit, duration, workers, createdAt
+    )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -538,7 +430,7 @@ async function migrateFarmActivities() {
     stmt.run(
       a.id,
       a.logId,
-      a.type, // Enum → String
+      a.type,
       a.cropId,
       a.plotId,
       a.description,
@@ -554,20 +446,150 @@ async function migrateFarmActivities() {
   log.success(`영농활동 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateInventoryItems() {
-  log.info("재고(InventoryItem) 마이그레이션 중...");
+// ==================== MaterialUsage ====================
+async function migrateMaterialUsages() {
+  log.info("자재사용(MaterialUsage) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"InventoryItem\"");
+  if (!(await tableExists("MaterialUsage"))) {
+    log.warning("MaterialUsage 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "MaterialUsage"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 재고가 없습니다.");
+    log.warning("마이그레이션할 자재사용이 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO InventoryItem (id, userId, name, category, quantity, unit, minQuantity,
-      location, purchaseDate, expiryDate, price, supplier, notes, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO MaterialUsage (id, activityId, itemId, quantity)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i];
+    stmt.run(m.id, m.activityId, m.itemId, formatDecimal(m.quantity));
+    log.progress(i + 1, rows.length, "MaterialUsage");
+  }
+
+  log.success(`자재사용 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== Crop ====================
+async function migrateCrops() {
+  log.info("작물(Crop) 마이그레이션 중...");
+
+  if (!(await tableExists("Crop"))) {
+    log.warning("Crop 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "Crop"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 작물이 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO Crop (
+      id, userId, name, variety, plantingDate, expectedHarvestDate, plotId,
+      status, growthStage, notes, createdAt, updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const c = rows[i];
+    stmt.run(
+      c.id,
+      c.userId,
+      c.name,
+      c.variety,
+      formatDateTime(c.plantingDate),
+      formatDateTime(c.expectedHarvestDate),
+      c.plotId,
+      c.status,
+      c.growthStage,
+      c.notes,
+      formatDateTime(c.createdAt),
+      formatDateTime(c.updatedAt)
+    );
+    log.progress(i + 1, rows.length, "Crop");
+  }
+
+  log.success(`작물 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== FinancialTransaction ====================
+async function migrateFinancialTransactions() {
+  log.info("재무 거래(FinancialTransaction) 마이그레이션 중...");
+
+  if (!(await tableExists("FinancialTransaction"))) {
+    log.warning("FinancialTransaction 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "FinancialTransaction"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 재무 거래가 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO FinancialTransaction (
+      id, userId, date, type, category, subcategory, amount, description,
+      relatedCropId, paymentMethod, receiptUrl, createdAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const t = rows[i];
+    stmt.run(
+      t.id,
+      t.userId,
+      formatDateTime(t.date),
+      t.type,
+      t.category,
+      t.subcategory,
+      formatDecimal(t.amount),
+      t.description,
+      t.relatedCropId,
+      t.paymentMethod,
+      t.receiptUrl,
+      formatDateTime(t.createdAt)
+    );
+    log.progress(i + 1, rows.length, "FinancialTransaction");
+  }
+
+  log.success(`재무 거래 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== InventoryItem ====================
+async function migrateInventoryItems() {
+  log.info("재고 항목(InventoryItem) 마이그레이션 중...");
+
+  if (!(await tableExists("InventoryItem"))) {
+    log.warning("InventoryItem 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "InventoryItem"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 재고 항목이 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO InventoryItem (
+      id, userId, name, category, currentQuantity, unit, minimumQuantity,
+      lastPurchaseDate, lastPurchasePrice, location, expirationDate, createdAt, updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
@@ -576,133 +598,211 @@ async function migrateInventoryItems() {
       item.id,
       item.userId,
       item.name,
-      item.category, // Enum → String
-      formatDecimal(item.quantity),
+      item.category,
+      formatDecimal(item.currentQuantity),
       item.unit,
-      formatDecimal(item.minQuantity),
+      formatDecimal(item.minimumQuantity),
+      formatDateTime(item.lastPurchaseDate),
+      formatDecimal(item.lastPurchasePrice),
       item.location,
-      formatDateTime(item.purchaseDate),
-      formatDateTime(item.expiryDate),
-      formatDecimal(item.price),
-      item.supplier,
-      item.notes,
+      formatDateTime(item.expirationDate),
       formatDateTime(item.createdAt),
       formatDateTime(item.updatedAt)
     );
     log.progress(i + 1, rows.length, "InventoryItem");
   }
 
-  log.success(`재고 ${rows.length}건 마이그레이션 완료`);
+  log.success(`재고 항목 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateFarmFinanceRecords() {
-  log.info("농가재정(FarmFinanceRecord) 마이그레이션 중...");
+// ==================== InventoryTransaction ====================
+async function migrateInventoryTransactions() {
+  log.info("재고 거래(InventoryTransaction) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"FarmFinanceRecord\"");
+  if (!(await tableExists("InventoryTransaction"))) {
+    log.warning("InventoryTransaction 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "InventoryTransaction"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 농가재정이 없습니다.");
+    log.warning("마이그레이션할 재고 거래가 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO FarmFinanceRecord (id, userId, date, type, category, amount, description,
-      relatedCropId, paymentMethod, receipt, notes, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO InventoryTransaction (id, itemId, type, quantity, date, reason)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
-    const f = rows[i];
+    const t = rows[i];
     stmt.run(
-      f.id,
-      f.userId,
-      formatDateTime(f.date),
-      f.type, // Enum → String
-      f.category, // Enum → String
-      formatDecimal(f.amount),
-      f.description,
-      f.relatedCropId,
-      f.paymentMethod,
-      f.receipt,
-      f.notes,
-      formatDateTime(f.createdAt),
-      formatDateTime(f.updatedAt)
+      t.id,
+      t.itemId,
+      t.type,
+      formatDecimal(t.quantity),
+      formatDateTime(t.date),
+      t.reason
     );
-    log.progress(i + 1, rows.length, "FarmFinanceRecord");
+    log.progress(i + 1, rows.length, "InventoryTransaction");
   }
 
-  log.success(`농가재정 ${rows.length}건 마이그레이션 완료`);
+  log.success(`재고 거래 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateMarketPrices() {
-  log.info("시세(MarketPrice) 마이그레이션 중...");
+// ==================== PriceWatchlist ====================
+async function migratePriceWatchlists() {
+  log.info("시세 관심목록(PriceWatchlist) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"MarketPrice\"");
+  if (!(await tableExists("PriceWatchlist"))) {
+    log.warning("PriceWatchlist 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "PriceWatchlist"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 시세가 없습니다.");
+    log.warning("마이그레이션할 시세 관심목록이 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO MarketPrice (id, itemName, itemCode, unit, price, market, date,
-      source, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO PriceWatchlist (id, userId, itemCode, itemName)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const w = rows[i];
+    stmt.run(w.id, w.userId, w.itemCode, w.itemName);
+    log.progress(i + 1, rows.length, "PriceWatchlist");
+  }
+
+  log.success(`시세 관심목록 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== PriceAlert ====================
+async function migratePriceAlerts() {
+  log.info("시세 알림(PriceAlert) 마이그레이션 중...");
+
+  if (!(await tableExists("PriceAlert"))) {
+    log.warning("PriceAlert 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "PriceAlert"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 시세 알림이 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO PriceAlert (id, userId, itemCode, itemName, condition, targetPrice, isActive)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (let i = 0; i < rows.length; i++) {
+    const a = rows[i];
+    stmt.run(
+      a.id,
+      a.userId,
+      a.itemCode,
+      a.itemName,
+      a.condition,
+      formatDecimal(a.targetPrice),
+      formatBoolean(a.isActive)
+    );
+    log.progress(i + 1, rows.length, "PriceAlert");
+  }
+
+  log.success(`시세 알림 ${rows.length}건 마이그레이션 완료`);
+}
+
+// ==================== MarketPriceCache ====================
+async function migrateMarketPriceCache() {
+  log.info("시세 캐시(MarketPriceCache) 마이그레이션 중...");
+
+  if (!(await tableExists("MarketPriceCache"))) {
+    log.warning("MarketPriceCache 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "MarketPriceCache"');
+
+  if (rows.length === 0) {
+    log.warning("마이그레이션할 시세 캐시가 없습니다.");
+    return;
+  }
+
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO MarketPriceCache (
+      id, itemCode, itemName, marketCode, marketName, date, avgPrice,
+      maxPrice, minPrice, tradingVolume, unit, fetchedAt
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
     const m = rows[i];
     stmt.run(
       m.id,
-      m.itemName,
       m.itemCode,
-      m.unit,
-      formatDecimal(m.price),
-      m.market,
+      m.itemName,
+      m.marketCode,
+      m.marketName,
       formatDateTime(m.date),
-      m.source,
-      formatDateTime(m.createdAt)
+      formatDecimal(m.avgPrice),
+      formatDecimal(m.maxPrice),
+      formatDecimal(m.minPrice),
+      formatDecimal(m.tradingVolume),
+      m.unit,
+      formatDateTime(m.fetchedAt)
     );
-    log.progress(i + 1, rows.length, "MarketPrice");
+    log.progress(i + 1, rows.length, "MarketPriceCache");
   }
 
-  log.success(`시세 ${rows.length}건 마이그레이션 완료`);
+  log.success(`시세 캐시 ${rows.length}건 마이그레이션 완료`);
 }
 
-async function migrateWeatherData() {
-  log.info("날씨(WeatherData) 마이그레이션 중...");
+// ==================== Notification ====================
+async function migrateNotifications() {
+  log.info("알림(Notification) 마이그레이션 중...");
 
-  const { rows } = await pgPool.query("SELECT * FROM \"WeatherData\"");
+  if (!(await tableExists("Notification"))) {
+    log.warning("Notification 테이블이 없습니다. 건너뜁니다.");
+    return;
+  }
+
+  const { rows } = await pgPool.query('SELECT * FROM "Notification"');
 
   if (rows.length === 0) {
-    log.warning("마이그레이션할 날씨 데이터가 없습니다.");
+    log.warning("마이그레이션할 알림이 없습니다.");
     return;
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO WeatherData (id, date, location, temperature, humidity, rainfall,
-      windSpeed, condition, forecast, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO Notification (id, userId, type, title, message, link, isRead, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < rows.length; i++) {
-    const w = rows[i];
+    const n = rows[i];
     stmt.run(
-      w.id,
-      formatDateTime(w.date),
-      w.location,
-      formatDecimal(w.temperature),
-      w.humidity,
-      formatDecimal(w.rainfall),
-      formatDecimal(w.windSpeed),
-      w.condition,
-      w.forecast,
-      formatDateTime(w.createdAt)
+      n.id,
+      n.userId,
+      n.type,
+      n.title,
+      n.message,
+      n.link,
+      formatBoolean(n.isRead),
+      formatDateTime(n.createdAt)
     );
-    log.progress(i + 1, rows.length, "WeatherData");
+    log.progress(i + 1, rows.length, "Notification");
   }
 
-  log.success(`날씨 ${rows.length}건 마이그레이션 완료`);
+  log.success(`알림 ${rows.length}건 마이그레이션 완료`);
 }
 
 async function main() {
@@ -710,9 +810,7 @@ async function main() {
   console.log("  PostgreSQL → SQLite 데이터 마이그레이션");
   console.log("==========================================\n");
 
-  log.info(
-    `PostgreSQL URL: ${POSTGRES_URL.replace(/:[^:@]+@/, ":****@")}`
-  );
+  log.info(`PostgreSQL URL: ${POSTGRES_URL.replace(/:[^:@]+@/, ":****@")}`);
   log.info(`SQLite 파일: ${SQLITE_PATH}`);
 
   let transactionStarted = false;
@@ -730,21 +828,22 @@ async function main() {
     // 순서대로 마이그레이션 (외래 키 의존성 고려)
     await migrateUsers();
     await migrateRetirementGoals();
-    await migrateAssets();
-    await migrateRealEstates();
-    await migrateFinancialAssets();
+    await migrateRealEstateAssets();
+    await migrateSetupCostCategories();
+    await migrateSetupCostSubcategories();
+    await migrateSetupCostItems();
     await migrateFundingSources();
-    await migrateSetupCategories();
-    await migrateSetupItems();
-    await migrateLandParcels();
-    await migratePlots();
-    await migrateCrops();
     await migrateFarmingLogs();
+    await migrateCrops();
     await migrateFarmActivities();
+    await migrateMaterialUsages();
+    await migrateFinancialTransactions();
     await migrateInventoryItems();
-    await migrateFarmFinanceRecords();
-    await migrateMarketPrices();
-    await migrateWeatherData();
+    await migrateInventoryTransactions();
+    await migratePriceWatchlists();
+    await migratePriceAlerts();
+    await migrateMarketPriceCache();
+    await migrateNotifications();
 
     sqlite.exec("COMMIT");
     transactionStarted = false;
