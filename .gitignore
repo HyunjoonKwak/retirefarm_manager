@@ -47,3 +47,6 @@ next-env.d.ts
 
 # SQLite database data
 data/
+
+# Local dev database
+data-dev/
