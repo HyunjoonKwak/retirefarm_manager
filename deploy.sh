@@ -234,7 +234,7 @@ logs() {
     docker-compose -f "$COMPOSE_FILE" logs -f --tail=100
 }
 
-# 백업
+# 백업 (SQLite - 호스트 디렉토리에서 직접 복사)
 backup() {
     log_info "데이터베이스 백업 중..."
 
@@ -242,16 +242,15 @@ backup() {
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.db"
-    CONTAINER_NAME="retirefarm-app"
+    DATA_DIR="${DATA_PATH:-$DEPLOY_DIR/data}"
+    SOURCE_DB="$DATA_DIR/$DB_FILE"
 
-    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        docker cp "${CONTAINER_NAME}:/app/prisma/data/${DB_FILE}" "$BACKUP_FILE" 2>/dev/null
+    # 호스트 디렉토리에서 직접 복사
+    if [ -f "$SOURCE_DB" ]; then
+        cp "$SOURCE_DB" "$BACKUP_FILE"
     else
-        log_warning "컨테이너가 실행 중이지 않습니다. 볼륨에서 직접 백업을 시도합니다."
-        docker run --rm \
-            -v retirefarm-manager_sqlite_data:/data \
-            -v "$BACKUP_DIR":/backup \
-            alpine cp "/data/${DB_FILE}" "/backup/backup_$TIMESTAMP.db" 2>/dev/null
+        log_error "데이터베이스 파일을 찾을 수 없습니다: $SOURCE_DB"
+        return 1
     fi
 
     if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
@@ -263,7 +262,7 @@ backup() {
     else
         rm -f "$BACKUP_FILE"
         log_error "백업 실패"
-        exit 1
+        return 1
     fi
 }
 
