@@ -1,0 +1,39 @@
+version: '3.8'
+
+# GHCR 이미지 기반 프로덕션 배포용 (NAS용)
+# 사용법: docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  app:
+    image: ghcr.io/${GHCR_USERNAME:-hyunjoonkwak}/retirefarm-manager:${IMAGE_TAG:-latest}
+    container_name: retirefarm-app
+    restart: unless-stopped
+    ports:
+      - "3024:3000"
+    environment:
+      - DATABASE_URL=file:/app/prisma/data/retirefarm.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXTAUTH_URL=${NEXTAUTH_URL}
+      - KAMIS_API_KEY=${KAMIS_API_KEY}
+      - KAMIS_API_ID=${KAMIS_API_ID}
+      - MY_PORTAL_API_URL=${MY_PORTAL_API_URL}
+      - NEXT_PUBLIC_MY_PORTAL_URL=${NEXT_PUBLIC_MY_PORTAL_URL}
+      - BACKUP_DIR=/backups
+    volumes:
+      - ${BACKUP_PATH:-./backups}:/backups
+      - sqlite_data:/app/prisma/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - retirefarm-network
+
+volumes:
+  sqlite_data:
+
+networks:
+  retirefarm-network:
+    driver: bridge

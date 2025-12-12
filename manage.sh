@@ -13,6 +13,11 @@ BACKUP_DIR="$APP_DIR/backups"
 LOG_FILE="$APP_DIR/logs/app.log"
 DB_FILE="retirefarm.db"
 
+# GHCR 설정
+GHCR_USERNAME="${GHCR_USERNAME:-hyunjoonkwak}"
+IMAGE_NAME="ghcr.io/$GHCR_USERNAME/retirefarm-manager"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+
 # 색상
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -305,6 +310,82 @@ cleanup() {
     log_success "정리가 완료되었습니다."
 }
 
+# ==================== GHCR 관련 함수 ====================
+
+# GHCR 로그인
+ghcr_login() {
+    log_info "GHCR 로그인 중..."
+    check_env
+
+    if [ -z "$GHCR_TOKEN" ]; then
+        log_error "GHCR_TOKEN이 설정되지 않았습니다."
+        log_info ".env 파일에 GHCR_TOKEN=<your-token>을 추가하세요."
+        exit 1
+    fi
+
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+    if [ $? -eq 0 ]; then
+        log_success "GHCR 로그인 성공"
+    else
+        log_error "GHCR 로그인 실패"
+        exit 1
+    fi
+}
+
+# Docker Buildx 빌더 설정
+setup_buildx() {
+    BUILDER_NAME="multiarch-builder"
+
+    # 빌더 존재 여부 확인
+    if ! docker buildx inspect "$BUILDER_NAME" &>/dev/null; then
+        log_info "멀티플랫폼 빌더 생성 중..."
+        docker buildx create --name "$BUILDER_NAME" --driver docker-container --bootstrap
+    fi
+
+    docker buildx use "$BUILDER_NAME"
+    log_success "Buildx 빌더 설정 완료: $BUILDER_NAME"
+}
+
+# GHCR 멀티플랫폼 빌드 및 푸시
+ghcr_build() {
+    log_info "GHCR 멀티플랫폼 이미지 빌드 중..."
+    check_env
+
+    # 빌더 설정
+    setup_buildx
+
+    # 태그 설정
+    local FULL_TAG="$IMAGE_NAME:$IMAGE_TAG"
+    local LATEST_TAG="$IMAGE_NAME:latest"
+
+    log_info "빌드 태그: $FULL_TAG"
+
+    # 멀티플랫폼 빌드 (linux/amd64 + linux/arm64)
+    docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        -t "$FULL_TAG" \
+        -t "$LATEST_TAG" \
+        --push \
+        "$APP_DIR"
+
+    if [ $? -eq 0 ]; then
+        log_success "빌드 및 푸시 완료"
+        log_info "이미지: $FULL_TAG"
+        log_info "이미지: $LATEST_TAG"
+    else
+        log_error "빌드 실패"
+        exit 1
+    fi
+}
+
+# GHCR 이미지 푸시 (로컬 빌드 후)
+ghcr_push() {
+    log_info "GHCR에 이미지 푸시 중..."
+    ghcr_login
+    ghcr_build
+}
+
 # 도움말
 show_help() {
     echo ""
@@ -314,13 +395,13 @@ show_help() {
     echo ""
     echo "사용법: $0 [명령어]"
     echo ""
-    echo "명령어:"
+    echo "로컬 개발 명령어:"
     echo "  start     - 애플리케이션 시작"
     echo "  stop      - 애플리케이션 중지"
     echo "  restart   - 애플리케이션 재시작"
     echo "  status    - 상태 확인"
     echo "  logs      - 로그 보기 (실시간)"
-    echo "  build     - Docker 이미지 빌드"
+    echo "  build     - Docker 이미지 빌드 (로컬)"
     echo "  update    - Git pull + 빌드 + 재시작"
     echo "  backup    - 데이터베이스 백업 (SQLite)"
     echo "  restore   - 데이터베이스 복원"
@@ -328,13 +409,21 @@ show_help() {
     echo "  shell     - 컨테이너 셸 접속"
     echo "  cleanup   - Docker 리소스 정리"
     echo "  health    - 애플리케이션 헬스체크"
-    echo "  help      - 이 도움말 표시"
+    echo ""
+    echo "GHCR 배포 명령어:"
+    echo "  ghcr:login  - GHCR에 로그인"
+    echo "  ghcr:push   - 멀티플랫폼 이미지 빌드 및 GHCR에 푸시"
+    echo ""
+    echo "환경 변수:"
+    echo "  GHCR_TOKEN     - GitHub Personal Access Token (GHCR용)"
+    echo "  GHCR_USERNAME  - GitHub Username (기본: hyunjoonkwak)"
+    echo "  IMAGE_TAG      - 이미지 태그 (기본: latest)"
     echo ""
     echo "예시:"
-    echo "  $0 start           # 시작"
-    echo "  $0 logs            # 로그 확인"
-    echo "  $0 update          # 업데이트"
-    echo "  $0 backup          # 백업"
+    echo "  $0 start                    # 로컬 시작"
+    echo "  $0 ghcr:push                # GHCR에 이미지 푸시"
+    echo "  IMAGE_TAG=v1.0.0 $0 ghcr:push  # 특정 태그로 푸시"
+    echo "  $0 backup                   # 백업"
     echo "  $0 restore backups/backup_20241210_120000.db.gz  # 복원"
     echo ""
 }
@@ -379,6 +468,12 @@ case "$1" in
         ;;
     healthcheck|health)
         healthcheck 10 3
+        ;;
+    ghcr:login)
+        ghcr_login
+        ;;
+    ghcr:push)
+        ghcr_push
         ;;
     help|--help|-h)
         show_help
