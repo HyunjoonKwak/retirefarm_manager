@@ -312,18 +312,40 @@ cleanup() {
 
 # ==================== GHCR 관련 함수 ====================
 
-# GHCR 로그인
-ghcr_login() {
-    log_info "GHCR 로그인 중..."
-    check_env
+# GHCR 로그인 상태 확인
+check_ghcr_login() {
+    if grep -q "ghcr.io" ~/.docker/config.json 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
 
-    if [ -z "$GHCR_TOKEN" ]; then
-        log_error "GHCR_TOKEN이 설정되지 않았습니다."
-        log_info ".env 파일에 GHCR_TOKEN=<your-token>을 추가하세요."
+# GHCR 로그인 (대화형)
+ghcr_login() {
+    # 이미 로그인 되어있으면 스킵
+    if check_ghcr_login; then
+        log_success "GHCR 이미 로그인됨 (스킵)"
+        return 0
+    fi
+
+    log_info "GHCR 로그인"
+    echo ""
+    echo -e "${YELLOW}GitHub Personal Access Token이 필요합니다.${NC}"
+    echo ""
+
+    read -p "GitHub 사용자명 [$GHCR_USERNAME]: " input_username
+    GHCR_USERNAME="${input_username:-$GHCR_USERNAME}"
+
+    echo -e "${YELLOW}토큰을 입력하세요 (write:packages 권한 필요):${NC}"
+    read -s token
+    echo ""
+
+    if [ -z "$token" ]; then
+        log_error "토큰이 입력되지 않았습니다."
         exit 1
     fi
 
-    echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+    echo "$token" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
     if [ $? -eq 0 ]; then
         log_success "GHCR 로그인 성공"

@@ -43,8 +43,23 @@ check_env() {
     source "$DEPLOY_DIR/.env"
 }
 
+# GHCR 로그인 상태 확인
+check_ghcr_login() {
+    # Docker config에서 ghcr.io 로그인 여부 확인
+    if grep -q "ghcr.io" ~/.docker/config.json 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
 # GHCR 로그인 (대화형)
 ghcr_login() {
+    # 이미 로그인 되어있으면 스킵
+    if check_ghcr_login; then
+        log_success "GHCR 이미 로그인됨 (스킵)"
+        return 0
+    fi
+
     log_info "GHCR 로그인"
     echo ""
     echo -e "${YELLOW}GitHub Personal Access Token이 필요합니다.${NC}"
