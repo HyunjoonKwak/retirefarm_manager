@@ -11,6 +11,7 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 DOCKER_COMPOSE_FILE="$APP_DIR/docker-compose.yml"
 BACKUP_DIR="$APP_DIR/backups"
 LOG_FILE="$APP_DIR/logs/app.log"
+DB_FILE="retirefarm.db"
 
 # 색상
 RED='\033[0;31m'
@@ -182,26 +183,38 @@ update() {
     log_success "업데이트가 완료되었습니다."
 }
 
-# 데이터베이스 백업
+# 데이터베이스 백업 (SQLite)
 backup() {
-    log_info "데이터베이스 백업 중..."
+    log_info "SQLite 데이터베이스 백업 중..."
 
     # 백업 디렉토리 생성
     mkdir -p "$BACKUP_DIR"
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.sql"
+    BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.db"
 
-    # PostgreSQL 백업 (Docker 컨테이너 이름에 따라 수정 필요)
-    docker-compose -f "$DOCKER_COMPOSE_FILE" exec -T db pg_dump -U postgres retirefarm > "$BACKUP_FILE" 2>/dev/null
+    # Docker 볼륨에서 SQLite 파일 복사
+    CONTAINER_NAME="retirefarm-app"
 
-    if [ $? -eq 0 ] && [ -s "$BACKUP_FILE" ]; then
+    # 컨테이너 실행 여부 확인
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        # 컨테이너가 실행 중인 경우
+        docker cp "${CONTAINER_NAME}:/app/prisma/data/${DB_FILE}" "$BACKUP_FILE" 2>/dev/null
+    else
+        # 컨테이너가 중지된 경우 볼륨에서 직접 복사 시도
+        log_warning "컨테이너가 실행 중이지 않습니다. 볼륨에서 직접 백업을 시도합니다."
+
+        # 임시 컨테이너로 볼륨 마운트하여 복사
+        docker run --rm -v retirefarm-manager_sqlite_data:/data -v "$BACKUP_DIR":/backup alpine cp "/data/${DB_FILE}" "/backup/backup_$TIMESTAMP.db" 2>/dev/null
+    fi
+
+    if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
         # 압축
         gzip "$BACKUP_FILE"
         log_success "백업 완료: ${BACKUP_FILE}.gz"
 
         # 오래된 백업 삭제 (30일 이상)
-        find "$BACKUP_DIR" -name "backup_*.sql.gz" -mtime +30 -delete
+        find "$BACKUP_DIR" -name "backup_*.db.gz" -mtime +30 -delete
         log_info "30일 이상 된 백업 파일을 삭제했습니다."
     else
         rm -f "$BACKUP_FILE"
@@ -210,14 +223,14 @@ backup() {
     fi
 }
 
-# 데이터베이스 복원
+# 데이터베이스 복원 (SQLite)
 restore() {
     if [ -z "$2" ]; then
         log_error "복원할 백업 파일을 지정해주세요."
-        echo "사용법: $0 restore <backup_file.sql.gz>"
+        echo "사용법: $0 restore <backup_file.db.gz>"
         echo ""
         echo "사용 가능한 백업 파일:"
-        ls -la "$BACKUP_DIR"/*.sql.gz 2>/dev/null || echo "백업 파일이 없습니다."
+        ls -la "$BACKUP_DIR"/*.db.gz 2>/dev/null || echo "백업 파일이 없습니다."
         exit 1
     fi
 
@@ -238,11 +251,25 @@ restore() {
 
     log_info "데이터베이스 복원 중..."
 
+    # 앱 중지
+    log_info "앱을 중지합니다..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" stop app 2>/dev/null || true
+
     # 압축 해제 후 복원
-    gunzip -c "$RESTORE_FILE" | docker-compose -f "$DOCKER_COMPOSE_FILE" exec -T db psql -U postgres retirefarm
+    TEMP_FILE="/tmp/restore_${DB_FILE}"
+    gunzip -c "$RESTORE_FILE" > "$TEMP_FILE"
+
+    # 볼륨에 복원
+    docker run --rm -v retirefarm-manager_sqlite_data:/data -v /tmp:/backup alpine cp "/backup/restore_${DB_FILE}" "/data/${DB_FILE}"
+
+    rm -f "$TEMP_FILE"
 
     if [ $? -eq 0 ]; then
         log_success "복원이 완료되었습니다."
+
+        # 앱 재시작
+        log_info "앱을 재시작합니다..."
+        docker-compose -f "$DOCKER_COMPOSE_FILE" start app
     else
         log_error "복원에 실패했습니다."
         exit 1
@@ -295,7 +322,7 @@ show_help() {
     echo "  logs      - 로그 보기 (실시간)"
     echo "  build     - Docker 이미지 빌드"
     echo "  update    - Git pull + 빌드 + 재시작"
-    echo "  backup    - 데이터베이스 백업"
+    echo "  backup    - 데이터베이스 백업 (SQLite)"
     echo "  restore   - 데이터베이스 복원"
     echo "  migrate   - Prisma 마이그레이션 실행"
     echo "  shell     - 컨테이너 셸 접속"
@@ -308,7 +335,7 @@ show_help() {
     echo "  $0 logs            # 로그 확인"
     echo "  $0 update          # 업데이트"
     echo "  $0 backup          # 백업"
-    echo "  $0 restore backup_20241210_120000.sql.gz  # 복원"
+    echo "  $0 restore backups/backup_20241210_120000.db.gz  # 복원"
     echo ""
 }
 

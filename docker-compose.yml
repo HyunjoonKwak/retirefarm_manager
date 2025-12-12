@@ -8,7 +8,7 @@ services:
     ports:
       - "3024:3000"
     environment:
-      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD}@db:5432/retirefarm
+      - DATABASE_URL=file:/app/prisma/data/retirefarm.db
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_URL=${NEXTAUTH_URL}
       - KAMIS_API_KEY=${KAMIS_API_KEY}
@@ -16,39 +16,20 @@ services:
       - MY_PORTAL_API_URL=${MY_PORTAL_API_URL}
       - NEXT_PUBLIC_MY_PORTAL_URL=${NEXT_PUBLIC_MY_PORTAL_URL}
       - BACKUP_DIR=/backups
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_NAME=retirefarm
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=${DB_PASSWORD}
     volumes:
       - ${BACKUP_PATH:-./backups}:/backups
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - retirefarm-network
-
-  db:
-    image: postgres:15-alpine
-    container_name: retirefarm-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_DB=retirefarm
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - sqlite_data:/app/prisma/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       - retirefarm-network
 
 volumes:
-  postgres_data:
+  sqlite_data:
 
 networks:
   retirefarm-network:

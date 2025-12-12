@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -41,11 +41,11 @@ model RetirementGoal {
   id                     String   @id @default(cuid())
   userId                 String   @unique
   targetDate             DateTime // 퇴직 목표일
-  estimatedRetirementPay Decimal? @db.Decimal(15, 0) // DC 퇴직금 예상액
-  estimatedSeverancePay  Decimal? @db.Decimal(15, 0) // 퇴직수당 예상액
-  initialLivingBuffer    Decimal? @db.Decimal(15, 0) // 초기 생활비 버퍼
+  estimatedRetirementPay Decimal? // DC 퇴직금 예상액
+  estimatedSeverancePay  Decimal? // 퇴직수당 예상액
+  initialLivingBuffer    Decimal? // 초기 생활비 버퍼
   bufferMonths           Int?     @default(6) // 버퍼 개월 수
-  monthlyLivingExpense   Decimal? @db.Decimal(12, 0) // 월 생활비 (버퍼 계산용)
+  monthlyLivingExpense   Decimal? // 월 생활비 (버퍼 계산용)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -57,16 +57,16 @@ model RealEstateAsset {
   id                String      @id @default(cuid())
   userId            String
   name              String
-  propertyType      PropertyType
+  propertyType      String      // PropertyType enum -> String
   address           String
-  area              Decimal     @db.Decimal(10, 2)
+  area              Decimal
   acquisitionDate   DateTime
-  acquisitionPrice  Decimal     @db.Decimal(15, 0)
-  currentPrice      Decimal     @db.Decimal(15, 0)
-  expectedSalePrice Decimal     @db.Decimal(15, 0)
-  mortgageBalance   Decimal     @db.Decimal(15, 0) @default(0)
-  monthlyRent       Decimal?    @db.Decimal(12, 0)
-  status            AssetStatus @default(HOLDING)
+  acquisitionPrice  Decimal
+  currentPrice      Decimal
+  expectedSalePrice Decimal
+  mortgageBalance   Decimal     @default(0)
+  monthlyRent       Decimal?
+  status            String      @default("HOLDING") // AssetStatus enum -> String
   plannedSaleDate   DateTime?
   notes             String?
   createdAt         DateTime    @default(now())
@@ -74,22 +74,6 @@ model RealEstateAsset {
 
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   fundingSource FundingSource?
-}
-
-enum PropertyType {
-  APARTMENT
-  OFFICETEL
-  LAND
-  COMMERCIAL
-  HOUSE
-  OTHER
-}
-
-enum AssetStatus {
-  HOLDING
-  LISTING
-  CONTRACT
-  SOLD
 }
 
 // ==================== 설립 비용 ====================
@@ -116,15 +100,15 @@ model SetupCostItem {
   subcategoryId    String
   name             String
   description      String?
-  estimatedCost    Decimal    @db.Decimal(15, 0)
-  actualCost       Decimal?   @db.Decimal(15, 0)
+  estimatedCost    Decimal
+  actualCost       Decimal?
   quantity         Int        @default(1)
   unit             String     @default("개")
   isGovernmentSubsidy Boolean @default(false)
-  subsidyAmount    Decimal?   @db.Decimal(15, 0)
-  subsidyRate      Decimal?   @db.Decimal(5, 2)
-  priority         Priority   @default(ESSENTIAL)
-  status           ItemStatus @default(PLANNED)
+  subsidyAmount    Decimal?
+  subsidyRate      Decimal?
+  priority         String     @default("ESSENTIAL") // Priority enum -> String
+  status           String     @default("PLANNED")   // ItemStatus enum -> String
   notes            String?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -133,30 +117,16 @@ model SetupCostItem {
   subcategory SetupCostSubcategory @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
 }
 
-enum Priority {
-  ESSENTIAL
-  IMPORTANT
-  OPTIONAL
-}
-
-enum ItemStatus {
-  PLANNED
-  QUOTED
-  ORDERED
-  DELIVERED
-  INSTALLED
-}
-
 // ==================== 자금 조달 ====================
 model FundingSource {
   id            String        @id @default(cuid())
   userId        String
-  type          FundingType
+  type          String        // FundingType enum -> String
   name          String
-  amount        Decimal       @db.Decimal(15, 0)
+  amount        Decimal
   expectedDate  DateTime
   linkedAssetId String?       @unique
-  status        FundingStatus @default(PLANNED)
+  status        String        @default("PLANNED") // FundingStatus enum -> String
   notes         String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -165,33 +135,17 @@ model FundingSource {
   linkedAsset RealEstateAsset? @relation(fields: [linkedAssetId], references: [id])
 }
 
-enum FundingType {
-  REAL_ESTATE_SALE
-  SAVINGS
-  LOAN
-  GOVERNMENT_SUBSIDY
-  RETIREMENT_PAY
-  SEVERANCE_PAY
-  OTHER
-}
-
-enum FundingStatus {
-  PLANNED
-  IN_PROGRESS
-  COMPLETED
-}
-
 // ==================== 영농일지 ====================
 model FarmingLog {
   id          String         @id @default(cuid())
   userId      String
-  date        DateTime       @db.Date
-  temperature Decimal?       @db.Decimal(4, 1)
+  date        DateTime
+  temperature Decimal?
   humidity    Int?
-  rainfall    Decimal?       @db.Decimal(5, 1)
+  rainfall    Decimal?
   weather     String?
   notes       String?
-  photos      String[]
+  photos      String?        // String[] -> String (JSON 형식으로 저장)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -204,11 +158,11 @@ model FarmingLog {
 model FarmActivity {
   id          String       @id @default(cuid())
   logId       String
-  type        ActivityType
+  type        String       // ActivityType enum -> String
   cropId      String?
   plotId      String?
   description String
-  quantity    Decimal?     @db.Decimal(10, 2)
+  quantity    Decimal?
   unit        String?
   duration    Int?
   workers     Int?
@@ -219,25 +173,11 @@ model FarmActivity {
   materialUsages MaterialUsage[]
 }
 
-enum ActivityType {
-  SEEDING
-  TRANSPLANTING
-  WATERING
-  FERTILIZING
-  PEST_CONTROL
-  PRUNING
-  HARVESTING
-  PACKING
-  SHIPPING
-  MAINTENANCE
-  OTHER
-}
-
 model MaterialUsage {
   id         String   @id @default(cuid())
   activityId String
   itemId     String
-  quantity   Decimal  @db.Decimal(10, 2)
+  quantity   Decimal
 
   activity FarmActivity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
   item     InventoryItem @relation(fields: [itemId], references: [id])
@@ -252,8 +192,8 @@ model Crop {
   plantingDate        DateTime
   expectedHarvestDate DateTime
   plotId              String?
-  status              CropStatus  @default(GROWING)
-  growthStage         GrowthStage @default(SEEDING)
+  status              String      @default("GROWING")  // CropStatus enum -> String
+  growthStage         String      @default("SEEDING")  // GrowthStage enum -> String
   notes               String?
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
@@ -263,32 +203,15 @@ model Crop {
   transactions FinancialTransaction[]
 }
 
-enum CropStatus {
-  GROWING
-  HARVESTING
-  COMPLETED
-  FAILED
-}
-
-enum GrowthStage {
-  SEEDING
-  GERMINATION
-  SEEDLING
-  VEGETATIVE
-  FLOWERING
-  FRUITING
-  HARVEST
-}
-
 // ==================== 재무 ====================
 model FinancialTransaction {
   id            String          @id @default(cuid())
   userId        String
   date          DateTime
-  type          TransactionType
+  type          String          // TransactionType enum -> String
   category      String
   subcategory   String?
-  amount        Decimal         @db.Decimal(12, 0)
+  amount        Decimal
   description   String
   relatedCropId String?
   paymentMethod String?
@@ -299,22 +222,17 @@ model FinancialTransaction {
   crop Crop? @relation(fields: [relatedCropId], references: [id])
 }
 
-enum TransactionType {
-  INCOME
-  EXPENSE
-}
-
 // ==================== 재고 ====================
 model InventoryItem {
   id               String            @id @default(cuid())
   userId           String
   name             String
-  category         InventoryCategory
-  currentQuantity  Decimal           @db.Decimal(10, 2)
+  category         String            // InventoryCategory enum -> String
+  currentQuantity  Decimal
   unit             String
-  minimumQuantity  Decimal           @db.Decimal(10, 2) @default(0)
+  minimumQuantity  Decimal           @default(0)
   lastPurchaseDate DateTime?
-  lastPurchasePrice Decimal?         @db.Decimal(12, 0)
+  lastPurchasePrice Decimal?
   location         String?
   expirationDate   DateTime?
   createdAt        DateTime          @default(now())
@@ -325,20 +243,11 @@ model InventoryItem {
   materialUsages MaterialUsage[]
 }
 
-enum InventoryCategory {
-  SEED
-  FERTILIZER
-  PESTICIDE
-  TOOL
-  PACKAGING
-  OTHER
-}
-
 model InventoryTransaction {
   id       String   @id @default(cuid())
   itemId   String
   type     String   // "IN" | "OUT"
-  quantity Decimal  @db.Decimal(10, 2)
+  quantity Decimal
   date     DateTime
   reason   String
 
@@ -363,7 +272,7 @@ model PriceAlert {
   itemCode    String
   itemName    String
   condition   String  // "ABOVE" | "BELOW"
-  targetPrice Decimal @db.Decimal(12, 0)
+  targetPrice Decimal
   isActive    Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -375,11 +284,11 @@ model MarketPriceCache {
   itemName      String
   marketCode    String
   marketName    String
-  date          DateTime @db.Date
-  avgPrice      Decimal  @db.Decimal(12, 0)
-  maxPrice      Decimal  @db.Decimal(12, 0)
-  minPrice      Decimal  @db.Decimal(12, 0)
-  tradingVolume Decimal  @db.Decimal(15, 2)
+  date          DateTime
+  avgPrice      Decimal
+  maxPrice      Decimal
+  minPrice      Decimal
+  tradingVolume Decimal
   unit          String
   fetchedAt     DateTime @default(now())
 
@@ -391,7 +300,7 @@ model MarketPriceCache {
 model Notification {
   id        String           @id @default(cuid())
   userId    String
-  type      NotificationType
+  type      String           // NotificationType enum -> String
   title     String
   message   String
   link      String?
@@ -402,15 +311,4 @@ model Notification {
 
   @@index([userId, isRead])
   @@index([userId, createdAt])
-}
-
-enum NotificationType {
-  INFO
-  WARNING
-  SUCCESS
-  ERROR
-  REMINDER
-  PRICE_ALERT
-  INVENTORY_ALERT
-  HARVEST_REMINDER
 }

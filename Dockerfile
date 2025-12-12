@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# 데이터 디렉토리 생성
+RUN mkdir -p /app/prisma/data
+
 RUN npx prisma generate
 RUN npm run build
 
@@ -22,11 +26,14 @@ WORKDIR /app
 
 ENV NODE_ENV production
 
-# OpenSSL for Prisma + PostgreSQL client for backup
-RUN apt-get update && apt-get install -y openssl postgresql-client && rm -rf /var/lib/apt/lists/*
+# OpenSSL for Prisma (SQLite는 별도 클라이언트 불필요)
+RUN apt-get update && apt-get install -y openssl wget && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+
+# 데이터 디렉토리 생성 및 권한 설정
+RUN mkdir -p /app/prisma/data && chown nextjs:nodejs /app/prisma/data
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
