@@ -148,17 +148,30 @@ healthcheck() {
 
 # 로그 보기
 logs() {
-    log_info "$APP_NAME 로그:"
-    docker-compose -f "$DOCKER_COMPOSE_FILE" logs -f --tail=100
+    local service=$1
+
+    if [ -z "$service" ]; then
+        log_info "$APP_NAME 전체 로그:"
+        docker-compose -f "$DOCKER_COMPOSE_FILE" logs -f --tail=100
+    else
+        log_info "$APP_NAME $service 로그:"
+        docker-compose -f "$DOCKER_COMPOSE_FILE" logs -f --tail=100 "$service"
+    fi
 }
 
 # 빌드
 build() {
+    local no_cache=$1
     log_info "$APP_NAME 빌드 중..."
     check_docker_compose
     check_env
 
-    docker-compose -f "$DOCKER_COMPOSE_FILE" build --no-cache
+    if [ "$no_cache" = "no-cache" ]; then
+        log_warning "캐시 없이 빌드합니다..."
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build --no-cache
+    else
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build
+    fi
 
     if [ $? -eq 0 ]; then
         log_success "빌드가 완료되었습니다."
@@ -182,10 +195,76 @@ update() {
     fi
 
     # 빌드 및 재시작
-    build
+    build "no-cache"
     restart
 
     log_success "업데이트가 완료되었습니다."
+}
+
+# 로컬 개발용 업데이트 (빌드 + 재시작, git pull 없음)
+dev_update() {
+    local no_cache=$1
+    log_info "$APP_NAME 로컬 개발 업데이트 중..."
+
+    # 빌드
+    build "$no_cache"
+
+    # 재시작
+    restart
+
+    log_success "로컬 개발 업데이트가 완료되었습니다."
+}
+
+# 배포 (처음 배포 또는 전체 재배포)
+deploy() {
+    local no_cache=$1
+    log_info "$APP_NAME 배포 중..."
+
+    check_docker_compose
+    check_env
+
+    # 필수 디렉토리 생성
+    mkdir -p "$BACKUP_DIR"
+
+    # 기존 컨테이너 중지
+    log_info "기존 컨테이너 중지 중..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down || true
+
+    # 빌드
+    log_info "Docker 이미지 빌드 중..."
+    if [ "$no_cache" = "no-cache" ]; then
+        log_warning "캐시 없이 빌드합니다..."
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build --no-cache
+    else
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build
+    fi
+
+    # 시작
+    log_info "컨테이너 실행 중..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
+
+    if [ $? -eq 0 ]; then
+        log_success "배포 완료!"
+        echo ""
+        status
+        healthcheck 15 3
+    else
+        log_error "배포 실패"
+        exit 1
+    fi
+}
+
+# 컨테이너 및 볼륨 정리
+clean() {
+    log_info "컨테이너 및 이미지 정리 중..."
+
+    log_warning "컨테이너 삭제 중..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down -v || true
+
+    log_warning "사용하지 않는 이미지 삭제 중..."
+    docker image prune -f
+
+    log_success "정리 완료!"
 }
 
 # 데이터베이스 백업 (SQLite)
@@ -403,9 +482,18 @@ ghcr_build() {
 
 # GHCR 이미지 푸시 (로컬 빌드 후)
 ghcr_push() {
+    local tag="${1:-$IMAGE_TAG}"
+    IMAGE_TAG="$tag"
+
     log_info "GHCR에 이미지 푸시 중..."
+    log_info "태그: $IMAGE_TAG"
+
     ghcr_login
     ghcr_build
+
+    echo ""
+    log_info "NAS에서 배포하려면:"
+    echo "  IMAGE_TAG=${IMAGE_TAG} ./deploy.sh update"
 }
 
 # 도움말
@@ -417,41 +505,54 @@ show_help() {
     echo ""
     echo "사용법: $0 [명령어]"
     echo ""
-    echo "로컬 개발 명령어:"
-    echo "  start     - 애플리케이션 시작"
-    echo "  stop      - 애플리케이션 중지"
-    echo "  restart   - 애플리케이션 재시작"
-    echo "  status    - 상태 확인"
-    echo "  logs      - 로그 보기 (실시간)"
-    echo "  build     - Docker 이미지 빌드 (로컬)"
-    echo "  update    - Git pull + 빌드 + 재시작"
-    echo "  backup    - 데이터베이스 백업 (SQLite)"
-    echo "  restore   - 데이터베이스 복원"
-    echo "  migrate   - Prisma 마이그레이션 실행"
-    echo "  shell     - 컨테이너 셸 접속"
-    echo "  cleanup   - Docker 리소스 정리"
-    echo "  health    - 애플리케이션 헬스체크"
+    echo -e "${BLUE}=== 로컬 개발 (Docker) ===${NC}"
+    echo "  deploy [no-cache]     - 전체 배포 (빌드 + 실행)"
+    echo "  start                 - 애플리케이션 시작"
+    echo "  stop                  - 애플리케이션 중지"
+    echo "  restart               - 애플리케이션 재시작"
+    echo "  status                - 상태 확인"
+    echo "  logs [service]        - 로그 보기 (실시간)"
+    echo "  build [no-cache]      - Docker 이미지 빌드"
+    echo "  dev:update [no-cache] - 빌드 + 재시작 (로컬 수정 테스트용)"
+    echo "  update                - Git pull + 빌드 + 재시작"
+    echo "  health                - 애플리케이션 헬스체크"
     echo ""
-    echo "GHCR 배포 명령어:"
-    echo "  ghcr:login  - GHCR에 로그인"
-    echo "  ghcr:push   - 멀티플랫폼 이미지 빌드 및 GHCR에 푸시"
+    echo -e "${BLUE}=== 데이터베이스 ===${NC}"
+    echo "  backup                - 데이터베이스 백업 (SQLite)"
+    echo "  restore <file>        - 데이터베이스 복원"
+    echo "  migrate               - Prisma 마이그레이션 실행"
     echo ""
-    echo "환경 변수:"
-    echo "  GHCR_TOKEN     - GitHub Personal Access Token (GHCR용)"
+    echo -e "${BLUE}=== 유지보수 ===${NC}"
+    echo "  shell                 - 컨테이너 셸 접속"
+    echo "  cleanup               - Docker 리소스 정리 (볼륨 유지)"
+    echo "  clean                 - 컨테이너 및 볼륨 정리"
+    echo ""
+    echo -e "${BLUE}=== GHCR 배포 (로컬 → NAS) ===${NC}"
+    echo "  ghcr:login            - GHCR에 로그인"
+    echo "  ghcr:push [tag]       - 멀티플랫폼 이미지 빌드 및 GHCR에 푸시"
+    echo ""
+    echo -e "${YELLOW}환경 변수:${NC}"
     echo "  GHCR_USERNAME  - GitHub Username (기본: hyunjoonkwak)"
     echo "  IMAGE_TAG      - 이미지 태그 (기본: latest)"
     echo ""
-    echo "예시:"
-    echo "  $0 start                    # 로컬 시작"
-    echo "  $0 ghcr:push                # GHCR에 이미지 푸시"
-    echo "  IMAGE_TAG=v1.0.0 $0 ghcr:push  # 특정 태그로 푸시"
-    echo "  $0 backup                   # 백업"
-    echo "  $0 restore backups/backup_20241210_120000.db.gz  # 복원"
+    echo -e "${YELLOW}예시 (로컬 개발):${NC}"
+    echo "  $0 deploy               # 처음 배포"
+    echo "  $0 dev:update           # 로컬 수정 후 빌드 + 재시작"
+    echo "  $0 dev:update no-cache  # 캐시 없이 빌드 + 재시작"
+    echo "  $0 logs                 # 전체 로그 확인"
+    echo "  $0 logs app             # app 서비스 로그만 확인"
+    echo ""
+    echo -e "${YELLOW}예시 (GHCR 배포):${NC}"
+    echo "  $0 ghcr:push            # GHCR에 이미지 푸시 (latest)"
+    echo "  $0 ghcr:push v1.0.0     # 특정 태그로 푸시"
     echo ""
 }
 
 # 메인
 case "$1" in
+    deploy)
+        deploy "$2"
+        ;;
     start)
         start
         ;;
@@ -465,10 +566,13 @@ case "$1" in
         status
         ;;
     logs)
-        logs
+        logs "$2"
         ;;
     build)
-        build
+        build "$2"
+        ;;
+    dev:update)
+        dev_update "$2"
         ;;
     update)
         update
@@ -488,6 +592,9 @@ case "$1" in
     cleanup)
         cleanup
         ;;
+    clean)
+        clean
+        ;;
     healthcheck|health)
         healthcheck 10 3
         ;;
@@ -495,7 +602,7 @@ case "$1" in
         ghcr_login
         ;;
     ghcr:push)
-        ghcr_push
+        ghcr_push "$2"
         ;;
     help|--help|-h)
         show_help
