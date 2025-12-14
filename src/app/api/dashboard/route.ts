@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { externalPortfolioClient } from "@/lib/api/external-portfolio";
 
 // GET: 대시보드 통합 데이터
 export async function GET() {
@@ -17,10 +18,13 @@ export async function GET() {
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const thisMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
+    // 사용자 이메일 가져오기
+    const userEmail = session.user.email;
+
     // 병렬로 모든 데이터 조회
     const [
       retirementGoal,
-      assets,
+      externalAssetSummary,
       recentLogs,
       monthlyFinance,
       watchlist,
@@ -31,10 +35,10 @@ export async function GET() {
       prisma.retirementGoal.findUnique({
         where: { userId },
       }),
-      // 부동산 자산 현황
-      prisma.realEstateAsset.findMany({
-        where: { userId },
-      }),
+      // 외부 포트폴리오 자산 현황 (assets.specialrisk.me)
+      userEmail
+        ? externalPortfolioClient.getSummary(userEmail).catch(() => null)
+        : Promise.resolve(null),
       // 최근 영농일지 (7일)
       prisma.farmingLog.findMany({
         where: {
@@ -137,30 +141,29 @@ export async function GET() {
       };
     }
 
-    // 자산 현황 계산
-    let totalAssetValue = BigInt(0);
-    let totalMortgage = BigInt(0);
-    let holdingCount = 0;
-    let soldCount = 0;
-
-    for (const asset of assets) {
-      if (asset.status === "SOLD") {
-        soldCount++;
-      } else {
-        holdingCount++;
-        totalAssetValue += BigInt(asset.currentPrice.toString());
-        totalMortgage += BigInt(asset.mortgageBalance.toString());
-      }
+    // 자산 현황 계산 (외부 API에서 가져온 데이터 사용)
+    let assetData;
+    if (externalAssetSummary) {
+      const totalValue = BigInt(externalAssetSummary.totalValue || "0");
+      const totalLoan = BigInt(externalAssetSummary.totalLoanAmount || "0");
+      assetData = {
+        totalValue: externalAssetSummary.totalValue,
+        totalMortgage: externalAssetSummary.totalLoanAmount,
+        netValue: (totalValue - totalLoan).toString(),
+        holdingCount: externalAssetSummary.totalAssets,
+        soldCount: 0, // 외부 API의 getSummary는 보유 자산만 조회하므로 별도 처리 필요시 추가
+        totalCount: externalAssetSummary.totalAssets,
+      };
+    } else {
+      assetData = {
+        totalValue: "0",
+        totalMortgage: "0",
+        netValue: "0",
+        holdingCount: 0,
+        soldCount: 0,
+        totalCount: 0,
+      };
     }
-
-    const assetData = {
-      totalValue: totalAssetValue.toString(),
-      totalMortgage: totalMortgage.toString(),
-      netValue: (totalAssetValue - totalMortgage).toString(),
-      holdingCount,
-      soldCount,
-      totalCount: assets.length,
-    };
 
     // 재무 현황 계산
     let monthlyIncome = BigInt(0);

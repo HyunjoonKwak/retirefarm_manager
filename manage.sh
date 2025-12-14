@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# RetireFarm Manager - 나스 배포 관리 스크립트
-# 사용법: ./manage.sh [start|stop|restart|status|logs|build|update|backup]
+# RetireFarm Manager - 로컬 개발 및 GHCR 배포 관리 스크립트
+# 사용법: ./manage.sh [명령어]
 
 set -e
 
@@ -10,11 +10,11 @@ APP_NAME="retirefarm-manager"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 DOCKER_COMPOSE_FILE="$APP_DIR/docker-compose.yml"
 BACKUP_DIR="$APP_DIR/backups"
-LOG_FILE="$APP_DIR/logs/app.log"
 DB_FILE="retirefarm.db"
 
 # GHCR 설정
 GHCR_USERNAME="${GHCR_USERNAME:-hyunjoonkwak}"
+GHCR_USERNAME=$(echo "$GHCR_USERNAME" | tr '[:upper:]' '[:lower:]')
 IMAGE_NAME="ghcr.io/$GHCR_USERNAME/retirefarm-manager"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
@@ -62,6 +62,49 @@ check_env() {
             exit 1
         fi
     fi
+    source "$APP_DIR/.env"
+}
+
+# ==================== 로컬 개발 (Docker) ====================
+
+# 배포 (처음 배포 또는 전체 재배포)
+deploy() {
+    local no_cache=$1
+    log_info "$APP_NAME 배포 중..."
+
+    check_docker_compose
+    check_env
+
+    # 필수 디렉토리 생성
+    local data_dir="${DATA_PATH:-$APP_DIR/data}"
+    mkdir -p "$BACKUP_DIR" "$data_dir"
+
+    # 기존 컨테이너 중지
+    log_info "기존 컨테이너 중지 중..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down || true
+
+    # 빌드
+    log_info "Docker 이미지 빌드 중..."
+    if [ "$no_cache" = "no-cache" ]; then
+        log_warning "캐시 없이 빌드합니다..."
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build --no-cache
+    else
+        docker-compose -f "$DOCKER_COMPOSE_FILE" build
+    fi
+
+    # 시작
+    log_info "컨테이너 실행 중..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
+
+    if [ $? -eq 0 ]; then
+        log_success "배포 완료!"
+        echo ""
+        status
+        healthcheck 15 3
+    else
+        log_error "배포 실패"
+        exit 1
+    fi
 }
 
 # 시작
@@ -70,12 +113,15 @@ start() {
     check_docker_compose
     check_env
 
+    local data_dir="${DATA_PATH:-$APP_DIR/data}"
+    mkdir -p "$BACKUP_DIR" "$data_dir"
+
     docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
 
     if [ $? -eq 0 ]; then
         log_success "$APP_NAME이(가) 시작되었습니다."
         status
-        healthcheck 15 3  # 최대 15회, 3초 간격 (최대 45초 대기)
+        healthcheck 15 3
     else
         log_error "시작에 실패했습니다."
         exit 1
@@ -181,77 +227,15 @@ build() {
     fi
 }
 
-# 업데이트 (git pull + rebuild + restart)
-update() {
-    log_info "$APP_NAME 업데이트 중..."
-
-    # Git 업데이트
-    log_info "Git에서 최신 코드 가져오는 중..."
-    git -C "$APP_DIR" pull origin main
-
-    if [ $? -ne 0 ]; then
-        log_error "Git pull에 실패했습니다."
-        exit 1
-    fi
-
-    # 빌드 및 재시작
-    build "no-cache"
-    restart
-
-    log_success "업데이트가 완료되었습니다."
-}
-
-# 로컬 개발용 업데이트 (빌드 + 재시작, git pull 없음)
+# 로컬 개발용 업데이트 (빌드 + 재시작)
 dev_update() {
     local no_cache=$1
     log_info "$APP_NAME 로컬 개발 업데이트 중..."
 
-    # 빌드
     build "$no_cache"
-
-    # 재시작
     restart
 
     log_success "로컬 개발 업데이트가 완료되었습니다."
-}
-
-# 배포 (처음 배포 또는 전체 재배포)
-deploy() {
-    local no_cache=$1
-    log_info "$APP_NAME 배포 중..."
-
-    check_docker_compose
-    check_env
-
-    # 필수 디렉토리 생성
-    mkdir -p "$BACKUP_DIR"
-
-    # 기존 컨테이너 중지
-    log_info "기존 컨테이너 중지 중..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" down || true
-
-    # 빌드
-    log_info "Docker 이미지 빌드 중..."
-    if [ "$no_cache" = "no-cache" ]; then
-        log_warning "캐시 없이 빌드합니다..."
-        docker-compose -f "$DOCKER_COMPOSE_FILE" build --no-cache
-    else
-        docker-compose -f "$DOCKER_COMPOSE_FILE" build
-    fi
-
-    # 시작
-    log_info "컨테이너 실행 중..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
-
-    if [ $? -eq 0 ]; then
-        log_success "배포 완료!"
-        echo ""
-        status
-        healthcheck 15 3
-    else
-        log_error "배포 실패"
-        exit 1
-    fi
 }
 
 # 컨테이너 및 볼륨 정리
@@ -267,43 +251,55 @@ clean() {
     log_success "정리 완료!"
 }
 
-# 데이터베이스 백업 (SQLite)
+# 클린업 (미사용 이미지/볼륨 정리, 볼륨 유지)
+cleanup() {
+    log_info "Docker 리소스 정리 중..."
+
+    docker system prune -f
+    docker volume prune -f
+
+    log_success "정리가 완료되었습니다."
+}
+
+# 셸 접속
+shell() {
+    log_info "컨테이너 셸에 접속합니다..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" exec app /bin/sh
+}
+
+# ==================== 데이터베이스 ====================
+
+# 데이터베이스 백업 (SQLite - 호스트 디렉토리에서 직접 복사)
 backup() {
     log_info "SQLite 데이터베이스 백업 중..."
+    check_env
 
-    # 백업 디렉토리 생성
     mkdir -p "$BACKUP_DIR"
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
     BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.db"
+    DATA_DIR="${DATA_PATH:-$APP_DIR/data}"
+    SOURCE_DB="$DATA_DIR/$DB_FILE"
 
-    # Docker 볼륨에서 SQLite 파일 복사
-    CONTAINER_NAME="retirefarm-app"
-
-    # 컨테이너 실행 여부 확인
-    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        # 컨테이너가 실행 중인 경우
-        docker cp "${CONTAINER_NAME}:/app/prisma/data/${DB_FILE}" "$BACKUP_FILE" 2>/dev/null
+    # 호스트 디렉토리에서 직접 복사
+    if [ -f "$SOURCE_DB" ]; then
+        cp "$SOURCE_DB" "$BACKUP_FILE"
     else
-        # 컨테이너가 중지된 경우 볼륨에서 직접 복사 시도
-        log_warning "컨테이너가 실행 중이지 않습니다. 볼륨에서 직접 백업을 시도합니다."
-
-        # 임시 컨테이너로 볼륨 마운트하여 복사
-        docker run --rm -v retirefarm-manager_sqlite_data:/data -v "$BACKUP_DIR":/backup alpine cp "/data/${DB_FILE}" "/backup/backup_$TIMESTAMP.db" 2>/dev/null
+        log_error "데이터베이스 파일을 찾을 수 없습니다: $SOURCE_DB"
+        return 1
     fi
 
     if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
-        # 압축
         gzip "$BACKUP_FILE"
         log_success "백업 완료: ${BACKUP_FILE}.gz"
 
-        # 오래된 백업 삭제 (30일 이상)
-        find "$BACKUP_DIR" -name "backup_*.db.gz" -mtime +30 -delete
+        # 30일 이상 된 백업 삭제
+        find "$BACKUP_DIR" -name "backup_*.db.gz" -mtime +30 -delete 2>/dev/null || true
         log_info "30일 이상 된 백업 파일을 삭제했습니다."
     else
         rm -f "$BACKUP_FILE"
         log_error "백업에 실패했습니다."
-        exit 1
+        return 1
     fi
 }
 
@@ -333,6 +329,7 @@ restore() {
         exit 0
     fi
 
+    check_env
     log_info "데이터베이스 복원 중..."
 
     # 앱 중지
@@ -340,12 +337,12 @@ restore() {
     docker-compose -f "$DOCKER_COMPOSE_FILE" stop app 2>/dev/null || true
 
     # 압축 해제 후 복원
+    DATA_DIR="${DATA_PATH:-$APP_DIR/data}"
     TEMP_FILE="/tmp/restore_${DB_FILE}"
     gunzip -c "$RESTORE_FILE" > "$TEMP_FILE"
 
-    # 볼륨에 복원
-    docker run --rm -v retirefarm-manager_sqlite_data:/data -v /tmp:/backup alpine cp "/backup/restore_${DB_FILE}" "/data/${DB_FILE}"
-
+    # 호스트 디렉토리에 복원
+    cp "$TEMP_FILE" "$DATA_DIR/$DB_FILE"
     rm -f "$TEMP_FILE"
 
     if [ $? -eq 0 ]; then
@@ -371,22 +368,6 @@ migrate() {
         log_error "마이그레이션에 실패했습니다."
         exit 1
     fi
-}
-
-# 셸 접속
-shell() {
-    log_info "컨테이너 셸에 접속합니다..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" exec app /bin/sh
-}
-
-# 클린업 (미사용 이미지/볼륨 정리)
-cleanup() {
-    log_info "Docker 리소스 정리 중..."
-
-    docker system prune -f
-    docker volume prune -f
-
-    log_success "정리가 완료되었습니다."
 }
 
 # ==================== GHCR 관련 함수 ====================
@@ -450,21 +431,26 @@ setup_buildx() {
 
 # GHCR 멀티플랫폼 빌드 및 푸시
 ghcr_build() {
+    local tag="${1:-$IMAGE_TAG}"
+    local platforms="linux/amd64,linux/arm64"
+
     log_info "GHCR 멀티플랫폼 이미지 빌드 중..."
+    log_info "태그: $tag"
+    log_info "플랫폼: $platforms"
     check_env
 
     # 빌더 설정
     setup_buildx
 
     # 태그 설정
-    local FULL_TAG="$IMAGE_NAME:$IMAGE_TAG"
+    local FULL_TAG="$IMAGE_NAME:$tag"
     local LATEST_TAG="$IMAGE_NAME:latest"
 
     log_info "빌드 태그: $FULL_TAG"
 
     # 멀티플랫폼 빌드 (linux/amd64 + linux/arm64)
     docker buildx build \
-        --platform linux/amd64,linux/arm64 \
+        --platform "$platforms" \
         -t "$FULL_TAG" \
         -t "$LATEST_TAG" \
         --push \
@@ -483,20 +469,20 @@ ghcr_build() {
 # GHCR 이미지 푸시 (로컬 빌드 후)
 ghcr_push() {
     local tag="${1:-$IMAGE_TAG}"
-    IMAGE_TAG="$tag"
 
     log_info "GHCR에 이미지 푸시 중..."
-    log_info "태그: $IMAGE_TAG"
+    log_info "태그: $tag"
 
     ghcr_login
-    ghcr_build
+    ghcr_build "$tag"
 
     echo ""
     log_info "NAS에서 배포하려면:"
-    echo "  IMAGE_TAG=${IMAGE_TAG} ./deploy.sh update"
+    echo "  IMAGE_TAG=${tag} ./deploy.sh update"
 }
 
-# 도움말
+# ==================== 도움말 ====================
+
 show_help() {
     echo ""
     echo "=========================================="
@@ -514,7 +500,6 @@ show_help() {
     echo "  logs [service]        - 로그 보기 (실시간)"
     echo "  build [no-cache]      - Docker 이미지 빌드"
     echo "  dev:update [no-cache] - 빌드 + 재시작 (로컬 수정 테스트용)"
-    echo "  update                - Git pull + 빌드 + 재시작"
     echo "  health                - 애플리케이션 헬스체크"
     echo ""
     echo -e "${BLUE}=== 데이터베이스 ===${NC}"
@@ -534,6 +519,7 @@ show_help() {
     echo -e "${YELLOW}환경 변수:${NC}"
     echo "  GHCR_USERNAME  - GitHub Username (기본: hyunjoonkwak)"
     echo "  IMAGE_TAG      - 이미지 태그 (기본: latest)"
+    echo "  DATA_PATH      - 데이터 디렉토리 경로 (기본: ./data)"
     echo ""
     echo -e "${YELLOW}예시 (로컬 개발):${NC}"
     echo "  $0 deploy               # 처음 배포"
@@ -548,8 +534,10 @@ show_help() {
     echo ""
 }
 
-# 메인
+# ==================== 메인 ====================
+
 case "$1" in
+    # 로컬 개발 (Docker)
     deploy)
         deploy "$2"
         ;;
@@ -574,9 +562,10 @@ case "$1" in
     dev:update)
         dev_update "$2"
         ;;
-    update)
-        update
+    healthcheck|health)
+        healthcheck 10 3
         ;;
+    # 데이터베이스
     backup)
         backup
         ;;
@@ -586,6 +575,7 @@ case "$1" in
     migrate)
         migrate
         ;;
+    # 유지보수
     shell)
         shell
         ;;
@@ -595,9 +585,7 @@ case "$1" in
     clean)
         clean
         ;;
-    healthcheck|health)
-        healthcheck 10 3
-        ;;
+    # GHCR
     ghcr:login)
         ghcr_login
         ;;

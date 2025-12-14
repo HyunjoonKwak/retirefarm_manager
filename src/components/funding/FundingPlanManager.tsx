@@ -47,6 +47,7 @@ import {
   AlertCircle,
   Briefcase,
   HandCoins,
+  Pencil,
 } from "lucide-react";
 import { formatLargeNumber, formatPercent, formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
@@ -141,6 +142,17 @@ export function FundingPlanManager() {
     expectedDate: "",
     notes: "",
     selectedAssetId: "", // 선택된 부동산 자산 ID
+  });
+
+  // 수정 다이얼로그
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingSource, setEditingSource] = useState<FundingSource | null>(null);
+  const [editSource, setEditSource] = useState({
+    type: "SAVINGS" as FundingSource["type"],
+    name: "",
+    amount: "",
+    expectedDate: "",
+    notes: "",
   });
 
   // 금액을 한국어로 변환하는 함수
@@ -274,6 +286,57 @@ export function FundingPlanManager() {
       }
     } catch {
       toast.error("등록 중 오류가 발생했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleEditStart(source: FundingSource) {
+    setEditingSource(source);
+    setEditSource({
+      type: source.type,
+      name: source.name,
+      amount: source.amount,
+      expectedDate: source.expectedDate.split("T")[0],
+      notes: source.notes || "",
+    });
+    setIsEditDialogOpen(true);
+  }
+
+  async function handleEditSource() {
+    if (!editingSource) return;
+    if (!editSource.name || !editSource.amount || !editSource.expectedDate) {
+      toast.error("필수 항목을 입력해주세요.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/funding/${editingSource.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: editSource.type,
+          name: editSource.name,
+          amount: Number(editSource.amount),
+          expectedDate: editSource.expectedDate,
+          notes: editSource.notes,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        toast.error(result.error || "수정에 실패했습니다.");
+      } else {
+        toast.success("자금원이 수정되었습니다.");
+        setIsEditDialogOpen(false);
+        setEditingSource(null);
+        fetchData();
+      }
+    } catch {
+      toast.error("수정 중 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
     }
@@ -615,14 +678,24 @@ export function FundingPlanManager() {
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-red-500 hover:text-red-700"
-                          onClick={() => handleDeleteSource(source.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            onClick={() => handleEditStart(source)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-500 hover:text-red-700"
+                            onClick={() => handleDeleteSource(source.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -639,6 +712,85 @@ export function FundingPlanManager() {
           )}
         </CardContent>
       </Card>
+
+      {/* 수정 다이얼로그 */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>자금원 수정</DialogTitle>
+            <DialogDescription>
+              자금 조달 계획을 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>유형</Label>
+              <Select
+                value={editSource.type}
+                onValueChange={(v) => setEditSource((p) => ({ ...p, type: v as FundingSource["type"] }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(FUNDING_TYPE_CONFIG).map(([key, config]) => (
+                    <SelectItem key={key} value={key}>
+                      {config.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>이름</Label>
+              <Input
+                placeholder="예: 강남 아파트 매각"
+                value={editSource.name}
+                onChange={(e) => setEditSource((p) => ({ ...p, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>금액 (원)</Label>
+              <Input
+                type="number"
+                placeholder="500000000"
+                value={editSource.amount}
+                onChange={(e) => setEditSource((p) => ({ ...p, amount: e.target.value }))}
+              />
+              {editSource.amount && (
+                <p className="text-xs text-blue-600 font-medium">
+                  {formatNumberWithCommas(editSource.amount)}원 = {formatKoreanCurrency(editSource.amount) || "0원"}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>예상 조달일</Label>
+              <Input
+                type="date"
+                value={editSource.expectedDate}
+                onChange={(e) => setEditSource((p) => ({ ...p, expectedDate: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>메모</Label>
+              <Input
+                placeholder="추가 정보"
+                value={editSource.notes}
+                onChange={(e) => setEditSource((p) => ({ ...p, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              취소
+            </Button>
+            <Button onClick={handleEditSource} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              수정
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 월별 현금흐름 */}
       {monthlyFlow.length > 0 && monthlyFlow.some((m) => Number(m.amount) > 0) && (

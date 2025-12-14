@@ -32,6 +32,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 import { formatLargeNumber, formatPercent } from "@/lib/utils/format";
 import { toast } from "sonner";
@@ -101,6 +102,13 @@ export function SetupCostManager() {
   const [useAreaCalculation, setUseAreaCalculation] = useState(false);
   const [areaInPyeong, setAreaInPyeong] = useState("");
   const [pricePerPyeong, setPricePerPyeong] = useState("");
+
+  // 수정 다이얼로그
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<SetupCostItem | null>(null);
+  const [editItemName, setEditItemName] = useState("");
+  const [editItemCost, setEditItemCost] = useState("");
+  const [editItemPriority, setEditItemPriority] = useState<"ESSENTIAL" | "IMPORTANT" | "OPTIONAL">("ESSENTIAL");
 
   // 금액을 한국어로 변환하는 함수
   function formatKoreanCurrency(value: string): string {
@@ -204,6 +212,51 @@ export function SetupCostManager() {
       }
     } catch {
       toast.error("항목 등록 중 오류가 발생했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleEditStart(item: SetupCostItem) {
+    setEditingItem(item);
+    setEditItemName(item.name);
+    setEditItemCost(item.estimatedCost);
+    setEditItemPriority(item.priority);
+    setIsEditDialogOpen(true);
+  }
+
+  async function handleEditItem() {
+    if (!editingItem) return;
+    if (!editItemName || !editItemCost) {
+      toast.error("필수 항목을 입력해주세요.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`/api/setup/items/${editingItem.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editItemName,
+          estimatedCost: Number(editItemCost),
+          priority: editItemPriority,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        toast.error(result.error || "수정에 실패했습니다.");
+      } else {
+        toast.success("항목이 수정되었습니다.");
+        setIsEditDialogOpen(false);
+        setEditingItem(null);
+        fetchData();
+      }
+    } catch {
+      toast.error("수정 중 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
     }
@@ -574,6 +627,14 @@ export function SetupCostManager() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleEditStart(item)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-red-500 hover:text-red-700"
                                 onClick={() => handleDeleteItem(item.id)}
                               >
@@ -607,6 +668,64 @@ export function SetupCostManager() {
           </CardContent>
         </Card>
       )}
+
+      {/* 수정 다이얼로그 */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>비용 항목 수정</DialogTitle>
+            <DialogDescription>
+              설립 비용 항목을 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>항목명</Label>
+              <Input
+                placeholder="예: 비닐하우스 설치"
+                value={editItemName}
+                onChange={(e) => setEditItemName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>예상 비용 (원)</Label>
+              <Input
+                type="number"
+                placeholder="50000000"
+                value={editItemCost}
+                onChange={(e) => setEditItemCost(e.target.value)}
+              />
+              {editItemCost && (
+                <p className="text-xs text-blue-600 font-medium">
+                  {formatNumberWithCommas(editItemCost)}원 = {formatKoreanCurrency(editItemCost) || "0원"}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>우선순위</Label>
+              <Select value={editItemPriority} onValueChange={(v) => setEditItemPriority(v as typeof editItemPriority)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ESSENTIAL">필수</SelectItem>
+                  <SelectItem value="IMPORTANT">중요</SelectItem>
+                  <SelectItem value="OPTIONAL">선택</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              취소
+            </Button>
+            <Button onClick={handleEditItem} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              수정
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

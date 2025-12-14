@@ -104,6 +104,31 @@ export function FundingTimelineVisual({
     });
   }, [timelineItems, totalRequired]);
 
+  // 같은 날짜의 아이템을 그룹핑 (마커 표시용)
+  const groupedByDate = useMemo(() => {
+    const groups: Map<string, typeof cumulativeData> = new Map();
+
+    cumulativeData.forEach((item) => {
+      // 날짜만 비교 (시간 정보 제거) - YYYY-MM-DD 형식으로 통일
+      const dateKey = new Date(item.expectedDate).toISOString().split('T')[0];
+      if (!groups.has(dateKey)) {
+        groups.set(dateKey, []);
+      }
+      groups.get(dateKey)!.push(item);
+    });
+
+    return Array.from(groups.entries()).map(([dateKey, items]) => ({
+      dateKey,
+      position: items[0].position,
+      items,
+      totalAmount: items.reduce((sum, item) => sum + item.amount, 0),
+      lastCumulative: items[items.length - 1].cumulative,
+      lastCoveragePercent: items[items.length - 1].coveragePercent,
+      // 그룹 내 대표 타입 (가장 금액이 큰 것)
+      primaryType: items.reduce((max, item) => item.amount > max.amount ? item : max, items[0]).type,
+    }));
+  }, [cumulativeData]);
+
   // 부족/초과 금액 계산
   const fundingDifference = totalPlanned - totalRequired;
   const isShortfall = fundingDifference < 0;
@@ -176,38 +201,65 @@ export function FundingTimelineVisual({
             />
           </div>
 
-          {/* 마커들 + 상시 라벨 */}
-          {cumulativeData.map((item, index) => (
+          {/* 마커들 + 상시 라벨 (날짜별 그룹핑) */}
+          {groupedByDate.map((group, index) => (
             <div
-              key={item.id}
+              key={group.dateKey}
               className="absolute transform -translate-x-1/2"
               style={{
-                left: `${item.position}%`,
+                left: `${group.position}%`,
                 top: '32px',
-                zIndex: cumulativeData.length - index
+                zIndex: groupedByDate.length - index
               }}
             >
               {/* 마커 - 클릭 시 Popover */}
               <Popover>
                 <PopoverTrigger asChild>
                   <button
-                    className={`relative w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-all hover:scale-150 focus:scale-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`}
+                    className={`relative w-5 h-5 rounded-full border-2 border-white shadow-md cursor-pointer transition-all hover:scale-150 focus:scale-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary ${FUNDING_TYPE_COLORS[group.primaryType] || "bg-gray-500"}`}
                     style={{ zIndex: 'inherit' }}
                   >
-                    <span className="sr-only">{item.name}</span>
+                    {/* 같은 날짜에 여러 항목이 있으면 개수 표시 */}
+                    {group.items.length > 1 && (
+                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                        {group.items.length}
+                      </span>
+                    )}
+                    <span className="sr-only">{group.items.map(i => i.name).join(', ')}</span>
                   </button>
                 </PopoverTrigger>
-                <PopoverContent side="top" className="w-56 p-3" sideOffset={8}>
-                  <div className="space-y-2">
-                    <p className="font-medium text-sm">{item.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {FUNDING_TYPE_LABELS[item.type] || item.type}
-                    </p>
-                    <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
-                    <p className="text-xs text-muted-foreground">{formatDate(item.expectedDate)}</p>
+                <PopoverContent side="top" className="w-64 p-3" sideOffset={8}>
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground font-medium">{formatDate(group.dateKey)}</p>
+
+                    {/* 각 항목 표시 */}
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {group.items.map((item) => (
+                        <div key={item.id} className="flex items-start gap-2 p-2 bg-muted/50 rounded">
+                          <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${FUNDING_TYPE_COLORS[item.type] || "bg-gray-500"}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {FUNDING_TYPE_LABELS[item.type] || item.type}
+                            </p>
+                            <p className="font-bold text-green-600 text-sm">+{formatLargeNumber(item.amount)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 합계 (여러 항목일 경우) */}
+                    {group.items.length > 1 && (
+                      <div className="pt-2 border-t">
+                        <p className="text-xs font-medium">
+                          합계: <span className="text-green-600">+{formatLargeNumber(group.totalAmount)}</span>
+                        </p>
+                      </div>
+                    )}
+
                     <div className="pt-2 border-t">
                       <p className="text-xs">
-                        누적: <span className="font-medium">{formatLargeNumber(item.cumulative)}</span> ({Math.round(item.coveragePercent)}%)
+                        누적: <span className="font-medium">{formatLargeNumber(group.lastCumulative)}</span> ({Math.round(group.lastCoveragePercent)}%)
                       </p>
                     </div>
                   </div>
@@ -216,8 +268,8 @@ export function FundingTimelineVisual({
 
               {/* 상시 표시 라벨 */}
               <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-10'}`}>
-                <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
-                <p className="text-[9px] text-muted-foreground">누적 {Math.round(item.coveragePercent)}%</p>
+                <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(group.totalAmount)}</p>
+                <p className="text-[9px] text-muted-foreground">누적 {Math.round(group.lastCoveragePercent)}%</p>
               </div>
             </div>
           ))}
