@@ -1,6 +1,7 @@
-// Service Worker for RetireFarm Manager PWA
+import { NextResponse } from "next/server";
+
+const SW_SCRIPT = `// Service Worker for RetireFarm Manager PWA
 const CACHE_NAME = 'retirefarm-v1';
-const OFFLINE_URL = '/offline';
 
 // Static assets to cache on install
 const STATIC_CACHE = [
@@ -88,7 +89,7 @@ self.addEventListener('fetch', (event) => {
   // For static assets, use stale-while-revalidate
   if (
     url.pathname.startsWith('/_next/static/') ||
-    url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|ico|woff|woff2)$/)
+    url.pathname.match(/\\.(js|css|png|jpg|jpeg|svg|ico|woff|woff2)$/)
   ) {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) => {
@@ -132,3 +133,13 @@ self.addEventListener('message', (event) => {
 });
 
 console.log('[SW] Service Worker loaded');
+`;
+
+export async function GET() {
+  return new NextResponse(SW_SCRIPT, {
+    headers: {
+      "Content-Type": "application/javascript",
+      "Service-Worker-Allowed": "/",
+    },
+  });
+}
