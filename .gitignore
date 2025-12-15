@@ -50,3 +50,7 @@ data/
 
 # Local dev database
 data-dev/
+
+# PWA files (generated during build by next-pwa)
+public/workbox-*.js
+public/workbox-*.js.map
