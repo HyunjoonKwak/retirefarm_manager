@@ -33,7 +33,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // 정적 파일 제외한 모든 경로 매칭
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    // 정적 파일 및 PWA 파일 제외한 모든 경로 매칭
+    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons/).*)",
   ],
 };
