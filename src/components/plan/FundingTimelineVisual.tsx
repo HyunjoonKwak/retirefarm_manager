@@ -267,9 +267,10 @@ export function FundingTimelineVisual({
               </Popover>
 
               {/* 상시 표시 라벨 */}
-              <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-10'}`}>
+              <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-center pointer-events-none ${index % 2 === 0 ? '' : 'mt-12'}`}>
                 <p className="text-[10px] font-bold text-green-600">+{formatLargeNumber(group.totalAmount)}</p>
-                <p className="text-[9px] text-muted-foreground">누적 {Math.round(group.lastCoveragePercent)}%</p>
+                <p className="text-[9px] font-medium text-foreground">{formatLargeNumber(group.lastCumulative)}</p>
+                <p className="text-[9px] text-muted-foreground">({Math.round(group.lastCoveragePercent)}%)</p>
               </div>
             </div>
           ))}
@@ -282,7 +283,7 @@ export function FundingTimelineVisual({
         </div>
 
         {/* 라벨 공간 확보 */}
-        <div className="h-8" />
+        <div className="h-12" />
 
         {/* 범례 */}
         <div className="flex flex-wrap gap-2 pt-2">
@@ -323,8 +324,9 @@ export function FundingTimelineVisual({
               </div>
               <div className="text-right">
                 <p className="font-bold text-green-600">+{formatLargeNumber(item.amount)}</p>
+                <p className="text-sm font-medium">{formatLargeNumber(item.cumulative)}</p>
                 <p className="text-xs text-muted-foreground">
-                  누적 {Math.round(item.coveragePercent)}%
+                  ({Math.round(item.coveragePercent)}%)
                 </p>
               </div>
             </div>
