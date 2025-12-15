@@ -36,6 +36,8 @@ export async function GET() {
           ...item,
           estimatedCost: item.estimatedCost.toString(),
           actualCost: item.actualCost?.toString() || null,
+          areaInPyeong: item.areaInPyeong?.toString() || null,
+          pricePerPyeong: item.pricePerPyeong?.toString() || null,
           subsidyAmount: item.subsidyAmount?.toString() || null,
           subsidyRate: item.subsidyRate ? Number(item.subsidyRate) : null,
         })),

@@ -104,6 +104,8 @@ model SetupCostItem {
   actualCost       Decimal?
   quantity         Int        @default(1)
   unit             String     @default("개")
+  areaInPyeong     Decimal?   // 면적 (평)
+  pricePerPyeong   Decimal?   // 평단가 (원)
   isGovernmentSubsidy Boolean @default(false)
   subsidyAmount    Decimal?
   subsidyRate      Decimal?

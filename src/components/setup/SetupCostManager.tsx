@@ -45,6 +45,8 @@ interface SetupCostItem {
   actualCost?: string;
   quantity: number;
   unit: string;
+  areaInPyeong?: string;      // 면적 (평)
+  pricePerPyeong?: string;    // 평단가 (원)
   isGovernmentSubsidy: boolean;
   subsidyAmount?: string;
   priority: "ESSENTIAL" | "IMPORTANT" | "OPTIONAL";
@@ -191,6 +193,8 @@ export function SetupCostManager() {
           name: newItemName,
           estimatedCost: Number(newItemCost),
           priority: newItemPriority,
+          areaInPyeong: areaInPyeong ? Number(areaInPyeong) : undefined,
+          pricePerPyeong: pricePerPyeong ? Number(pricePerPyeong) : undefined,
         }),
       });
 
@@ -603,7 +607,14 @@ export function SetupCostManager() {
                               <span className={`px-2 py-0.5 rounded text-xs ${PRIORITY_LABELS[item.priority].color}`}>
                                 {PRIORITY_LABELS[item.priority].label}
                               </span>
-                              <span className="font-medium">{item.name}</span>
+                              <div>
+                                <span className="font-medium">{item.name}</span>
+                                {item.areaInPyeong && item.pricePerPyeong && (
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    ({Number(item.areaInPyeong).toLocaleString()}평 × {formatLargeNumber(item.pricePerPyeong)}/평)
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-center gap-4">
                               <span className="text-sm font-medium">

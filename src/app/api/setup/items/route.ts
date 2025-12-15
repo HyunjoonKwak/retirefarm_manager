@@ -11,6 +11,8 @@ const createItemSchema = z.object({
   estimatedCost: z.number().min(0, "예상 비용은 0 이상이어야 합니다."),
   quantity: z.number().min(1).default(1),
   unit: z.string().default("개"),
+  areaInPyeong: z.number().optional(),      // 면적 (평)
+  pricePerPyeong: z.number().optional(),    // 평단가 (원)
   isGovernmentSubsidy: z.boolean().default(false),
   subsidyAmount: z.number().optional(),
   subsidyRate: z.number().min(0).max(100).optional(),
@@ -44,6 +46,8 @@ export async function GET() {
       ...item,
       estimatedCost: item.estimatedCost.toString(),
       actualCost: item.actualCost?.toString() || null,
+      areaInPyeong: item.areaInPyeong?.toString() || null,
+      pricePerPyeong: item.pricePerPyeong?.toString() || null,
       subsidyAmount: item.subsidyAmount?.toString() || null,
       subsidyRate: item.subsidyRate ? Number(item.subsidyRate) : null,
     }));
@@ -91,6 +95,8 @@ export async function POST(request: NextRequest) {
         estimatedCost: validatedData.estimatedCost,
         quantity: validatedData.quantity,
         unit: validatedData.unit,
+        areaInPyeong: validatedData.areaInPyeong,
+        pricePerPyeong: validatedData.pricePerPyeong,
         isGovernmentSubsidy: validatedData.isGovernmentSubsidy,
         subsidyAmount: validatedData.subsidyAmount,
         subsidyRate: validatedData.subsidyRate,
@@ -112,6 +118,8 @@ export async function POST(request: NextRequest) {
         ...item,
         estimatedCost: item.estimatedCost.toString(),
         actualCost: item.actualCost?.toString() || null,
+        areaInPyeong: item.areaInPyeong?.toString() || null,
+        pricePerPyeong: item.pricePerPyeong?.toString() || null,
         subsidyAmount: item.subsidyAmount?.toString() || null,
         subsidyRate: item.subsidyRate ? Number(item.subsidyRate) : null,
       },
