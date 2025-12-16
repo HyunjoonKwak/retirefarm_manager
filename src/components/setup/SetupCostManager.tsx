@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +25,6 @@ import { Label } from "@/components/ui/label";
 import {
   Calculator,
   Wallet,
-  CheckCircle,
   Loader2,
   Plus,
   Trash2,
@@ -34,7 +32,7 @@ import {
   ChevronRight,
   Pencil,
 } from "lucide-react";
-import { formatLargeNumber, formatPercent } from "@/lib/utils/format";
+import { formatLargeNumber } from "@/lib/utils/format";
 import { toast } from "sonner";
 
 interface SetupCostItem {
@@ -77,6 +75,13 @@ interface Summary {
   progressRate: number;
 }
 
+interface CategorySummary {
+  name: string;
+  estimated: string;
+  actual: string;
+  subsidy: string;
+}
+
 const PRIORITY_LABELS = {
   ESSENTIAL: { label: "필수", color: "bg-red-100 text-red-800" },
   IMPORTANT: { label: "중요", color: "bg-yellow-100 text-yellow-800" },
@@ -94,6 +99,7 @@ const STATUS_LABELS = {
 export function SetupCostManager() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [categorySummary, setCategorySummary] = useState<CategorySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -157,6 +163,7 @@ export function SetupCostManager() {
 
       setCategories(categoriesData.categories || []);
       setSummary(summaryData.summary || null);
+      setCategorySummary(summaryData.byCategory || []);
 
       // 첫 로드 시에만 첫 번째 카테고리 펼치기 (이후에는 상태 유지)
       if (!preserveExpanded && categoriesData.categories?.length > 0) {
@@ -425,7 +432,7 @@ export function SetupCostManager() {
     <div className="space-y-6">
       {/* 요약 카드 */}
       {summary && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">총 예상 비용</CardTitle>
@@ -441,40 +448,23 @@ export function SetupCostManager() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">정부 지원금</CardTitle>
-              <Wallet className="h-4 w-4 text-green-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {formatLargeNumber(summary.totalSubsidy)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">자기자본 필요액</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {formatLargeNumber(summary.selfFundingRequired)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">진행률</CardTitle>
-              <CheckCircle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatPercent(summary.progressRate, 0)}</div>
-              <Progress value={summary.progressRate} className="mt-2" />
-            </CardContent>
-          </Card>
+          {/* 카테고리별 비용 요약 */}
+          {["토지 및 시설", "장비", "운영비", "기타"].map((categoryName) => {
+            const catData = categorySummary.find((c) => c.name === categoryName);
+            return (
+              <Card key={categoryName}>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">{categoryName}</CardTitle>
+                  <Wallet className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {catData ? formatLargeNumber(catData.estimated) : "0원"}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
