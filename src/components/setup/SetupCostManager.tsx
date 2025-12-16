@@ -47,6 +47,9 @@ interface SetupCostItem {
   unit: string;
   areaInPyeong?: string;      // 면적 (평)
   pricePerPyeong?: string;    // 평단가 (원)
+  personCount?: number;       // 인원수 (인건비용)
+  pricePerPerson?: string;    // 인당 단가 (인건비용)
+  durationMonths?: number;    // 기간 (개월, 인건비용)
   isGovernmentSubsidy: boolean;
   subsidyAmount?: string;
   priority: "ESSENTIAL" | "IMPORTANT" | "OPTIONAL";
@@ -105,6 +108,12 @@ export function SetupCostManager() {
   const [areaInPyeong, setAreaInPyeong] = useState("");
   const [pricePerPyeong, setPricePerPyeong] = useState("");
 
+  // 인건비 입력용 상태
+  const [useLaborCalculation, setUseLaborCalculation] = useState(false);
+  const [personCount, setPersonCount] = useState("");
+  const [pricePerPerson, setPricePerPerson] = useState("");
+  const [durationMonths, setDurationMonths] = useState("");
+
   // 수정 다이얼로그
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<SetupCostItem | null>(null);
@@ -136,7 +145,7 @@ export function SetupCostManager() {
     return num.toLocaleString();
   }
 
-  async function fetchData() {
+  async function fetchData(preserveExpanded = false) {
     try {
       const [categoriesRes, summaryRes] = await Promise.all([
         fetch("/api/setup/categories"),
@@ -149,8 +158,8 @@ export function SetupCostManager() {
       setCategories(categoriesData.categories || []);
       setSummary(summaryData.summary || null);
 
-      // 첫 번째 카테고리 펼치기
-      if (categoriesData.categories?.length > 0) {
+      // 첫 로드 시에만 첫 번째 카테고리 펼치기 (이후에는 상태 유지)
+      if (!preserveExpanded && categoriesData.categories?.length > 0) {
         setExpandedCategories(new Set([categoriesData.categories[0].id]));
       }
     } catch (error) {
@@ -195,6 +204,9 @@ export function SetupCostManager() {
           priority: newItemPriority,
           areaInPyeong: areaInPyeong ? Number(areaInPyeong) : undefined,
           pricePerPyeong: pricePerPyeong ? Number(pricePerPyeong) : undefined,
+          personCount: personCount ? Number(personCount) : undefined,
+          pricePerPerson: pricePerPerson ? Number(pricePerPerson) : undefined,
+          durationMonths: durationMonths ? Number(durationMonths) : undefined,
         }),
       });
 
@@ -212,7 +224,11 @@ export function SetupCostManager() {
         setAreaInPyeong("");
         setPricePerPyeong("");
         setUseAreaCalculation(false);
-        fetchData();
+        setPersonCount("");
+        setPricePerPerson("");
+        setDurationMonths("");
+        setUseLaborCalculation(false);
+        fetchData(true); // 펼침 상태 유지
       }
     } catch {
       toast.error("항목 등록 중 오류가 발생했습니다.");
@@ -257,7 +273,7 @@ export function SetupCostManager() {
         toast.success("항목이 수정되었습니다.");
         setIsEditDialogOpen(false);
         setEditingItem(null);
-        fetchData();
+        fetchData(true); // 펼침 상태 유지
       }
     } catch {
       toast.error("수정 중 오류가 발생했습니다.");
@@ -279,7 +295,7 @@ export function SetupCostManager() {
         toast.error(result.error || "삭제에 실패했습니다.");
       } else {
         toast.success("항목이 삭제되었습니다.");
-        fetchData();
+        fetchData(true); // 펼침 상태 유지
       }
     } catch {
       toast.error("삭제 중 오류가 발생했습니다.");
@@ -299,7 +315,7 @@ export function SetupCostManager() {
         toast.error(result.error || "상태 변경에 실패했습니다.");
       } else {
         toast.success("상태가 변경되었습니다.");
-        fetchData();
+        fetchData(true); // 펼침 상태 유지
       }
     } catch {
       toast.error("상태 변경 중 오류가 발생했습니다.");
@@ -324,10 +340,22 @@ export function SetupCostManager() {
     selectedSubcategoryInfo?.subcategoryName?.includes("시설") ||
     selectedSubcategoryInfo?.subcategoryName?.includes("건축");
 
+  // 인건비 카테고리인지 확인
+  const isLaborCategory =
+    selectedSubcategoryInfo?.subcategoryName?.includes("인력") ||
+    selectedSubcategoryInfo?.subcategoryName?.includes("인건비") ||
+    selectedSubcategoryInfo?.categoryName === "운영비";
+
   // 평수 * 평단가 계산
   const calculatedCost =
     areaInPyeong && pricePerPyeong
       ? (Number(areaInPyeong) * Number(pricePerPyeong)).toString()
+      : "";
+
+  // 인건비 계산 (인원수 × 인당 단가 × 기간)
+  const calculatedLaborCost =
+    personCount && pricePerPerson && durationMonths
+      ? (Number(personCount) * Number(pricePerPerson) * Number(durationMonths)).toString()
       : "";
 
   // 평수 계산 모드일 때 비용 자동 설정
@@ -337,7 +365,14 @@ export function SetupCostManager() {
     }
   }, [calculatedCost, useAreaCalculation]);
 
-  // 카테고리 변경 시 평수 계산 모드 초기화
+  // 인건비 계산 모드일 때 비용 자동 설정
+  useEffect(() => {
+    if (useLaborCalculation && calculatedLaborCost) {
+      setNewItemCost(calculatedLaborCost);
+    }
+  }, [calculatedLaborCost, useLaborCalculation]);
+
+  // 카테고리 변경 시 계산 모드 초기화
   useEffect(() => {
     if (!selectedSubcategory) return;
 
@@ -357,12 +392,24 @@ export function SetupCostManager() {
       subInfo?.subcategoryName?.includes("시설") ||
       subInfo?.subcategoryName?.includes("건축");
 
+    const isLabor =
+      subInfo?.subcategoryName?.includes("인력") ||
+      subInfo?.subcategoryName?.includes("인건비") ||
+      subInfo?.categoryName === "운영비";
+
+    // 모든 계산 모드 초기화
+    setUseAreaCalculation(false);
+    setUseLaborCalculation(false);
+    setAreaInPyeong("");
+    setPricePerPyeong("");
+    setPersonCount("");
+    setPricePerPerson("");
+    setDurationMonths("");
+
     if (isLandOrFacility) {
       setUseAreaCalculation(true);
-    } else {
-      setUseAreaCalculation(false);
-      setAreaInPyeong("");
-      setPricePerPyeong("");
+    } else if (isLabor) {
+      setUseLaborCalculation(true);
     }
   }, [selectedSubcategory, categories]);
 
@@ -519,6 +566,58 @@ export function SetupCostManager() {
                 </div>
               )}
 
+              {/* 인건비 카테고리일 때 인건비 계산 UI */}
+              {isLaborCategory && (
+                <div className="space-y-4 p-4 bg-blue-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-900">인건비 계산</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <Label>인원수 (명)</Label>
+                      <Input
+                        type="number"
+                        placeholder="2"
+                        value={personCount}
+                        onChange={(e) => setPersonCount(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>인당 월급 (원)</Label>
+                      <Input
+                        type="number"
+                        placeholder="3000000"
+                        value={pricePerPerson}
+                        onChange={(e) => setPricePerPerson(e.target.value)}
+                      />
+                      {pricePerPerson && (
+                        <p className="text-xs text-muted-foreground">
+                          {formatKoreanCurrency(pricePerPerson) || "0원"}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>기간 (개월)</Label>
+                      <Input
+                        type="number"
+                        placeholder="12"
+                        value={durationMonths}
+                        onChange={(e) => setDurationMonths(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {personCount && pricePerPerson && durationMonths && (
+                    <div className="text-sm text-muted-foreground">
+                      계산: {Number(personCount).toLocaleString()}명 × {formatKoreanCurrency(pricePerPerson)} × {Number(durationMonths).toLocaleString()}개월 ={" "}
+                      <span className="font-semibold text-foreground">
+                        {formatLargeNumber(calculatedLaborCost)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label>예상 비용 (원)</Label>
                 <Input
@@ -526,8 +625,8 @@ export function SetupCostManager() {
                   placeholder="50000000"
                   value={newItemCost}
                   onChange={(e) => setNewItemCost(e.target.value)}
-                  readOnly={useAreaCalculation && !!calculatedCost}
-                  className={useAreaCalculation && calculatedCost ? "bg-muted" : ""}
+                  readOnly={(useAreaCalculation && !!calculatedCost) || (useLaborCalculation && !!calculatedLaborCost)}
+                  className={(useAreaCalculation && calculatedCost) || (useLaborCalculation && calculatedLaborCost) ? "bg-muted" : ""}
                 />
                 {newItemCost && (
                   <p className="text-xs text-blue-600 font-medium">
@@ -537,6 +636,11 @@ export function SetupCostManager() {
                 {useAreaCalculation && calculatedCost && (
                   <p className="text-xs text-muted-foreground">
                     평수 계산에서 자동 입력됨
+                  </p>
+                )}
+                {useLaborCalculation && calculatedLaborCost && (
+                  <p className="text-xs text-muted-foreground">
+                    인건비 계산에서 자동 입력됨
                   </p>
                 )}
               </div>
@@ -612,6 +716,11 @@ export function SetupCostManager() {
                                 {item.areaInPyeong && item.pricePerPyeong && (
                                   <span className="ml-2 text-xs text-muted-foreground">
                                     ({Number(item.areaInPyeong).toLocaleString()}평 × {formatLargeNumber(item.pricePerPyeong)}/평)
+                                  </span>
+                                )}
+                                {item.personCount && item.pricePerPerson && item.durationMonths && (
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    ({item.personCount}명 × {formatLargeNumber(item.pricePerPerson)}/월 × {item.durationMonths}개월)
                                   </span>
                                 )}
                               </div>

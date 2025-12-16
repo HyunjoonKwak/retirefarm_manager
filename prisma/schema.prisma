@@ -106,6 +106,9 @@ model SetupCostItem {
   unit             String     @default("개")
   areaInPyeong     Decimal?   // 면적 (평)
   pricePerPyeong   Decimal?   // 평단가 (원)
+  personCount      Int?       // 인원수 (인건비용)
+  pricePerPerson   Decimal?   // 인당 단가 (인건비용)
+  durationMonths   Int?       // 기간 (개월, 인건비용)
   isGovernmentSubsidy Boolean @default(false)
   subsidyAmount    Decimal?
   subsidyRate      Decimal?

@@ -13,6 +13,9 @@ const createItemSchema = z.object({
   unit: z.string().default("개"),
   areaInPyeong: z.number().optional(),      // 면적 (평)
   pricePerPyeong: z.number().optional(),    // 평단가 (원)
+  personCount: z.number().optional(),       // 인원수 (인건비용)
+  pricePerPerson: z.number().optional(),    // 인당 단가 (인건비용)
+  durationMonths: z.number().optional(),    // 기간 (개월, 인건비용)
   isGovernmentSubsidy: z.boolean().default(false),
   subsidyAmount: z.number().optional(),
   subsidyRate: z.number().min(0).max(100).optional(),
@@ -48,6 +51,9 @@ export async function GET() {
       actualCost: item.actualCost?.toString() || null,
       areaInPyeong: item.areaInPyeong?.toString() || null,
       pricePerPyeong: item.pricePerPyeong?.toString() || null,
+      personCount: item.personCount || null,
+      pricePerPerson: item.pricePerPerson?.toString() || null,
+      durationMonths: item.durationMonths || null,
       subsidyAmount: item.subsidyAmount?.toString() || null,
       subsidyRate: item.subsidyRate ? Number(item.subsidyRate) : null,
     }));
@@ -97,6 +103,9 @@ export async function POST(request: NextRequest) {
         unit: validatedData.unit,
         areaInPyeong: validatedData.areaInPyeong,
         pricePerPyeong: validatedData.pricePerPyeong,
+        personCount: validatedData.personCount,
+        pricePerPerson: validatedData.pricePerPerson,
+        durationMonths: validatedData.durationMonths,
         isGovernmentSubsidy: validatedData.isGovernmentSubsidy,
         subsidyAmount: validatedData.subsidyAmount,
         subsidyRate: validatedData.subsidyRate,
@@ -120,6 +129,9 @@ export async function POST(request: NextRequest) {
         actualCost: item.actualCost?.toString() || null,
         areaInPyeong: item.areaInPyeong?.toString() || null,
         pricePerPyeong: item.pricePerPyeong?.toString() || null,
+        personCount: item.personCount || null,
+        pricePerPerson: item.pricePerPerson?.toString() || null,
+        durationMonths: item.durationMonths || null,
         subsidyAmount: item.subsidyAmount?.toString() || null,
         subsidyRate: item.subsidyRate ? Number(item.subsidyRate) : null,
       },
