@@ -449,7 +449,7 @@ export function SetupCostManager() {
           </Card>
 
           {/* 카테고리별 비용 요약 */}
-          {["토지 및 시설", "장비", "운영비", "기타"].map((categoryName) => {
+          {["토지 및 시설", "장비", "운영준비", "기타"].map((categoryName) => {
             const catData = categorySummary.find((c) => c.name === categoryName);
             return (
               <Card key={categoryName}>
