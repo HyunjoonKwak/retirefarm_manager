@@ -34,6 +34,7 @@ model User {
   priceWatchlist    PriceWatchlist[]
   priceAlerts       PriceAlert[]
   notifications     Notification[]
+  productWatchlist  ProductWatchlist[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -260,6 +261,60 @@ model InventoryTransaction {
 }
 
 // ==================== 시세 정보 ====================
+
+// 가락시장 경매결과
+model AuctionResult {
+  id            String   @id @default(cuid())
+  productName   String   // PUMMOK 품목명
+  variety       String?  // PUMJONG 품종명
+  tempName      String?  // PUM_NAME_IMSI 임시품목명
+  unit          String   // UUN 거래단량
+  grade         String?  // DDD 등급
+  price         Int      // PPRICE 경락가
+  origin        String?  // SSANGI 산지명
+  corporation   String   // CORP_NM 법인명
+  corporationCode String // 법인코드
+  auctionDate   DateTime // ADJ_DT 경매일자
+  quantity      Int      @default(1) // QTY 수량
+  certification String?  // INJUNG_GUBUN 인증구분
+  createdAt     DateTime @default(now())
+
+  @@unique([productName, variety, corporation, auctionDate, price, origin])
+  @@index([productName, auctionDate])
+  @@index([auctionDate])
+  @@index([origin])
+}
+
+// 관심 품목 (가락시장용)
+model ProductWatchlist {
+  id          String   @id @default(cuid())
+  userId      String
+  productName String   // 품목명 (토마토, 딸기 등)
+  variety     String   @default("") // 품종명 (대추빨강 등) - 빈 문자열이면 전체
+  origin      String   @default("") // 산지명 - 빈 문자열이면 전체
+  targetPrice Int?     // 목표가격 (알림용)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productName, variety, origin])
+}
+
+// 데이터 수집 로그
+model DataCollectionLog {
+  id           String   @id @default(cuid())
+  targetDate   DateTime // 수집 대상 일자
+  corporation  String   // 법인코드
+  totalCount   Int      // 총 수집 건수
+  newCount     Int      // 신규 저장 건수
+  status       String   // SUCCESS, FAILED, PARTIAL
+  errorMessage String?
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+}
+
 model PriceWatchlist {
   id       String @id @default(cuid())
   userId   String

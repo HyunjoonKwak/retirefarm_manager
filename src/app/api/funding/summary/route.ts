@@ -22,6 +22,8 @@ export async function GET() {
       SAVINGS: { total: BigInt(0), count: 0, completed: BigInt(0) },
       LOAN: { total: BigInt(0), count: 0, completed: BigInt(0) },
       GOVERNMENT_SUBSIDY: { total: BigInt(0), count: 0, completed: BigInt(0) },
+      RETIREMENT_PAY: { total: BigInt(0), count: 0, completed: BigInt(0) },
+      SEVERANCE_PAY: { total: BigInt(0), count: 0, completed: BigInt(0) },
       OTHER: { total: BigInt(0), count: 0, completed: BigInt(0) },
     };
 

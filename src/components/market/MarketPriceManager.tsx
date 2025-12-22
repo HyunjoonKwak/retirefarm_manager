@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -29,117 +37,210 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  Plus,
+  RefreshCw,
+  Calendar,
+  Building2,
+  MapPin,
   LineChart,
+  Download,
 } from "lucide-react";
-import { formatLargeNumber } from "@/lib/utils/format";
+import { formatLargeNumber, formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
-
-interface MarketItem {
-  itemCode: string;
-  itemName: string;
-  unit: string;
-}
 
 interface WatchlistItem {
   id: string;
-  itemCode: string;
-  itemName: string;
-  targetPrice: string | null;
-  createdAt: string;
+  productName: string;
+  variety?: string | null;
+  origin?: string | null;
+  targetPrice?: number | null;
+  isActive: boolean;
+  latestPrice: number | null;
+  latestDate: string | null;
+  unit: string | null;
+  latestVariety: string | null;
+  priceChange: number | null;
 }
 
-interface PriceData {
-  id: string;
-  itemCode: string;
-  itemName: string;
-  marketName: string;
+interface PriceHistory {
   date: string;
-  avgPrice: string;
-  maxPrice: string;
-  minPrice: string;
-  tradingVolume: string;
+  avgPrice: number;
+  maxPrice: number;
+  minPrice: number;
+  tradeCount: number;
 }
+
+interface Corporation {
+  code: string;
+  name: string;
+}
+
+const MAJOR_PRODUCTS = [
+  "토마토",
+  "딸기",
+  "수박",
+  "참외",
+  "오이",
+  "고추",
+  "배추",
+  "상추",
+  "시금치",
+  "양배추",
+  "무",
+  "당근",
+  "감자",
+  "고구마",
+  "사과",
+  "배",
+  "포도",
+  "감귤",
+];
 
 export function MarketPriceManager() {
-  const [items, setItems] = useState<MarketItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
-  const [selectedItem, setSelectedItem] = useState<MarketItem | null>(null);
-  const [prices, setPrices] = useState<PriceData[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadingPrices, setLoadingPrices] = useState(false);
-  const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
-  const [searchResults, setSearchResults] = useState<MarketItem[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [products, setProducts] = useState<string[]>([]);
+  const [varieties, setVarieties] = useState<string[]>([]);
+  const [origins, setOrigins] = useState<string[]>([]);
+  const [corporations, setCorporations] = useState<Corporation[]>([]);
+  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([]);
+  const [latestDate, setLatestDate] = useState<string | null>(null);
 
-  async function fetchWatchlist() {
+  const [loading, setLoading] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [collecting, setCollecting] = useState(false);
+
+  const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
+  const [selectedVariety, setSelectedVariety] = useState<string | null>(null);
+  const [selectedOrigin, setSelectedOrigin] = useState<string | null>(null);
+
+  // 검색/등록 다이얼로그
+  const [isSearchDialogOpen, setIsSearchDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filteredProducts, setFilteredProducts] = useState<string[]>([]);
+
+  // 수집 다이얼로그
+  const [isCollectDialogOpen, setIsCollectDialogOpen] = useState(false);
+  const [collectDate, setCollectDate] = useState(() => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toISOString().split("T")[0];
+  });
+  const [selectedCorps, setSelectedCorps] = useState<string[]>(["11000101"]);
+
+  const fetchWatchlist = useCallback(async () => {
     try {
-      const response = await fetch("/api/market/watchlist");
+      const response = await fetch("/api/market/garak/watchlist");
       const data = await response.json();
       setWatchlist(data.watchlist || []);
     } catch (error) {
       console.error("Failed to fetch watchlist:", error);
     }
-  }
+  }, []);
 
-  async function fetchItems() {
+  const fetchProducts = useCallback(async () => {
     try {
-      const response = await fetch("/api/market/prices");
+      const response = await fetch("/api/market/garak?action=products");
       const data = await response.json();
-      setItems(data.items || []);
+      setProducts(data.products || MAJOR_PRODUCTS);
     } catch (error) {
-      console.error("Failed to fetch items:", error);
-    } finally {
-      setLoading(false);
+      console.error("Failed to fetch products:", error);
+      setProducts(MAJOR_PRODUCTS);
+    }
+  }, []);
+
+  const fetchCorporations = useCallback(async () => {
+    try {
+      const response = await fetch("/api/market/garak/collect");
+      const data = await response.json();
+      setCorporations(data.corporations || []);
+    } catch (error) {
+      console.error("Failed to fetch corporations:", error);
+    }
+  }, []);
+
+  const fetchLatestDate = useCallback(async () => {
+    try {
+      const response = await fetch("/api/market/garak?action=latest");
+      const data = await response.json();
+      setLatestDate(data.latestDate);
+    } catch (error) {
+      console.error("Failed to fetch latest date:", error);
+    }
+  }, []);
+
+  async function fetchVarieties(productName: string) {
+    try {
+      const response = await fetch(`/api/market/garak?action=varieties&productName=${encodeURIComponent(productName)}`);
+      const data = await response.json();
+      setVarieties(data.varieties || []);
+    } catch (error) {
+      console.error("Failed to fetch varieties:", error);
+      setVarieties([]);
     }
   }
 
-  async function fetchPrices(itemCode: string) {
-    setLoadingPrices(true);
+  async function fetchOrigins(productName: string) {
     try {
-      const response = await fetch(`/api/market/prices?itemCode=${itemCode}`);
+      const response = await fetch(`/api/market/garak?action=origins&productName=${encodeURIComponent(productName)}`);
       const data = await response.json();
-      setPrices(data.prices || []);
+      setOrigins(data.origins || []);
     } catch (error) {
-      console.error("Failed to fetch prices:", error);
+      console.error("Failed to fetch origins:", error);
+      setOrigins([]);
+    }
+  }
+
+  async function fetchPriceHistory(productName: string, variety?: string | null, origin?: string | null) {
+    setLoadingHistory(true);
+    try {
+      let url = `/api/market/garak?action=history&productName=${encodeURIComponent(productName)}&days=30`;
+      if (variety) url += `&variety=${encodeURIComponent(variety)}`;
+      if (origin) url += `&origin=${encodeURIComponent(origin)}`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+      setPriceHistory(data.history || []);
+    } catch (error) {
+      console.error("Failed to fetch price history:", error);
+      setPriceHistory([]);
     } finally {
-      setLoadingPrices(false);
+      setLoadingHistory(false);
     }
   }
 
   useEffect(() => {
-    fetchItems();
-    fetchWatchlist();
-  }, []);
+    Promise.all([
+      fetchWatchlist(),
+      fetchProducts(),
+      fetchCorporations(),
+      fetchLatestDate(),
+    ]).finally(() => setLoading(false));
+  }, [fetchWatchlist, fetchProducts, fetchCorporations, fetchLatestDate]);
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) {
-      setSearchResults(items);
-      return;
+  useEffect(() => {
+    if (selectedProduct) {
+      fetchVarieties(selectedProduct);
+      fetchOrigins(selectedProduct);
+      fetchPriceHistory(selectedProduct, selectedVariety, selectedOrigin);
     }
+  }, [selectedProduct, selectedVariety, selectedOrigin]);
 
-    setSearchLoading(true);
-    try {
-      const response = await fetch(`/api/market/prices?search=${encodeURIComponent(searchQuery)}`);
-      const data = await response.json();
-      setSearchResults(data.items || []);
-    } catch (error) {
-      console.error("Search failed:", error);
-    } finally {
-      setSearchLoading(false);
+  useEffect(() => {
+    if (searchQuery) {
+      const filtered = products.filter((p) =>
+        p.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    } else {
+      setFilteredProducts(products);
     }
-  }
+  }, [searchQuery, products]);
 
-  async function handleAddToWatchlist(item: MarketItem) {
+  async function handleAddToWatchlist(productName: string, variety?: string, origin?: string) {
     try {
-      const response = await fetch("/api/market/watchlist", {
+      const response = await fetch("/api/market/garak/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemCode: item.itemCode,
-          itemName: item.itemName,
-        }),
+        body: JSON.stringify({ productName, variety, origin }),
       });
 
       const result = await response.json();
@@ -149,15 +250,16 @@ export function MarketPriceManager() {
       } else {
         toast.success("관심 품목에 추가되었습니다.");
         fetchWatchlist();
+        setIsSearchDialogOpen(false);
       }
     } catch {
       toast.error("등록 중 오류가 발생했습니다.");
     }
   }
 
-  async function handleRemoveFromWatchlist(itemCode: string) {
+  async function handleRemoveFromWatchlist(id: string) {
     try {
-      const response = await fetch(`/api/market/watchlist?itemCode=${itemCode}`, {
+      const response = await fetch(`/api/market/garak/watchlist?id=${id}`, {
         method: "DELETE",
       });
 
@@ -173,25 +275,63 @@ export function MarketPriceManager() {
     }
   }
 
-  function handleSelectItem(item: MarketItem) {
-    setSelectedItem(item);
-    fetchPrices(item.itemCode);
+  async function handleCollectData() {
+    if (selectedCorps.length === 0) {
+      toast.error("법인을 선택해주세요.");
+      return;
+    }
+
+    setCollecting(true);
+    try {
+      const response = await fetch("/api/market/garak/collect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: collectDate,
+          corporationCodes: selectedCorps,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        toast.error(result.error || "수집에 실패했습니다.");
+      } else {
+        toast.success(`${result.totalCount}건 조회, ${result.newCount}건 저장되었습니다.`);
+        setIsCollectDialogOpen(false);
+        fetchProducts();
+        fetchLatestDate();
+        if (selectedProduct) {
+          fetchPriceHistory(selectedProduct, selectedVariety, selectedOrigin);
+        }
+      }
+    } catch {
+      toast.error("수집 중 오류가 발생했습니다.");
+    } finally {
+      setCollecting(false);
+    }
   }
 
-  function isInWatchlist(itemCode: string): boolean {
-    return watchlist.some((w) => w.itemCode === itemCode);
+  function handleSelectProduct(productName: string) {
+    setSelectedProduct(productName);
+    setSelectedVariety(null);
+    setSelectedOrigin(null);
+    setVarieties([]);
+    setOrigins([]);
   }
 
-  function getPriceChange(prices: PriceData[]): { value: number; direction: "up" | "down" | "same" } {
-    if (prices.length < 2) return { value: 0, direction: "same" };
-    const latest = Number(prices[0]?.avgPrice || 0);
-    const previous = Number(prices[1]?.avgPrice || 0);
-    if (previous === 0) return { value: 0, direction: "same" };
-    const change = ((latest - previous) / previous) * 100;
-    return {
-      value: Math.abs(change),
-      direction: change > 0 ? "up" : change < 0 ? "down" : "same",
-    };
+  function getPriceChangeIcon(change: number | null) {
+    if (change === null) return <Minus className="h-3 w-3" />;
+    if (change > 0) return <TrendingUp className="h-3 w-3" />;
+    if (change < 0) return <TrendingDown className="h-3 w-3" />;
+    return <Minus className="h-3 w-3" />;
+  }
+
+  function getPriceChangeBadge(change: number | null) {
+    if (change === null) return "secondary";
+    if (change > 0) return "destructive";
+    if (change < 0) return "default";
+    return "secondary";
   }
 
   if (loading) {
@@ -205,7 +345,7 @@ export function MarketPriceManager() {
   return (
     <div className="space-y-6">
       {/* 요약 카드 */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -223,65 +363,145 @@ export function MarketPriceManager() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <LineChart className="h-4 w-4 text-blue-500" />
-              전체 품목
+              조회 가능 품목
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{items.length}개</div>
-            <p className="text-xs text-muted-foreground">조회 가능</p>
+            <div className="text-2xl font-bold">{products.length}개</div>
+            <p className="text-xs text-muted-foreground">가락시장 기준</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-green-500" />
-              시세 정보
+              <Calendar className="h-4 w-4 text-green-500" />
+              최근 수집일
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">30일</div>
-            <p className="text-xs text-muted-foreground">데이터 보관</p>
+            <div className="text-2xl font-bold">
+              {latestDate ? formatDate(latestDate) : "-"}
+            </div>
+            <p className="text-xs text-muted-foreground">경매 데이터</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-purple-500" />
+              데이터 소스
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">가락시장</div>
+            <p className="text-xs text-muted-foreground">공공데이터 API</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 품목 검색 및 관심 목록 */}
+      {/* 데이터 수집 및 품목 검색 */}
+      <div className="flex flex-wrap gap-2 justify-between">
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setIsCollectDialogOpen(true)}>
+            <Download className="mr-2 h-4 w-4" />
+            데이터 수집
+          </Button>
+          <Button variant="outline" onClick={() => {
+            setSearchQuery("");
+            setFilteredProducts(products);
+            setIsSearchDialogOpen(true);
+          }}>
+            <Search className="mr-2 h-4 w-4" />
+            품목 검색
+          </Button>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            fetchWatchlist();
+            fetchLatestDate();
+            if (selectedProduct) {
+              fetchPriceHistory(selectedProduct, selectedVariety, selectedOrigin);
+            }
+          }}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          새로고침
+        </Button>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* 품목 검색 */}
+        {/* 품목 선택 */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              품목 검색
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setSearchResults(items);
-                  setSearchQuery("");
-                  setIsSearchDialogOpen(true);
-                }}
-              >
-                <Search className="mr-2 h-4 w-4" />
-                검색
-              </Button>
-            </CardTitle>
-            <CardDescription>품목을 검색하고 시세를 확인하세요.</CardDescription>
+            <CardTitle>품목 선택</CardTitle>
+            <CardDescription>시세를 조회할 품목을 선택하세요.</CardDescription>
           </CardHeader>
           <CardContent>
-            {/* 빠른 검색 - 주요 품목 */}
             <div className="flex flex-wrap gap-2">
-              {items.slice(0, 12).map((item) => (
+              {products.slice(0, 18).map((product) => (
                 <Button
-                  key={item.itemCode}
-                  variant={selectedItem?.itemCode === item.itemCode ? "default" : "outline"}
+                  key={product}
+                  variant={selectedProduct === product ? "default" : "outline"}
                   size="sm"
-                  onClick={() => handleSelectItem(item)}
+                  onClick={() => handleSelectProduct(product)}
                 >
-                  {item.itemName}
+                  {product}
                 </Button>
               ))}
             </div>
+
+            {/* 품종/산지 필터 */}
+            {selectedProduct && (varieties.length > 0 || origins.length > 0) && (
+              <div className="mt-4 pt-4 border-t space-y-3">
+                {varieties.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">품종</Label>
+                    <Select
+                      value={selectedVariety || "all"}
+                      onValueChange={(v) => setSelectedVariety(v === "all" ? null : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="전체 품종" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">전체 품종</SelectItem>
+                        {varieties.map((v) => (
+                          <SelectItem key={v} value={v}>
+                            {v}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {origins.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">산지</Label>
+                    <Select
+                      value={selectedOrigin || "all"}
+                      onValueChange={(v) => setSelectedOrigin(v === "all" ? null : v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="전체 산지" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">전체 산지</SelectItem>
+                        {origins.map((o) => (
+                          <SelectItem key={o} value={o}>
+                            {o}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -292,38 +512,67 @@ export function MarketPriceManager() {
               <Star className="h-5 w-5 text-yellow-500" />
               관심 품목
             </CardTitle>
-            <CardDescription>자주 확인하는 품목을 관리하세요.</CardDescription>
+            <CardDescription>자주 확인하는 품목의 최신 시세입니다.</CardDescription>
           </CardHeader>
           <CardContent>
             {watchlist.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {watchlist.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-center justify-between p-2 rounded-lg border hover:bg-muted/50 cursor-pointer"
-                    onClick={() =>
-                      handleSelectItem({
-                        itemCode: item.itemCode,
-                        itemName: item.itemName,
-                        unit: "",
-                      })
-                    }
+                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
+                    onClick={() => {
+                      handleSelectProduct(item.productName);
+                      if (item.variety) setSelectedVariety(item.variety);
+                      if (item.origin) setSelectedOrigin(item.origin);
+                    }}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                       <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
-                      <span className="font-medium">{item.itemName}</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{item.productName}</span>
+                          {item.variety && (
+                            <Badge variant="outline" className="text-xs">
+                              {item.variety}
+                            </Badge>
+                          )}
+                        </div>
+                        {item.origin && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {item.origin}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-red-500"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRemoveFromWatchlist(item.itemCode);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-3">
+                      {item.latestPrice && (
+                        <div className="text-right">
+                          <p className="font-bold">{formatLargeNumber(item.latestPrice)}</p>
+                          {item.priceChange !== null && (
+                            <Badge
+                              variant={getPriceChangeBadge(item.priceChange) as "default" | "secondary" | "destructive"}
+                              className="text-xs"
+                            >
+                              {getPriceChangeIcon(item.priceChange)}
+                              {Math.abs(item.priceChange).toFixed(1)}%
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-500"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveFromWatchlist(item.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -341,84 +590,114 @@ export function MarketPriceManager() {
       </div>
 
       {/* 선택된 품목 시세 정보 */}
-      {selectedItem && (
+      {selectedProduct && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span>{selectedItem.itemName} 시세</span>
-                {prices.length > 0 && (
+                <span>{selectedProduct} 시세</span>
+                {selectedVariety && (
+                  <Badge variant="outline">{selectedVariety}</Badge>
+                )}
+                {selectedOrigin && (
+                  <Badge variant="secondary">{selectedOrigin}</Badge>
+                )}
+                {priceHistory.length > 0 && (
                   <Badge
-                    variant={
-                      getPriceChange(prices).direction === "up"
-                        ? "destructive"
-                        : getPriceChange(prices).direction === "down"
-                        ? "default"
-                        : "secondary"
-                    }
+                    variant={getPriceChangeBadge(
+                      priceHistory.length > 1
+                        ? ((priceHistory[0].avgPrice - priceHistory[1].avgPrice) /
+                            priceHistory[1].avgPrice) *
+                            100
+                        : null
+                    ) as "default" | "secondary" | "destructive"}
                     className="flex items-center gap-1"
                   >
-                    {getPriceChange(prices).direction === "up" && <TrendingUp className="h-3 w-3" />}
-                    {getPriceChange(prices).direction === "down" && <TrendingDown className="h-3 w-3" />}
-                    {getPriceChange(prices).direction === "same" && <Minus className="h-3 w-3" />}
-                    {getPriceChange(prices).value.toFixed(1)}%
+                    {priceHistory.length > 1 ? (
+                      <>
+                        {getPriceChangeIcon(
+                          ((priceHistory[0].avgPrice - priceHistory[1].avgPrice) /
+                            priceHistory[1].avgPrice) *
+                            100
+                        )}
+                        {Math.abs(
+                          ((priceHistory[0].avgPrice - priceHistory[1].avgPrice) /
+                            priceHistory[1].avgPrice) *
+                            100
+                        ).toFixed(1)}
+                        %
+                      </>
+                    ) : (
+                      <Minus className="h-3 w-3" />
+                    )}
                   </Badge>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                {!isInWatchlist(selectedItem.itemCode) ? (
-                  <Button variant="outline" size="sm" onClick={() => handleAddToWatchlist(selectedItem)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    관심 등록
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleRemoveFromWatchlist(selectedItem.itemCode)}
-                  >
-                    <Star className="mr-2 h-4 w-4 fill-yellow-500 text-yellow-500" />
-                    관심 해제
-                  </Button>
-                )}
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleAddToWatchlist(selectedProduct, selectedVariety || undefined, selectedOrigin || undefined)}
+              >
+                <Star className="mr-2 h-4 w-4" />
+                관심 등록
+              </Button>
             </CardTitle>
-            <CardDescription>최근 30일간의 시세 추이입니다.</CardDescription>
+            <CardDescription>최근 30일간의 경매 시세 추이입니다.</CardDescription>
           </CardHeader>
           <CardContent>
-            {loadingPrices ? (
+            {loadingHistory ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : prices.length > 0 ? (
+            ) : priceHistory.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>날짜</TableHead>
-                    <TableHead>시장</TableHead>
                     <TableHead className="text-right">평균가</TableHead>
                     <TableHead className="text-right">최고가</TableHead>
                     <TableHead className="text-right">최저가</TableHead>
-                    <TableHead className="text-right">거래량</TableHead>
+                    <TableHead className="text-right">거래건수</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {prices.map((price) => (
-                    <TableRow key={price.id}>
-                      <TableCell>{new Date(price.date).toLocaleDateString("ko-KR")}</TableCell>
-                      <TableCell>{price.marketName}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatLargeNumber(price.avgPrice)}
-                      </TableCell>
-                      <TableCell className="text-right text-red-600">
-                        {formatLargeNumber(price.maxPrice)}
-                      </TableCell>
-                      <TableCell className="text-right text-blue-600">
-                        {formatLargeNumber(price.minPrice)}
-                      </TableCell>
-                      <TableCell className="text-right">{formatLargeNumber(price.tradingVolume)}</TableCell>
-                    </TableRow>
-                  ))}
+                  {priceHistory.map((price, index) => {
+                    const prevPrice = priceHistory[index + 1];
+                    const change = prevPrice
+                      ? ((price.avgPrice - prevPrice.avgPrice) / prevPrice.avgPrice) * 100
+                      : null;
+
+                    return (
+                      <TableRow key={price.date}>
+                        <TableCell>{formatDate(price.date)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="font-medium">
+                              {formatLargeNumber(price.avgPrice)}
+                            </span>
+                            {change !== null && (
+                              <Badge
+                                variant={getPriceChangeBadge(change) as "default" | "secondary" | "destructive"}
+                                className="text-xs"
+                              >
+                                {getPriceChangeIcon(change)}
+                                {Math.abs(change).toFixed(1)}%
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right text-red-600">
+                          {formatLargeNumber(price.maxPrice)}
+                        </TableCell>
+                        <TableCell className="text-right text-blue-600">
+                          {formatLargeNumber(price.minPrice)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {price.tradeCount}건
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             ) : (
@@ -426,7 +705,7 @@ export function MarketPriceManager() {
                 <LineChart className="h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">시세 데이터가 없습니다.</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  KAMIS API 연동 후 데이터가 수집됩니다.
+                  데이터 수집 버튼을 눌러 가락시장 경매 데이터를 수집해보세요.
                 </p>
               </div>
             )}
@@ -434,55 +713,42 @@ export function MarketPriceManager() {
         </Card>
       )}
 
-      {/* 검색 다이얼로그 */}
+      {/* 품목 검색 다이얼로그 */}
       <Dialog open={isSearchDialogOpen} onOpenChange={setIsSearchDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>품목 검색</DialogTitle>
-            <DialogDescription>품목명 또는 코드로 검색하세요.</DialogDescription>
+            <DialogDescription>품목명으로 검색하여 관심 품목에 등록하세요.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex gap-2">
               <Input
-                placeholder="품목명 또는 코드 입력"
+                placeholder="품목명 입력 (예: 토마토, 딸기)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               />
-              <Button onClick={handleSearch} disabled={searchLoading}>
-                {searchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              </Button>
             </div>
             <div className="max-h-[300px] overflow-y-auto space-y-2">
-              {searchResults.map((item) => (
+              {filteredProducts.map((product) => (
                 <div
-                  key={item.itemCode}
+                  key={product}
                   className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
                   onClick={() => {
-                    handleSelectItem(item);
+                    handleSelectProduct(product);
                     setIsSearchDialogOpen(false);
                   }}
                 >
-                  <div>
-                    <p className="font-medium">{item.itemName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      코드: {item.itemCode} · 단위: {item.unit}
-                    </p>
-                  </div>
-                  {isInWatchlist(item.itemCode) ? (
-                    <Star className="h-5 w-5 text-yellow-500 fill-yellow-500" />
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleAddToWatchlist(item);
-                      }}
-                    >
-                      <Star className="h-5 w-5" />
-                    </Button>
-                  )}
+                  <span className="font-medium">{product}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAddToWatchlist(product);
+                    }}
+                  >
+                    <Star className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -490,6 +756,64 @@ export function MarketPriceManager() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSearchDialogOpen(false)}>
               닫기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 데이터 수집 다이얼로그 */}
+      <Dialog open={isCollectDialogOpen} onOpenChange={setIsCollectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>가락시장 경매 데이터 수집</DialogTitle>
+            <DialogDescription>
+              지정한 날짜와 법인의 경매 결과를 수집합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>수집 날짜</Label>
+              <Input
+                type="date"
+                value={collectDate}
+                onChange={(e) => setCollectDate(e.target.value)}
+                max={new Date().toISOString().split("T")[0]}
+              />
+              <p className="text-xs text-muted-foreground">
+                당일 데이터는 아직 없을 수 있으므로 어제 이전 날짜를 권장합니다.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>법인 선택</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {corporations.map((corp) => (
+                  <Button
+                    key={corp.code}
+                    variant={selectedCorps.includes(corp.code) ? "default" : "outline"}
+                    size="sm"
+                    className="justify-start"
+                    onClick={() => {
+                      setSelectedCorps((prev) =>
+                        prev.includes(corp.code)
+                          ? prev.filter((c) => c !== corp.code)
+                          : [...prev, corp.code]
+                      );
+                    }}
+                  >
+                    {corp.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCollectDialogOpen(false)}>
+              취소
+            </Button>
+            <Button onClick={handleCollectData} disabled={collecting}>
+              {collecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              수집 시작
             </Button>
           </DialogFooter>
         </DialogContent>
