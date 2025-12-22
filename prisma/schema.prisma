@@ -31,10 +31,11 @@ model User {
   crops             Crop[]
   transactions      FinancialTransaction[]
   inventory         InventoryItem[]
-  priceWatchlist    PriceWatchlist[]
-  priceAlerts       PriceAlert[]
-  notifications     Notification[]
-  productWatchlist  ProductWatchlist[]
+  priceWatchlist           PriceWatchlist[]
+  priceAlerts              PriceAlert[]
+  notifications            Notification[]
+  productWatchlist         ProductWatchlist[]
+  marketCollectionSettings MarketCollectionSettings?
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -313,6 +314,30 @@ model DataCollectionLog {
   errorMessage String?
   startedAt    DateTime @default(now())
   completedAt  DateTime?
+
+  @@index([targetDate])
+  @@index([status])
+}
+
+// 시세 수집 설정
+model MarketCollectionSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  // 자동 수집 설정
+  autoCollectEnabled  Boolean  @default(false)
+  collectTime         String   @default("06:00") // HH:mm 형식
+  collectDaysAgo      Int      @default(1) // 몇 일 전 데이터 수집 (1=어제)
+  // 수집 대상
+  corporationCodes    String   @default("11000101") // 쉼표로 구분
+  // 데이터 보관 설정
+  retentionDays       Int      @default(90) // 보관 기간 (일)
+  autoCleanupEnabled  Boolean  @default(true) // 자동 정리 활성화
+  // 조회 설정
+  defaultViewDays     Int      @default(30) // 기본 조회 기간
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model PriceWatchlist {

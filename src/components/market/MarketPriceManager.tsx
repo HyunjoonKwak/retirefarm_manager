@@ -15,6 +15,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -30,6 +40,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   Search,
   Star,
   Loader2,
@@ -43,7 +59,9 @@ import {
   MapPin,
   LineChart,
   Download,
+  Settings,
 } from "lucide-react";
+import { MarketSettings } from "./MarketSettings";
 import { formatLargeNumber, formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
 
@@ -125,6 +143,10 @@ export function MarketPriceManager() {
     return yesterday.toISOString().split("T")[0];
   });
   const [selectedCorps, setSelectedCorps] = useState<string[]>(["11000101"]);
+
+  // 삭제 확인 다이얼로그
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState<string>("");
 
   const fetchWatchlist = useCallback(async () => {
     try {
@@ -235,7 +257,22 @@ export function MarketPriceManager() {
     }
   }, [searchQuery, products]);
 
+  function isAlreadyInWatchlist(productName: string, variety?: string, origin?: string) {
+    return watchlist.some(
+      (item) =>
+        item.productName === productName &&
+        (item.variety || "") === (variety || "") &&
+        (item.origin || "") === (origin || "")
+    );
+  }
+
   async function handleAddToWatchlist(productName: string, variety?: string, origin?: string) {
+    // 중복 확인
+    if (isAlreadyInWatchlist(productName, variety, origin)) {
+      toast.warning("이미 관심 품목에 등록되어 있습니다.");
+      return;
+    }
+
     try {
       const response = await fetch("/api/market/garak/watchlist", {
         method: "POST",
@@ -257,9 +294,16 @@ export function MarketPriceManager() {
     }
   }
 
-  async function handleRemoveFromWatchlist(id: string) {
+  function handleDeleteClick(id: string, productName: string) {
+    setDeleteConfirmId(id);
+    setDeleteConfirmName(productName);
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteConfirmId) return;
+
     try {
-      const response = await fetch(`/api/market/garak/watchlist?id=${id}`, {
+      const response = await fetch(`/api/market/garak/watchlist?id=${deleteConfirmId}`, {
         method: "DELETE",
       });
 
@@ -272,6 +316,9 @@ export function MarketPriceManager() {
       }
     } catch {
       toast.error("삭제 중 오류가 발생했습니다.");
+    } finally {
+      setDeleteConfirmId(null);
+      setDeleteConfirmName("");
     }
   }
 
@@ -343,9 +390,21 @@ export function MarketPriceManager() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* 요약 카드 */}
-      <div className="grid gap-4 md:grid-cols-4">
+    <Tabs defaultValue="prices" className="space-y-6">
+      <TabsList>
+        <TabsTrigger value="prices" className="flex items-center gap-2">
+          <LineChart className="h-4 w-4" />
+          시세 조회
+        </TabsTrigger>
+        <TabsTrigger value="settings" className="flex items-center gap-2">
+          <Settings className="h-4 w-4" />
+          설정
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="prices" className="space-y-6">
+        {/* 요약 카드 */}
+        <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -564,10 +623,10 @@ export function MarketPriceManager() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-red-500"
+                        className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleRemoveFromWatchlist(item.id);
+                          handleDeleteClick(item.id, item.productName);
                         }}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -633,14 +692,21 @@ export function MarketPriceManager() {
                   </Badge>
                 )}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleAddToWatchlist(selectedProduct, selectedVariety || undefined, selectedOrigin || undefined)}
-              >
-                <Star className="mr-2 h-4 w-4" />
-                관심 등록
-              </Button>
+              {isAlreadyInWatchlist(selectedProduct, selectedVariety || undefined, selectedOrigin || undefined) ? (
+                <Button variant="secondary" size="sm" disabled>
+                  <Star className="mr-2 h-4 w-4 fill-yellow-500 text-yellow-500" />
+                  등록됨
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddToWatchlist(selectedProduct, selectedVariety || undefined, selectedOrigin || undefined)}
+                >
+                  <Star className="mr-2 h-4 w-4" />
+                  관심 등록
+                </Button>
+              )}
             </CardTitle>
             <CardDescription>최근 30일간의 경매 시세 추이입니다.</CardDescription>
           </CardHeader>
@@ -729,28 +795,39 @@ export function MarketPriceManager() {
               />
             </div>
             <div className="max-h-[300px] overflow-y-auto space-y-2">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product}
-                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
-                  onClick={() => {
-                    handleSelectProduct(product);
-                    setIsSearchDialogOpen(false);
-                  }}
-                >
-                  <span className="font-medium">{product}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAddToWatchlist(product);
+              {filteredProducts.map((product) => {
+                const isRegistered = isAlreadyInWatchlist(product);
+                return (
+                  <div
+                    key={product}
+                    className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
+                    onClick={() => {
+                      handleSelectProduct(product);
+                      setIsSearchDialogOpen(false);
                     }}
                   >
-                    <Star className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{product}</span>
+                      {isRegistered && (
+                        <Badge variant="secondary" className="text-xs">
+                          등록됨
+                        </Badge>
+                      )}
+                    </div>
+                    <Button
+                      variant={isRegistered ? "ghost" : "outline"}
+                      size="sm"
+                      disabled={isRegistered}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAddToWatchlist(product);
+                      }}
+                    >
+                      <Star className={`h-4 w-4 ${isRegistered ? "fill-yellow-500 text-yellow-500" : ""}`} />
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <DialogFooter>
@@ -818,6 +895,34 @@ export function MarketPriceManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* 삭제 확인 다이얼로그 */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>관심 품목 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteConfirmName}</strong>을(를) 관심 품목에서 삭제하시겠습니까?
+              <br />
+              삭제 후에도 품목 검색에서 다시 등록할 수 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      </TabsContent>
+
+      <TabsContent value="settings">
+        <MarketSettings />
+      </TabsContent>
+    </Tabs>
   );
 }

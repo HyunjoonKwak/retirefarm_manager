@@ -1,0 +1,135 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { z } from "zod";
+import prisma from "@/lib/prisma";
+import { authOptions } from "@/lib/auth/options";
+import { CORPORATION_CODES } from "@/lib/services/garak-market";
+
+const updateSettingsSchema = z.object({
+  autoCollectEnabled: z.boolean().optional(),
+  collectTime: z.string().regex(/^\d{2}:\d{2}$/, "HH:mm 형식이어야 합니다.").optional(),
+  collectDaysAgo: z.number().min(1).max(7).optional(),
+  corporationCodes: z.array(z.string()).optional(),
+  retentionDays: z.number().min(7).max(365).optional(),
+  autoCleanupEnabled: z.boolean().optional(),
+  defaultViewDays: z.number().min(7).max(90).optional(),
+});
+
+// GET: 설정 조회
+export async function GET() {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+
+    // 사용자 설정 조회 또는 기본값 반환
+    let settings = await prisma.marketCollectionSettings.findUnique({
+      where: { userId: session.user.id },
+    });
+
+    // 설정이 없으면 기본값 생성
+    if (!settings) {
+      settings = await prisma.marketCollectionSettings.create({
+        data: {
+          userId: session.user.id,
+        },
+      });
+    }
+
+    // 법인코드를 배열로 변환
+    const corporationCodes = settings.corporationCodes.split(",").filter(Boolean);
+
+    // 법인 목록 (선택 가능한 옵션)
+    const availableCorporations = Object.entries(CORPORATION_CODES).map(([code, name]) => ({
+      code,
+      name,
+      selected: corporationCodes.includes(code),
+    }));
+
+    return NextResponse.json({
+      settings: {
+        ...settings,
+        corporationCodes,
+      },
+      availableCorporations,
+    });
+  } catch (error) {
+    console.error("Get market settings error:", error);
+    return NextResponse.json(
+      { error: "설정 조회 중 오류가 발생했습니다." },
+      { status: 500 }
+    );
+  }
+}
+
+// PATCH: 설정 업데이트
+export async function PATCH(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const validatedData = updateSettingsSchema.parse(body);
+
+    // 법인코드 배열을 문자열로 변환
+    const updateData: Record<string, unknown> = {};
+
+    if (validatedData.autoCollectEnabled !== undefined) {
+      updateData.autoCollectEnabled = validatedData.autoCollectEnabled;
+    }
+    if (validatedData.collectTime !== undefined) {
+      updateData.collectTime = validatedData.collectTime;
+    }
+    if (validatedData.collectDaysAgo !== undefined) {
+      updateData.collectDaysAgo = validatedData.collectDaysAgo;
+    }
+    if (validatedData.corporationCodes !== undefined) {
+      // 유효한 법인코드만 필터링
+      const validCodes = validatedData.corporationCodes.filter(
+        (code) => code in CORPORATION_CODES
+      );
+      updateData.corporationCodes = validCodes.join(",");
+    }
+    if (validatedData.retentionDays !== undefined) {
+      updateData.retentionDays = validatedData.retentionDays;
+    }
+    if (validatedData.autoCleanupEnabled !== undefined) {
+      updateData.autoCleanupEnabled = validatedData.autoCleanupEnabled;
+    }
+    if (validatedData.defaultViewDays !== undefined) {
+      updateData.defaultViewDays = validatedData.defaultViewDays;
+    }
+
+    const settings = await prisma.marketCollectionSettings.upsert({
+      where: { userId: session.user.id },
+      update: updateData,
+      create: {
+        userId: session.user.id,
+        ...updateData,
+      },
+    });
+
+    return NextResponse.json({
+      message: "설정이 저장되었습니다.",
+      settings,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "입력값이 올바르지 않습니다." },
+        { status: 400 }
+      );
+    }
+
+    console.error("Update market settings error:", error);
+    return NextResponse.json(
+      { error: "설정 저장 중 오류가 발생했습니다." },
+      { status: 500 }
+    );
+  }
+}
