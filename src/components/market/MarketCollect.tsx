@@ -31,10 +31,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Settings,
   Loader2,
   Trash2,
   Database,
@@ -46,19 +44,21 @@ import {
   AlertTriangle,
   Download,
   Play,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface MarketSettings {
   autoCollectEnabled: boolean;
   collectTime: string;
   collectDaysAgo: number;
-  collectDays: number[]; // 0=일, 1=월, ..., 6=토
+  collectDays: number[];
   corporationCodes: string[];
   targetProducts: string[];
-  retentionDays: number;
-  autoCleanupEnabled: boolean;
   defaultViewDays: number;
 }
 
@@ -99,16 +99,16 @@ interface CollectionLog {
   completedAt?: string;
 }
 
+interface DailyData {
+  date: string;
+  count: number;
+}
+
 interface DataStats {
   totalCount: number;
   oldestDate: string | null;
   newestDate: string | null;
-  retentionBreakdown: {
-    within30Days: number;
-    within60Days: number;
-    within90Days: number;
-    over90Days: number;
-  };
+  dailyData: DailyData[];
 }
 
 export function MarketCollect() {
@@ -119,9 +119,8 @@ export function MarketCollect() {
   const [dataStats, setDataStats] = useState<DataStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [cleaning, setCleaning] = useState(false);
 
-  // 수동 수집 관련 상태
+  // 수집 관련 상태 (수동/자동 통합)
   const [isCollecting, setIsCollecting] = useState(false);
   const [collectProgress, setCollectProgress] = useState<string>("");
   const [collectProgressPercent, setCollectProgressPercent] = useState<number>(0);
@@ -141,14 +140,15 @@ export function MarketCollect() {
     return ["11000101"];
   });
 
-  // 데이터 삭제 관련 상태
-  const [deleteDate, setDeleteDate] = useState<string>("");
-  const [deleteProduct, setDeleteProduct] = useState<string>("");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-
   // 수집 품목 직접 입력
   const [customProduct, setCustomProduct] = useState<string>("");
+
+  // 자동 수집 설정 펼침 상태
+  const [autoSettingsOpen, setAutoSettingsOpen] = useState(false);
+
+  // 삭제 관련 상태
+  const [deleteTargetDate, setDeleteTargetDate] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // localStorage 동기화
   useEffect(() => {
@@ -192,7 +192,7 @@ export function MarketCollect() {
 
   const fetchDataStats = useCallback(async () => {
     try {
-      const response = await fetch("/api/market/garak/cleanup");
+      const response = await fetch("/api/market/garak/cleanup?byDate=true");
       const data = await response.json();
       setDataStats(data);
     } catch (error) {
@@ -238,31 +238,7 @@ export function MarketCollect() {
     }
   }
 
-  async function handleCleanup(retentionDays: number) {
-    setCleaning(true);
-    try {
-      const response = await fetch("/api/market/garak/cleanup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ retentionDays }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        toast.error(result.error || "데이터 정리에 실패했습니다.");
-      } else {
-        toast.success(result.message);
-        fetchDataStats();
-      }
-    } catch {
-      toast.error("데이터 정리 중 오류가 발생했습니다.");
-    } finally {
-      setCleaning(false);
-    }
-  }
-
-  // 수동 데이터 수집
+  // 데이터 수집
   async function handleCollectData() {
     if (selectedCorps.length === 0) {
       toast.error("수집할 법인을 선택해주세요.");
@@ -282,16 +258,16 @@ export function MarketCollect() {
         const corpName = corporations.find((c) => c.code === corpCode)?.name || corpCode;
         setCollectProgress(`${corpName} 데이터 수집 중...`);
 
-        const params = new URLSearchParams({
-          date: collectDate,
-          corporation: corpCode,
+        const response = await fetch("/api/market/garak/collect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: collectDate,
+            corporationCodes: [corpCode],
+            productName: collectProducts.length > 0 ? collectProducts.join(",") : undefined,
+          }),
         });
 
-        if (collectProducts.length > 0) {
-          params.append("products", collectProducts.join(","));
-        }
-
-        const response = await fetch(`/api/market/garak?${params.toString()}`);
         const result = await response.json();
 
         if (!response.ok) {
@@ -320,23 +296,11 @@ export function MarketCollect() {
     }
   }
 
-  // 특정 날짜/품목 데이터 삭제
-  async function handleDeleteDateData() {
-    if (!deleteDate) {
-      toast.error("삭제할 날짜를 선택해주세요.");
-      return;
-    }
-
+  // 특정 날짜 데이터 삭제
+  async function handleDeleteDateData(date: string) {
     setIsDeleting(true);
     try {
-      const params = new URLSearchParams({
-        date: deleteDate,
-      });
-      if (deleteProduct) {
-        params.append("product", deleteProduct);
-      }
-
-      const response = await fetch(`/api/market/garak/delete?${params.toString()}`, {
+      const response = await fetch(`/api/market/garak?date=${date}`, {
         method: "DELETE",
       });
 
@@ -346,10 +310,8 @@ export function MarketCollect() {
         throw new Error(result.error || "삭제 실패");
       }
 
-      toast.success(result.message || "데이터가 삭제되었습니다.");
-      setDeleteDate("");
-      setDeleteProduct("");
-      setDeleteConfirmOpen(false);
+      toast.success(`${formatDate(date)} 데이터 ${result.deletedCount}건이 삭제되었습니다.`);
+      setDeleteTargetDate(null);
       fetchDataStats();
     } catch (error) {
       const message = error instanceof Error ? error.message : "삭제 중 오류가 발생했습니다.";
@@ -437,17 +399,17 @@ export function MarketCollect() {
 
   return (
     <div className="space-y-6">
-      {/* 수동 데이터 수집 */}
+      {/* 데이터 수집 (수동/자동 통합) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
-            수동 데이터 수집
+            데이터 수집
           </CardTitle>
           <CardDescription>
-            가락시장 경매 데이터를 수동으로 수집합니다.
+            가락시장 경매 데이터를 수집합니다.
             {dataStats?.newestDate && (
-              <span className="ml-2 text-primary">
+              <span className="ml-2 text-primary font-medium">
                 최신 데이터: {formatDate(dataStats.newestDate)}
               </span>
             )}
@@ -456,7 +418,10 @@ export function MarketCollect() {
         <CardContent className="space-y-6">
           {/* 수집 날짜 */}
           <div className="space-y-2">
-            <Label>수집 날짜</Label>
+            <Label className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              수집 날짜
+            </Label>
             <Input
               type="date"
               value={collectDate}
@@ -553,6 +518,7 @@ export function MarketCollect() {
           <Button
             onClick={handleCollectData}
             disabled={isCollecting || selectedCorps.length === 0}
+            size="lg"
             className="w-full md:w-auto"
           >
             {isCollecting ? (
@@ -562,91 +528,34 @@ export function MarketCollect() {
             )}
             데이터 수집 시작
           </Button>
-        </CardContent>
-      </Card>
 
-      {/* 데이터 삭제 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5" />
-            데이터 삭제
-          </CardTitle>
-          <CardDescription>
-            특정 날짜 또는 품목의 데이터를 삭제합니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>삭제할 날짜</Label>
-              <Input
-                type="date"
-                value={deleteDate}
-                onChange={(e) => setDeleteDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>품목 (선택)</Label>
-              <Input
-                placeholder="비워두면 해당 날짜 전체 삭제"
-                value={deleteProduct}
-                onChange={(e) => setDeleteProduct(e.target.value)}
-              />
-            </div>
-          </div>
-          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="destructive"
-                disabled={!deleteDate || isDeleting}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                데이터 삭제
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>데이터 삭제 확인</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {formatDate(deleteDate)}
-                  {deleteProduct ? ` "${deleteProduct}" 품목` : " 전체"} 데이터를 삭제합니다.
-                  삭제된 데이터는 복구할 수 없습니다.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>취소</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDeleteDateData}>
-                  {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  삭제
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </CardContent>
-      </Card>
-
-      {/* 수집 설정 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            수집 설정
-          </CardTitle>
-          <CardDescription>
-            가락시장 경매 데이터 수집 및 보관 설정을 관리합니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
+          {/* 자동 수집 설정 (접이식) */}
           {settings && (
-            <>
-              {/* 자동 수집 설정 */}
-              <div className="space-y-4">
+            <Collapsible open={autoSettingsOpen} onOpenChange={setAutoSettingsOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between mt-4 border-t pt-4">
+                  <span className="flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    자동 수집 설정
+                    {settings.autoCollectEnabled && (
+                      <Badge variant="secondary" className="ml-2">
+                        활성화됨 ({settings.collectTime})
+                      </Badge>
+                    )}
+                  </span>
+                  {autoSettingsOpen ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-4 pt-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-base">자동 수집</Label>
                     <p className="text-sm text-muted-foreground">
-                      매일 지정된 시간에 자동으로 데이터를 수집합니다.
+                      지정된 시간에 자동으로 데이터를 수집합니다.
                     </p>
                   </div>
                   <Switch
@@ -682,9 +591,9 @@ export function MarketCollect() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="0">오늘 데이터</SelectItem>
                             <SelectItem value="1">어제 데이터</SelectItem>
                             <SelectItem value="2">2일 전 데이터</SelectItem>
-                            <SelectItem value="3">3일 전 데이터</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -711,231 +620,151 @@ export function MarketCollect() {
                           </Button>
                         ))}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        선택한 요일에만 자동 수집이 실행됩니다.
-                        {settings.collectDays.length === 0 && (
-                          <span className="text-red-500 ml-1">최소 1개 이상 선택해주세요.</span>
-                        )}
-                      </p>
+                      {settings.collectDays.length === 0 && (
+                        <p className="text-xs text-red-500">최소 1개 이상 선택해주세요.</p>
+                      )}
                     </div>
+
+                    {/* 수집 대상 법인 */}
+                    <div className="space-y-3">
+                      <Label>수집 대상 법인</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {corporations.map((corp) => (
+                          <Button
+                            key={corp.code}
+                            variant={settings.corporationCodes.includes(corp.code) ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => toggleCorporation(corp.code)}
+                          >
+                            {corp.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 수집 대상 품목 */}
+                    <div className="space-y-3">
+                      <div>
+                        <Label>수집 대상 품목</Label>
+                        <p className="text-sm text-muted-foreground">
+                          선택하지 않으면 전체 품목을 수집합니다.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {AVAILABLE_PRODUCTS.map((product) => (
+                          <Button
+                            key={product}
+                            variant={settings.targetProducts.includes(product) ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => toggleProduct(product)}
+                          >
+                            {product}
+                          </Button>
+                        ))}
+                      </div>
+                      {settings.targetProducts.length > 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          선택됨: {settings.targetProducts.join(", ")}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 법인 선택 경고 */}
+                    {settings.corporationCodes.length === 0 && (
+                      <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+                        <AlertTriangle className="h-4 w-4" />
+                        수집 대상 법인을 최소 1개 이상 선택해주세요.
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
 
-              {/* 수집 대상 법인 */}
-              <div className="space-y-3">
-                <Label className="text-base">수집 대상 법인</Label>
-                <div className="flex flex-wrap gap-2">
-                  {corporations.map((corp) => (
+                {/* 저장/취소 버튼 */}
+                <div className="flex items-center justify-between pt-4">
+                  <div className="flex items-center gap-2">
+                    {hasUnsavedChanges && (
+                      <Badge variant="outline" className="text-yellow-600 border-yellow-400">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        저장되지 않은 변경사항
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {hasUnsavedChanges && (
+                      <Button variant="outline" onClick={handleResetSettings}>
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        취소
+                      </Button>
+                    )}
                     <Button
-                      key={corp.code}
-                      variant={settings.corporationCodes.includes(corp.code) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleCorporation(corp.code)}
+                      onClick={handleSaveSettings}
+                      disabled={saving || (settings.autoCollectEnabled && settings.corporationCodes.length === 0)}
                     >
-                      {corp.name}
+                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      설정 저장
                     </Button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 수집 대상 품목 */}
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-base">수집 대상 품목</Label>
-                  <p className="text-sm text-muted-foreground">
-                    자동 수집할 품목을 선택하세요. 선택하지 않으면 전체 품목을 수집합니다.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_PRODUCTS.map((product) => (
-                    <Button
-                      key={product}
-                      variant={settings.targetProducts.includes(product) ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleProduct(product)}
-                    >
-                      {product}
-                    </Button>
-                  ))}
-                </div>
-                {settings.targetProducts.length > 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    선택됨: {settings.targetProducts.join(", ")}
-                  </p>
-                )}
-              </div>
-
-              {/* 데이터 보관 설정 */}
-              <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-base">자동 정리</Label>
-                    <p className="text-sm text-muted-foreground">
-                      보관 기간이 지난 데이터를 자동으로 삭제합니다.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.autoCleanupEnabled}
-                    onCheckedChange={(checked) =>
-                      setSettings({ ...settings, autoCleanupEnabled: checked })
-                    }
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>보관 기간</Label>
-                    <Select
-                      value={settings.retentionDays.toString()}
-                      onValueChange={(v) =>
-                        setSettings({ ...settings, retentionDays: parseInt(v, 10) })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="30">30일</SelectItem>
-                        <SelectItem value="60">60일</SelectItem>
-                        <SelectItem value="90">90일</SelectItem>
-                        <SelectItem value="180">180일</SelectItem>
-                        <SelectItem value="365">365일</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>기본 조회 기간</Label>
-                    <Select
-                      value={settings.defaultViewDays.toString()}
-                      onValueChange={(v) =>
-                        setSettings({ ...settings, defaultViewDays: parseInt(v, 10) })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="7">7일</SelectItem>
-                        <SelectItem value="14">14일</SelectItem>
-                        <SelectItem value="30">30일</SelectItem>
-                        <SelectItem value="60">60일</SelectItem>
-                        <SelectItem value="90">90일</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
-              </div>
-
-              {/* 법인 선택 경고 */}
-              {settings.corporationCodes.length === 0 && (
-                <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-                  <AlertTriangle className="h-4 w-4" />
-                  수집 대상 법인을 최소 1개 이상 선택해주세요.
-                </div>
-              )}
-
-              {/* 저장/취소 버튼 */}
-              <div className="flex items-center justify-between pt-4">
-                <div className="flex items-center gap-2">
-                  {hasUnsavedChanges && (
-                    <Badge variant="outline" className="text-yellow-600 border-yellow-400">
-                      <AlertCircle className="h-3 w-3 mr-1" />
-                      저장되지 않은 변경사항
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  {hasUnsavedChanges && (
-                    <Button variant="outline" onClick={handleResetSettings}>
-                      <RotateCcw className="mr-2 h-4 w-4" />
-                      취소
-                    </Button>
-                  )}
-                  <Button
-                    onClick={handleSaveSettings}
-                    disabled={saving || settings.corporationCodes.length === 0}
-                  >
-                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    설정 저장
-                  </Button>
-                </div>
-              </div>
-            </>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </CardContent>
       </Card>
 
-      {/* 데이터 현황 */}
+      {/* 저장된 데이터 현황 (날짜별) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
-            데이터 현황
+            저장된 데이터
           </CardTitle>
           <CardDescription>
-            저장된 시세 데이터 현황 및 관리
+            날짜별로 저장된 시세 데이터 현황입니다.
+            {dataStats && (
+              <span className="ml-2">
+                총 {dataStats.totalCount.toLocaleString()}건
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {dataStats && (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-4">
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-muted-foreground">전체 데이터</p>
-                  <p className="text-2xl font-bold">{dataStats.totalCount.toLocaleString()}건</p>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-muted-foreground">30일 이내</p>
-                  <p className="text-2xl font-bold text-green-600">
-                    {dataStats.retentionBreakdown.within30Days.toLocaleString()}건
-                  </p>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-muted-foreground">30-90일</p>
-                  <p className="text-2xl font-bold text-yellow-600">
-                    {(dataStats.retentionBreakdown.within60Days + dataStats.retentionBreakdown.within90Days).toLocaleString()}건
-                  </p>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <p className="text-sm text-muted-foreground">90일 초과</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {dataStats.retentionBreakdown.over90Days.toLocaleString()}건
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>
-                  데이터 기간: {dataStats.oldestDate ? formatDate(dataStats.oldestDate) : "-"} ~{" "}
-                  {dataStats.newestDate ? formatDate(dataStats.newestDate) : "-"}
-                </span>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={cleaning}>
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      오래된 데이터 정리
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>데이터 정리</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {settings?.retentionDays || 90}일 이전의 데이터를 삭제합니다.
-                        삭제된 데이터는 복구할 수 없습니다.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>취소</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => handleCleanup(settings?.retentionDays || 90)}
-                      >
-                        삭제
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
+          {dataStats?.dailyData && dataStats.dailyData.length > 0 ? (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>날짜</TableHead>
+                    <TableHead className="text-right">데이터 건수</TableHead>
+                    <TableHead className="w-[100px]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dataStats.dailyData.map((item) => (
+                    <TableRow key={item.date}>
+                      <TableCell className="font-medium">
+                        {formatDate(item.date)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {item.count.toLocaleString()}건
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTargetDate(item.date)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              저장된 데이터가 없습니다.
             </div>
           )}
         </CardContent>
@@ -989,6 +818,29 @@ export function MarketCollect() {
           )}
         </CardContent>
       </Card>
+
+      {/* 삭제 확인 다이얼로그 */}
+      <AlertDialog open={!!deleteTargetDate} onOpenChange={() => setDeleteTargetDate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>데이터 삭제 확인</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTargetDate && formatDate(deleteTargetDate)} 날짜의 모든 데이터를 삭제합니다.
+              삭제된 데이터는 복구할 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTargetDate && handleDeleteDateData(deleteTargetDate)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

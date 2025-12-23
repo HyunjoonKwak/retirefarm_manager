@@ -326,7 +326,7 @@ model MarketCollectionSettings {
   // 자동 수집 설정
   autoCollectEnabled  Boolean  @default(false)
   collectTime         String   @default("09:30") // HH:mm 형식
-  collectDaysAgo      Int      @default(1) // 몇 일 전 데이터 수집 (1=어제)
+  collectDaysAgo      Int      @default(0) // 몇 일 전 데이터 수집 (0=오늘, 1=어제)
   collectDays         String   @default("1,2,3,4,5") // 수집할 요일 (0=일,1=월,...,6=토, 쉼표 구분)
   // 수집 대상
   corporationCodes    String   @default("11000101") // 쉼표로 구분

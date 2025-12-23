@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
 
 // GET: 데이터 현황 조회
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
 
@@ -12,10 +12,46 @@ export async function GET() {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const byDate = searchParams.get("byDate") === "true";
+
     // 전체 데이터 수
     const totalCount = await prisma.auctionResult.count();
 
-    // 날짜별 데이터 분포 (최근 12개월)
+    // 가장 오래된 데이터
+    const oldest = await prisma.auctionResult.findFirst({
+      orderBy: { auctionDate: "asc" },
+      select: { auctionDate: true },
+    });
+
+    // 가장 최근 데이터
+    const newest = await prisma.auctionResult.findFirst({
+      orderBy: { auctionDate: "desc" },
+      select: { auctionDate: true },
+    });
+
+    // 날짜별 데이터 현황 (byDate=true인 경우)
+    if (byDate) {
+      const dailyStats = await prisma.auctionResult.groupBy({
+        by: ["auctionDate"],
+        _count: { id: true },
+        orderBy: { auctionDate: "desc" },
+      });
+
+      const dailyData = dailyStats.map((stat) => ({
+        date: stat.auctionDate.toISOString().split("T")[0],
+        count: stat._count.id,
+      }));
+
+      return NextResponse.json({
+        totalCount,
+        oldestDate: oldest?.auctionDate || null,
+        newestDate: newest?.auctionDate || null,
+        dailyData,
+      });
+    }
+
+    // 기본: 월별 데이터 분포
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
@@ -34,52 +70,6 @@ export async function GET() {
       monthlyData[month] = (monthlyData[month] || 0) + stat._count.id;
     });
 
-    // 가장 오래된 데이터
-    const oldest = await prisma.auctionResult.findFirst({
-      orderBy: { auctionDate: "asc" },
-      select: { auctionDate: true },
-    });
-
-    // 가장 최근 데이터
-    const newest = await prisma.auctionResult.findFirst({
-      orderBy: { auctionDate: "desc" },
-      select: { auctionDate: true },
-    });
-
-    // 보관 기간별 데이터 수
-    const retentionBreakdown = await Promise.all([
-      // 30일 이내
-      prisma.auctionResult.count({
-        where: {
-          auctionDate: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-        },
-      }),
-      // 30-60일
-      prisma.auctionResult.count({
-        where: {
-          auctionDate: {
-            gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-            lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-      // 60-90일
-      prisma.auctionResult.count({
-        where: {
-          auctionDate: {
-            gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
-            lt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-          },
-        },
-      }),
-      // 90일 이상
-      prisma.auctionResult.count({
-        where: {
-          auctionDate: { lt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
-        },
-      }),
-    ]);
-
     return NextResponse.json({
       totalCount,
       oldestDate: oldest?.auctionDate || null,
@@ -87,12 +77,6 @@ export async function GET() {
       monthlyData: Object.entries(monthlyData)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([month, count]) => ({ month, count })),
-      retentionBreakdown: {
-        within30Days: retentionBreakdown[0],
-        within60Days: retentionBreakdown[1],
-        within90Days: retentionBreakdown[2],
-        over90Days: retentionBreakdown[3],
-      },
     });
   } catch (error) {
     console.error("Get data stats error:", error);

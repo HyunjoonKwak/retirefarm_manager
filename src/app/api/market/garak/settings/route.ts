@@ -8,7 +8,7 @@ import { CORPORATION_CODES } from "@/lib/services/garak-market";
 const updateSettingsSchema = z.object({
   autoCollectEnabled: z.boolean().optional(),
   collectTime: z.string().regex(/^\d{2}:\d{2}$/, "HH:mm 형식이어야 합니다.").optional(),
-  collectDaysAgo: z.number().min(1).max(7).optional(),
+  collectDaysAgo: z.number().min(0).max(7).optional(), // 0=오늘, 1=어제, ...
   collectDays: z.array(z.number().min(0).max(6)).optional(), // 0=일, 1=월, ..., 6=토
   corporationCodes: z.array(z.string()).optional(),
   targetProducts: z.array(z.string()).optional(),
