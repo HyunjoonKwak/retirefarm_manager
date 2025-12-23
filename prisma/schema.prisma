@@ -325,10 +325,12 @@ model MarketCollectionSettings {
   userId              String   @unique
   // 자동 수집 설정
   autoCollectEnabled  Boolean  @default(false)
-  collectTime         String   @default("06:00") // HH:mm 형식
+  collectTime         String   @default("09:30") // HH:mm 형식
   collectDaysAgo      Int      @default(1) // 몇 일 전 데이터 수집 (1=어제)
+  collectDays         String   @default("1,2,3,4,5") // 수집할 요일 (0=일,1=월,...,6=토, 쉼표 구분)
   // 수집 대상
   corporationCodes    String   @default("11000101") // 쉼표로 구분
+  targetProducts      String   @default("토마토,포도") // 수집 대상 품목 (쉼표로 구분)
   // 데이터 보관 설정
   retentionDays       Int      @default(90) // 보관 기간 (일)
   autoCleanupEnabled  Boolean  @default(true) // 자동 정리 활성화

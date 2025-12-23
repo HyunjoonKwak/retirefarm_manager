@@ -18,7 +18,15 @@
       "Bash(DATABASE_URL=\"file:./prisma/data/retirefarm.db\" npx prisma migrate:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nfeat: PostgreSQL에서 SQLite로 데이터베이스 전환\n\n주요 변경사항:\n- prisma/schema.prisma: provider를 sqlite로 변경\n- Enum 타입을 String으로 변환 (SQLite 호환)\n- photos 배열을 JSON 문자열로 변환\n- docker-compose.yml: PostgreSQL 서비스 제거\n- Dockerfile: postgresql-client 제거\n- manage.sh: SQLite용 백업/복원 로직으로 변경\n- scripts/migrate-pg-to-sqlite.ts: 마이그레이션 스크립트 추가\n\n마이그레이션 방법:\n1. .env에 POSTGRES_URL 설정\n2. npx tsx scripts/migrate-pg-to-sqlite.ts 실행\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker compose build:*)",
+      "Bash(docker compose:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker cp:*)"
     ],
     "deny": [],
     "ask": []

@@ -9,7 +9,9 @@ const updateSettingsSchema = z.object({
   autoCollectEnabled: z.boolean().optional(),
   collectTime: z.string().regex(/^\d{2}:\d{2}$/, "HH:mm 형식이어야 합니다.").optional(),
   collectDaysAgo: z.number().min(1).max(7).optional(),
+  collectDays: z.array(z.number().min(0).max(6)).optional(), // 0=일, 1=월, ..., 6=토
   corporationCodes: z.array(z.string()).optional(),
+  targetProducts: z.array(z.string()).optional(),
   retentionDays: z.number().min(7).max(365).optional(),
   autoCleanupEnabled: z.boolean().optional(),
   defaultViewDays: z.number().min(7).max(90).optional(),
@@ -40,6 +42,10 @@ export async function GET() {
 
     // 법인코드를 배열로 변환
     const corporationCodes = settings.corporationCodes.split(",").filter(Boolean);
+    // 대상 품목을 배열로 변환
+    const targetProducts = settings.targetProducts.split(",").filter(Boolean);
+    // 수집 요일을 배열로 변환
+    const collectDays = settings.collectDays.split(",").filter(Boolean).map(Number);
 
     // 법인 목록 (선택 가능한 옵션)
     const availableCorporations = Object.entries(CORPORATION_CODES).map(([code, name]) => ({
@@ -52,6 +58,8 @@ export async function GET() {
       settings: {
         ...settings,
         corporationCodes,
+        targetProducts,
+        collectDays,
       },
       availableCorporations,
     });
@@ -88,12 +96,18 @@ export async function PATCH(request: NextRequest) {
     if (validatedData.collectDaysAgo !== undefined) {
       updateData.collectDaysAgo = validatedData.collectDaysAgo;
     }
+    if (validatedData.collectDays !== undefined) {
+      updateData.collectDays = validatedData.collectDays.join(",");
+    }
     if (validatedData.corporationCodes !== undefined) {
       // 유효한 법인코드만 필터링
       const validCodes = validatedData.corporationCodes.filter(
         (code) => code in CORPORATION_CODES
       );
       updateData.corporationCodes = validCodes.join(",");
+    }
+    if (validatedData.targetProducts !== undefined) {
+      updateData.targetProducts = validatedData.targetProducts.join(",");
     }
     if (validatedData.retentionDays !== undefined) {
       updateData.retentionDays = validatedData.retentionDays;

@@ -44,6 +44,8 @@ import {
   AlertCircle,
   RotateCcw,
   AlertTriangle,
+  Download,
+  Play,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
@@ -109,7 +111,7 @@ interface DataStats {
   };
 }
 
-export function MarketSettings() {
+export function MarketCollect() {
   const [settings, setSettings] = useState<MarketSettings | null>(null);
   const [originalSettings, setOriginalSettings] = useState<MarketSettings | null>(null);
   const [corporations, setCorporations] = useState<Corporation[]>([]);
@@ -118,6 +120,48 @@ export function MarketSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+
+  // 수동 수집 관련 상태
+  const [isCollecting, setIsCollecting] = useState(false);
+  const [collectProgress, setCollectProgress] = useState<string>("");
+  const [collectProgressPercent, setCollectProgressPercent] = useState<number>(0);
+  const [collectDate, setCollectDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [collectProducts, setCollectProducts] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("market_collectProducts");
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+  const [selectedCorps, setSelectedCorps] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("market_selectedCorps");
+      return saved ? JSON.parse(saved) : ["11000101"];
+    }
+    return ["11000101"];
+  });
+
+  // 데이터 삭제 관련 상태
+  const [deleteDate, setDeleteDate] = useState<string>("");
+  const [deleteProduct, setDeleteProduct] = useState<string>("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  // 수집 품목 직접 입력
+  const [customProduct, setCustomProduct] = useState<string>("");
+
+  // localStorage 동기화
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("market_collectProducts", JSON.stringify(collectProducts));
+    }
+  }, [collectProducts]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("market_selectedCorps", JSON.stringify(selectedCorps));
+    }
+  }, [selectedCorps]);
 
   // 변경사항 감지
   const hasUnsavedChanges = settings && originalSettings
@@ -218,6 +262,125 @@ export function MarketSettings() {
     }
   }
 
+  // 수동 데이터 수집
+  async function handleCollectData() {
+    if (selectedCorps.length === 0) {
+      toast.error("수집할 법인을 선택해주세요.");
+      return;
+    }
+
+    setIsCollecting(true);
+    setCollectProgress("수집 준비 중...");
+    setCollectProgressPercent(0);
+
+    const totalSteps = selectedCorps.length;
+    let completedSteps = 0;
+    let totalNewRecords = 0;
+
+    try {
+      for (const corpCode of selectedCorps) {
+        const corpName = corporations.find((c) => c.code === corpCode)?.name || corpCode;
+        setCollectProgress(`${corpName} 데이터 수집 중...`);
+
+        const params = new URLSearchParams({
+          date: collectDate,
+          corporation: corpCode,
+        });
+
+        if (collectProducts.length > 0) {
+          params.append("products", collectProducts.join(","));
+        }
+
+        const response = await fetch(`/api/market/garak?${params.toString()}`);
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || `${corpName} 수집 실패`);
+        }
+
+        totalNewRecords += result.newRecords || 0;
+        completedSteps++;
+        setCollectProgressPercent(Math.round((completedSteps / totalSteps) * 100));
+      }
+
+      setCollectProgress("수집 완료!");
+      toast.success(`${totalNewRecords}건의 새 데이터가 저장되었습니다.`);
+      fetchDataStats();
+      fetchLogs();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "수집 중 오류가 발생했습니다.";
+      setCollectProgress(`오류: ${message}`);
+      toast.error(message);
+    } finally {
+      setTimeout(() => {
+        setIsCollecting(false);
+        setCollectProgress("");
+        setCollectProgressPercent(0);
+      }, 2000);
+    }
+  }
+
+  // 특정 날짜/품목 데이터 삭제
+  async function handleDeleteDateData() {
+    if (!deleteDate) {
+      toast.error("삭제할 날짜를 선택해주세요.");
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const params = new URLSearchParams({
+        date: deleteDate,
+      });
+      if (deleteProduct) {
+        params.append("product", deleteProduct);
+      }
+
+      const response = await fetch(`/api/market/garak/delete?${params.toString()}`, {
+        method: "DELETE",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "삭제 실패");
+      }
+
+      toast.success(result.message || "데이터가 삭제되었습니다.");
+      setDeleteDate("");
+      setDeleteProduct("");
+      setDeleteConfirmOpen(false);
+      fetchDataStats();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "삭제 중 오류가 발생했습니다.";
+      toast.error(message);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  // 수집 품목 토글
+  function toggleCollectProduct(product: string) {
+    setCollectProducts((prev) =>
+      prev.includes(product) ? prev.filter((p) => p !== product) : [...prev, product]
+    );
+  }
+
+  // 수집 법인 토글
+  function toggleCollectCorp(code: string) {
+    setSelectedCorps((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  }
+
+  // 직접 입력 품목 추가
+  function handleAddCustomProduct() {
+    if (!customProduct.trim()) return;
+    const products = customProduct.split(",").map((p) => p.trim()).filter(Boolean);
+    setCollectProducts((prev) => [...new Set([...prev, ...products])]);
+    setCustomProduct("");
+  }
+
   function toggleCorporation(code: string) {
     if (!settings) return;
 
@@ -274,6 +437,195 @@ export function MarketSettings() {
 
   return (
     <div className="space-y-6">
+      {/* 수동 데이터 수집 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Download className="h-5 w-5" />
+            수동 데이터 수집
+          </CardTitle>
+          <CardDescription>
+            가락시장 경매 데이터를 수동으로 수집합니다.
+            {dataStats?.newestDate && (
+              <span className="ml-2 text-primary">
+                최신 데이터: {formatDate(dataStats.newestDate)}
+              </span>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* 수집 날짜 */}
+          <div className="space-y-2">
+            <Label>수집 날짜</Label>
+            <Input
+              type="date"
+              value={collectDate}
+              onChange={(e) => setCollectDate(e.target.value)}
+              className="w-full md:w-64"
+            />
+          </div>
+
+          {/* 수집 품목 선택 */}
+          <div className="space-y-3">
+            <Label>수집 품목 (선택하지 않으면 전체)</Label>
+            <div className="flex flex-wrap gap-2">
+              {AVAILABLE_PRODUCTS.slice(0, 14).map((product) => (
+                <Button
+                  key={product}
+                  variant={collectProducts.includes(product) ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => toggleCollectProduct(product)}
+                >
+                  {product}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="직접 입력 (쉼표로 구분)"
+                value={customProduct}
+                onChange={(e) => setCustomProduct(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCustomProduct()}
+                className="flex-1"
+              />
+              <Button variant="outline" onClick={handleAddCustomProduct}>
+                추가
+              </Button>
+            </div>
+            {collectProducts.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {collectProducts.map((p) => (
+                  <Badge
+                    key={p}
+                    variant="secondary"
+                    className="cursor-pointer"
+                    onClick={() => toggleCollectProduct(p)}
+                  >
+                    {p} ×
+                  </Badge>
+                ))}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => setCollectProducts([])}
+                >
+                  전체 해제
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* 법인 선택 */}
+          <div className="space-y-3">
+            <Label>수집 법인</Label>
+            <div className="flex flex-wrap gap-2">
+              {corporations.map((corp) => (
+                <Button
+                  key={corp.code}
+                  variant={selectedCorps.includes(corp.code) ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => toggleCollectCorp(corp.code)}
+                >
+                  {corp.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* 수집 진행 상태 */}
+          {isCollecting && (
+            <div className="space-y-2 p-4 bg-muted rounded-lg">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{collectProgress}</span>
+              </div>
+              <div className="w-full bg-secondary rounded-full h-2">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${collectProgressPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 수집 버튼 */}
+          <Button
+            onClick={handleCollectData}
+            disabled={isCollecting || selectedCorps.length === 0}
+            className="w-full md:w-auto"
+          >
+            {isCollecting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" />
+            )}
+            데이터 수집 시작
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* 데이터 삭제 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5" />
+            데이터 삭제
+          </CardTitle>
+          <CardDescription>
+            특정 날짜 또는 품목의 데이터를 삭제합니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>삭제할 날짜</Label>
+              <Input
+                type="date"
+                value={deleteDate}
+                onChange={(e) => setDeleteDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>품목 (선택)</Label>
+              <Input
+                placeholder="비워두면 해당 날짜 전체 삭제"
+                value={deleteProduct}
+                onChange={(e) => setDeleteProduct(e.target.value)}
+              />
+            </div>
+          </div>
+          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="destructive"
+                disabled={!deleteDate || isDeleting}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                데이터 삭제
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>데이터 삭제 확인</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {formatDate(deleteDate)}
+                  {deleteProduct ? ` "${deleteProduct}" 품목` : " 전체"} 데이터를 삭제합니다.
+                  삭제된 데이터는 복구할 수 없습니다.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>취소</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteDateData}>
+                  {isDeleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  삭제
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardContent>
+      </Card>
+
       {/* 수집 설정 */}
       <Card>
         <CardHeader>

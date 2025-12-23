@@ -80,9 +80,77 @@ export async function GET(request: NextRequest) {
     // 특정 날짜의 시세 요약
     if (action === "daily" && dateStr) {
       const date = new Date(dateStr);
-      const productNames = searchParams.get("products")?.split(",");
+      const productNames = searchParams.get("products")?.split(",").filter(Boolean);
       const summary = await getDailySummary(date, productNames);
       return NextResponse.json({ date: dateStr, summary });
+    }
+
+    // 특정 날짜의 상세 데이터 조회
+    if (action === "dailyDetail" && dateStr && productName) {
+      const date = new Date(dateStr);
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const whereClause: {
+        auctionDate: { gte: Date; lte: Date };
+        productName: string;
+        variety?: string;
+        origin?: { contains: string };
+      } = {
+        auctionDate: { gte: startOfDay, lte: endOfDay },
+        productName,
+      };
+
+      if (variety) whereClause.variety = variety;
+      if (origin) whereClause.origin = { contains: origin };
+
+      const results = await prisma.auctionResult.findMany({
+        where: whereClause,
+        orderBy: { price: "desc" },
+      });
+
+      // 통계 계산
+      const prices = results.map((r) => r.price);
+      const stats = prices.length > 0 ? {
+        avgPrice: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length),
+        maxPrice: Math.max(...prices),
+        minPrice: Math.min(...prices),
+        tradeCount: results.length,
+        totalQuantity: results.reduce((sum, r) => sum + r.quantity, 0),
+      } : null;
+
+      return NextResponse.json({
+        date: dateStr,
+        productName,
+        variety,
+        origin,
+        results,
+        stats,
+        hasData: results.length > 0,
+      });
+    }
+
+    // 데이터 존재 여부 확인
+    if (action === "checkDate" && dateStr) {
+      const date = new Date(dateStr);
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const count = await prisma.auctionResult.count({
+        where: {
+          auctionDate: { gte: startOfDay, lte: endOfDay },
+        },
+      });
+
+      return NextResponse.json({
+        date: dateStr,
+        hasData: count > 0,
+        count,
+      });
     }
 
     // 최근 데이터 날짜 조회
@@ -113,6 +181,76 @@ export async function GET(request: NextRequest) {
     console.error("Get garak data error:", error);
     return NextResponse.json(
       { error: "데이터 조회 중 오류가 발생했습니다." },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE: 특정 날짜 데이터 삭제
+export async function DELETE(request: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const dateStr = searchParams.get("date");
+    const productName = searchParams.get("productName");
+
+    if (!dateStr) {
+      return NextResponse.json({ error: "날짜가 필요합니다." }, { status: 400 });
+    }
+
+    const date = new Date(dateStr);
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // 삭제 조건 구성
+    const whereClause: {
+      auctionDate: { gte: Date; lte: Date };
+      productName?: string;
+    } = {
+      auctionDate: { gte: startOfDay, lte: endOfDay },
+    };
+
+    if (productName) {
+      whereClause.productName = productName;
+    }
+
+    // 삭제 전 개수 확인
+    const countBefore = await prisma.auctionResult.count({
+      where: whereClause,
+    });
+
+    // 데이터 삭제
+    const deleteResult = await prisma.auctionResult.deleteMany({
+      where: whereClause,
+    });
+
+    // 수집 로그도 삭제 (선택적)
+    if (!productName) {
+      await prisma.dataCollectionLog.deleteMany({
+        where: {
+          targetDate: { gte: startOfDay, lte: endOfDay },
+        },
+      });
+    }
+
+    return NextResponse.json({
+      message: "데이터가 삭제되었습니다.",
+      date: dateStr,
+      productName: productName || "전체",
+      deletedCount: deleteResult.count,
+      countBefore,
+    });
+  } catch (error) {
+    console.error("Delete garak data error:", error);
+    return NextResponse.json(
+      { error: "데이터 삭제 중 오류가 발생했습니다." },
       { status: 500 }
     );
   }

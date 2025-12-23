@@ -1,6 +1,8 @@
 /**
  * 가락시장 공공데이터 API 서비스
  * http://www.garak.co.kr/homepage/publicdata/dataOpen.do
+ *
+ * 참고: 문서에는 euc-kr이라고 하지만 실제로 UTF-8 인코딩이 작동함
  */
 
 import prisma from "@/lib/prisma";
@@ -76,20 +78,44 @@ function parseXmlResponse(xmlText: string): GarakApiResponse {
   const totalCountMatch = xmlText.match(/<list_total_count>(\d+)<\/list_total_count>/);
   const totalCount = totalCountMatch ? parseInt(totalCountMatch[1], 10) : 0;
 
-  // 각 list 항목 추출
+  // 디버그: XML 길이 및 처음 부분 확인
+  console.log(`[Garak XML] Response length: ${xmlText.length} chars`);
+
+  // 각 list 항목 추출 - row 태그도 시도
   const items: AuctionItem[] = [];
-  const listRegex = /<list>([\s\S]*?)<\/list>/g;
+
+  // <list> 또는 <row> 태그 모두 확인
+  let listRegex = /<list>([\s\S]*?)<\/list>/g;
   let match;
+
+  // 먼저 <list> 태그 개수 확인
+  const listMatches = xmlText.match(/<list>/gi);
+  const rowMatches = xmlText.match(/<row>/gi);
+
+  console.log(`[Garak XML] Found <list> tags: ${listMatches?.length || 0}, <row> tags: ${rowMatches?.length || 0}`);
+
+  // <row> 태그가 더 많으면 <row> 사용
+  if ((rowMatches?.length || 0) > (listMatches?.length || 0)) {
+    listRegex = /<row>([\s\S]*?)<\/row>/g;
+    console.log(`[Garak XML] Using <row> tags instead of <list>`);
+  }
 
   while ((match = listRegex.exec(xmlText)) !== null) {
     const listContent = match[1];
 
+    // CDATA 형식 지원: <TAG><![CDATA[value]]></TAG> 또는 <TAG>value</TAG>
     const getTagValue = (tag: string): string => {
-      const tagMatch = listContent.match(new RegExp(`<${tag}>([^<]*)</${tag}>`));
-      return tagMatch ? tagMatch[1].trim() : "";
+      // CDATA 형식 먼저 시도 - ]]> 까지 모든 문자 매칭
+      const cdataMatch = listContent.match(new RegExp(`<${tag}><!\\[CDATA\\[(.*?)\\]\\]></${tag}>`, 'is'));
+      if (cdataMatch) {
+        return cdataMatch[1].trim();
+      }
+      // 일반 형식
+      const normalMatch = listContent.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'i'));
+      return normalMatch ? normalMatch[1].trim() : "";
     };
 
-    items.push({
+    const item: AuctionItem = {
       PUMMOK: getTagValue("PUMMOK"),
       PUMJONG: getTagValue("PUMJONG") || undefined,
       PUM_NAME_IMSI: getTagValue("PUM_NAME_IMSI") || undefined,
@@ -101,8 +127,15 @@ function parseXmlResponse(xmlText: string): GarakApiResponse {
       ADJ_DT: getTagValue("ADJ_DT"),
       QTY: getTagValue("QTY") || undefined,
       INJUNG_GUBUN: getTagValue("INJUNG_GUBUN") || undefined,
-    });
+    };
+
+    // 유효한 데이터만 추가 (PUMMOK과 PPRICE가 필수)
+    if (item.PUMMOK && item.PPRICE && item.ADJ_DT) {
+      items.push(item);
+    }
   }
+
+  console.log(`[Garak XML] Parsed ${items.length} valid items from ${totalCount} total`);
 
   return { list_total_count: totalCount, items };
 }
@@ -132,7 +165,7 @@ interface FetchOptions {
   corporationCode?: string;
   productName?: string;
   origin?: string;
-  pageSize?: number;
+  pageSize?: number; // 참고: 가락시장 API는 실제로 10개씩만 반환
   pageIndex?: number;
 }
 
@@ -149,6 +182,7 @@ export async function fetchAuctionData(options: FetchOptions): Promise<GarakApiR
     pageIndex = 1,
   } = options;
 
+  // URLSearchParams는 기본적으로 UTF-8 인코딩 사용 (실제 API 동작에 맞음)
   const params = new URLSearchParams({
     id: GARAK_API_ID,
     passwd: GARAK_API_PASSWORD,
@@ -169,6 +203,9 @@ export async function fetchAuctionData(options: FetchOptions): Promise<GarakApiR
   }
 
   const url = `${GARAK_API_URL}?${params.toString()}`;
+
+  console.log(`[Garak API] Request URL: ${url}`);
+  console.log(`[Garak API] Product filter: ${productName || "전체"}`);
 
   try {
     const response = await fetch(url, {
@@ -199,73 +236,139 @@ export async function collectAndSaveAuctionData(
   productName?: string
 ): Promise<{ totalCount: number; newCount: number }> {
   let totalCount = 0;
-  let newCount = 0;
+  let totalNewCount = 0;
+
+  // 가락시장 API는 실제로 페이지당 10개씩만 반환함 (pagesize 파라미터 무시)
+  const ACTUAL_PAGE_SIZE = 10;
 
   for (const corpCode of corporationCodes) {
+    let corpNewCount = 0;
     try {
       // 첫 페이지 조회로 전체 건수 파악
       const firstPage = await fetchAuctionData({
         date,
         corporationCode: corpCode,
         productName,
-        pageSize: 1000,
+        pageSize: 1000, // API가 무시하지만 호환성을 위해 유지
         pageIndex: 1,
       });
 
+      console.log(`[Garak API] Corp ${corpCode}: list_total_count=${firstPage.list_total_count}, items=${firstPage.items.length}`);
+
       totalCount += firstPage.list_total_count;
 
-      // 페이지네이션 처리
-      const totalPages = Math.ceil(firstPage.list_total_count / 1000);
+      // 페이지네이션 처리 (API는 실제로 10개씩 반환)
+      const totalPages = Math.ceil(firstPage.list_total_count / ACTUAL_PAGE_SIZE);
       let allItems: AuctionItem[] = [...firstPage.items];
 
-      for (let page = 2; page <= totalPages; page++) {
+      console.log(`[Garak API] Total pages to fetch: ${totalPages} (${ACTUAL_PAGE_SIZE} items per page)`);
+
+      // 너무 많은 페이지는 제한 (최대 100페이지 = 1000개)
+      const maxPages = Math.min(totalPages, 100);
+
+      for (let page = 2; page <= maxPages; page++) {
         const pageData = await fetchAuctionData({
           date,
           corporationCode: corpCode,
           productName,
-          pageSize: 1000,
+          pageSize: 1000, // API가 무시하지만 호환성을 위해 유지
           pageIndex: page,
         });
         allItems = [...allItems, ...pageData.items];
+
+        // 진행 상황 로그 (10페이지마다)
+        if (page % 10 === 0) {
+          console.log(`[Garak API] Progress: ${page}/${maxPages} pages, ${allItems.length} items collected`);
+        }
       }
 
-      // DB에 저장
+      if (totalPages > maxPages) {
+        console.log(`[Garak API] Warning: Limited to ${maxPages} pages (${maxPages * ACTUAL_PAGE_SIZE} items) out of ${totalPages} total pages`);
+      }
+
+      console.log(`[Garak API] Total items to process: ${allItems.length}`);
+      if (allItems.length > 0) {
+        console.log(`[Garak API] First item:`, JSON.stringify(allItems[0]));
+      }
+
+      // DB에 저장 (upsert - 기존 데이터도 갱신)
+      let processedCount = 0;
       for (const item of allItems) {
         if (!item.PUMMOK || !item.PPRICE || !item.ADJ_DT) continue;
 
         try {
-          await prisma.auctionResult.upsert({
+          // 값 정규화 (빈 문자열은 빈 문자열로 통일)
+          const varietyValue = item.PUMJONG?.trim() || "";
+          const originValue = item.SSANGI?.trim() || "";
+          const priceValue = parseInt(item.PPRICE, 10) || 0;
+          const auctionDateValue = parseDate(item.ADJ_DT);
+
+          // 첫 번째 아이템 로그
+          if (processedCount === 0) {
+            console.log(`[Garak DB] First item to save:`, {
+              productName: item.PUMMOK,
+              variety: varietyValue,
+              price: priceValue,
+              origin: originValue,
+              auctionDate: auctionDateValue,
+            });
+          }
+          processedCount++;
+
+          // 먼저 존재 여부 확인
+          const existing = await prisma.auctionResult.findUnique({
             where: {
               productName_variety_corporation_auctionDate_price_origin: {
                 productName: item.PUMMOK,
-                variety: item.PUMJONG || "",
+                variety: varietyValue,
                 corporation: item.CORP_NM,
-                auctionDate: parseDate(item.ADJ_DT),
-                price: parseInt(item.PPRICE, 10) || 0,
-                origin: item.SSANGI || "",
+                auctionDate: auctionDateValue,
+                price: priceValue,
+                origin: originValue,
               },
             },
-            update: {},
-            create: {
-              productName: item.PUMMOK,
-              variety: item.PUMJONG || null,
-              tempName: item.PUM_NAME_IMSI || null,
-              unit: item.UUN || "kg",
-              grade: item.DDD || null,
-              price: parseInt(item.PPRICE, 10) || 0,
-              origin: item.SSANGI || null,
-              corporation: item.CORP_NM,
-              corporationCode: corpCode,
-              auctionDate: parseDate(item.ADJ_DT),
-              quantity: parseInt(item.QTY || "1", 10) || 1,
-              certification: item.INJUNG_GUBUN || null,
-            },
           });
-          newCount++;
-        } catch {
-          // 중복 데이터는 무시
+
+          if (existing) {
+            // 기존 데이터 갱신
+            await prisma.auctionResult.update({
+              where: { id: existing.id },
+              data: {
+                tempName: item.PUM_NAME_IMSI || null,
+                unit: item.UUN || "kg",
+                grade: item.DDD || null,
+                quantity: parseInt(item.QTY || "1", 10) || 1,
+                certification: item.INJUNG_GUBUN || null,
+              },
+            });
+          } else {
+            // 새 데이터 생성 (variety, origin을 빈 문자열로 저장하여 unique 일관성 유지)
+            await prisma.auctionResult.create({
+              data: {
+                productName: item.PUMMOK,
+                variety: varietyValue,  // 빈 문자열 유지 (null 대신)
+                tempName: item.PUM_NAME_IMSI || null,
+                unit: item.UUN || "kg",
+                grade: item.DDD || null,
+                price: priceValue,
+                origin: originValue,  // 빈 문자열 유지 (null 대신)
+                corporation: item.CORP_NM,
+                corporationCode: corpCode,
+                auctionDate: auctionDateValue,
+                quantity: parseInt(item.QTY || "1", 10) || 1,
+                certification: item.INJUNG_GUBUN || null,
+              },
+            });
+            corpNewCount++;
+          }
+        } catch (err) {
+          // 중복 키 에러 등은 무시하지 않고 로그 출력
+          console.error("[Garak DB] Save item error:", err);
         }
       }
+
+      console.log(`[Garak DB] Corp ${corpCode}: Saved ${corpNewCount} new items`);
+      totalNewCount += corpNewCount;
 
       // 수집 로그 저장
       await prisma.dataCollectionLog.create({
@@ -273,7 +376,7 @@ export async function collectAndSaveAuctionData(
           targetDate: date,
           corporation: corpCode,
           totalCount: firstPage.list_total_count,
-          newCount,
+          newCount: corpNewCount,
           status: "SUCCESS",
           completedAt: new Date(),
         },
@@ -294,7 +397,7 @@ export async function collectAndSaveAuctionData(
     }
   }
 
-  return { totalCount, newCount };
+  return { totalCount, newCount: totalNewCount };
 }
 
 /**
@@ -313,7 +416,7 @@ export async function getProductPriceHistory(
     productName: string;
     auctionDate: { gte: Date };
     variety?: string;
-    origin?: string;
+    origin?: { contains: string };
   } = {
     productName,
     auctionDate: { gte: startDate },
@@ -324,7 +427,8 @@ export async function getProductPriceHistory(
   }
 
   if (origin) {
-    where.origin = origin;
+    // 부분 일치 검색 (예: "충남" 입력 시 "충남 논산", "충남 예산" 등 매칭)
+    where.origin = { contains: origin };
   }
 
   const results = await prisma.auctionResult.groupBy({

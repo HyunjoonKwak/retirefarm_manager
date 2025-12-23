@@ -18,7 +18,13 @@ import {
   Wallet,
   Package,
   BarChart3,
+  Download,
+  LineChart,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
+import { useState } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const navigation = [
   {
@@ -47,7 +53,15 @@ const navigation = [
   {
     title: "시세 정보",
     items: [
-      { name: "농산물 시세", href: "/market", icon: TrendingUp },
+      {
+        name: "농산물 시세",
+        href: "/market",
+        icon: TrendingUp,
+        subItems: [
+          { name: "시세 조회", href: "/market", icon: LineChart },
+          { name: "데이터 수집", href: "/market/collect", icon: Download },
+        ],
+      },
     ],
   },
   {
@@ -64,11 +78,51 @@ const navigation = [
   },
 ];
 
+interface SubItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  subItems?: SubItem[];
+}
+
 interface SidebarContentProps {
   pathname: string;
 }
 
 function SidebarContent({ pathname }: SidebarContentProps) {
+  // 하위 메뉴가 있는 항목의 펼침 상태 관리
+  const [openItems, setOpenItems] = useState<string[]>(() => {
+    // 현재 경로가 하위 메뉴에 포함되어 있으면 해당 메뉴 열기
+    const initialOpen: string[] = [];
+    navigation.forEach((section) => {
+      section.items.forEach((item: NavItem) => {
+        if (item.subItems?.some((sub) => pathname === sub.href || pathname.startsWith(sub.href + "/"))) {
+          initialOpen.push(item.name);
+        }
+      });
+    });
+    return initialOpen;
+  });
+
+  const toggleItem = (name: string) => {
+    setOpenItems((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
+  };
+
+  const isActiveRoute = (href: string) => {
+    if (href === "/market") {
+      return pathname === "/market";
+    }
+    return pathname === href || pathname.startsWith(href + "/");
+  };
+
   return (
     <ScrollArea className="h-full py-6">
       <div className="space-y-6 px-3">
@@ -78,22 +132,77 @@ function SidebarContent({ pathname }: SidebarContentProps) {
               {section.title}
             </h4>
             <div className="space-y-1">
-              {section.items.map((item) => (
-                <Button
-                  key={item.href}
-                  variant={pathname === item.href ? "secondary" : "ghost"}
-                  className={cn(
-                    "w-full justify-start",
-                    pathname === item.href && "bg-secondary"
-                  )}
-                  asChild
-                >
-                  <Link href={item.href}>
-                    <item.icon className="mr-2 h-4 w-4" />
-                    {item.name}
-                  </Link>
-                </Button>
-              ))}
+              {section.items.map((item: NavItem) => {
+                // 하위 메뉴가 있는 경우
+                if (item.subItems && item.subItems.length > 0) {
+                  const isOpen = openItems.includes(item.name);
+                  const isChildActive = item.subItems.some((sub) => isActiveRoute(sub.href));
+
+                  return (
+                    <Collapsible
+                      key={item.name}
+                      open={isOpen}
+                      onOpenChange={() => toggleItem(item.name)}
+                    >
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          variant={isChildActive ? "secondary" : "ghost"}
+                          className={cn(
+                            "w-full justify-between",
+                            isChildActive && "bg-secondary"
+                          )}
+                        >
+                          <span className="flex items-center">
+                            <item.icon className="mr-2 h-4 w-4" />
+                            {item.name}
+                          </span>
+                          {isOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pl-4 space-y-1 mt-1">
+                        {item.subItems.map((subItem) => (
+                          <Button
+                            key={subItem.href}
+                            variant={isActiveRoute(subItem.href) ? "secondary" : "ghost"}
+                            className={cn(
+                              "w-full justify-start text-sm",
+                              isActiveRoute(subItem.href) && "bg-secondary"
+                            )}
+                            asChild
+                          >
+                            <Link href={subItem.href}>
+                              <subItem.icon className="mr-2 h-3.5 w-3.5" />
+                              {subItem.name}
+                            </Link>
+                          </Button>
+                        ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                }
+
+                // 하위 메뉴가 없는 경우
+                return (
+                  <Button
+                    key={item.href}
+                    variant={isActiveRoute(item.href) ? "secondary" : "ghost"}
+                    className={cn(
+                      "w-full justify-start",
+                      isActiveRoute(item.href) && "bg-secondary"
+                    )}
+                    asChild
+                  >
+                    <Link href={item.href}>
+                      <item.icon className="mr-2 h-4 w-4" />
+                      {item.name}
+                    </Link>
+                  </Button>
+                );
+              })}
             </div>
           </div>
         ))}
