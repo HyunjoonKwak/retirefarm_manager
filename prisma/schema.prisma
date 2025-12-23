@@ -305,15 +305,17 @@ model ProductWatchlist {
 
 // 데이터 수집 로그
 model DataCollectionLog {
-  id           String   @id @default(cuid())
-  targetDate   DateTime // 수집 대상 일자
-  corporation  String   // 법인코드
-  totalCount   Int      // 총 수집 건수
-  newCount     Int      // 신규 저장 건수
-  status       String   // SUCCESS, FAILED, PARTIAL
-  errorMessage String?
-  startedAt    DateTime @default(now())
-  completedAt  DateTime?
+  id              String   @id @default(cuid())
+  targetDate      DateTime // 수집 대상 일자
+  corporation     String   // 법인코드
+  targetProducts  String?  // 수집 대상 품목 (쉼표 구분, null=전체)
+  totalCount      Int      // 총 조회 건수 (API에서 가져온 건수)
+  newCount        Int      // 신규 저장 건수 (실제 DB 저장 건수)
+  duplicateCount  Int      @default(0) // 중복으로 건너뛴 건수
+  status          String   // SUCCESS, FAILED, PARTIAL
+  errorMessage    String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
 
   @@index([targetDate])
   @@index([status])

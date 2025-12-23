@@ -229,154 +229,164 @@ export async function fetchAuctionData(options: FetchOptions): Promise<GarakApiR
 
 /**
  * 경매 데이터 수집 및 저장
+ * productName이 쉼표로 구분된 여러 품목인 경우 각각 개별 API 호출
  */
 export async function collectAndSaveAuctionData(
   date: Date,
   corporationCodes: string[] = ["11000101"],
   productName?: string
-): Promise<{ totalCount: number; newCount: number }> {
+): Promise<{ totalCount: number; newCount: number; duplicateCount: number }> {
   let totalCount = 0;
   let totalNewCount = 0;
+  let totalDuplicateCount = 0;
 
   // 가락시장 API는 실제로 페이지당 10개씩만 반환함 (pagesize 파라미터 무시)
   const ACTUAL_PAGE_SIZE = 10;
 
+  // 여러 품목이 쉼표로 구분된 경우 분리 (가락시장 API는 단일 품목만 지원)
+  const productNames = productName
+    ? productName.split(",").map(p => p.trim()).filter(Boolean)
+    : [undefined]; // undefined면 전체 품목
+
   for (const corpCode of corporationCodes) {
     let corpNewCount = 0;
+    let corpDuplicateCount = 0;
+    let corpTotalCount = 0;
+
     try {
-      // 첫 페이지 조회로 전체 건수 파악
-      const firstPage = await fetchAuctionData({
-        date,
-        corporationCode: corpCode,
-        productName,
-        pageSize: 1000, // API가 무시하지만 호환성을 위해 유지
-        pageIndex: 1,
-      });
+      // 각 품목별로 개별 API 호출
+      for (const singleProduct of productNames) {
+        console.log(`[Garak API] Collecting: Corp ${corpCode}, Product: ${singleProduct || "전체"}`);
 
-      console.log(`[Garak API] Corp ${corpCode}: list_total_count=${firstPage.list_total_count}, items=${firstPage.items.length}`);
-
-      totalCount += firstPage.list_total_count;
-
-      // 페이지네이션 처리 (API는 실제로 10개씩 반환)
-      const totalPages = Math.ceil(firstPage.list_total_count / ACTUAL_PAGE_SIZE);
-      let allItems: AuctionItem[] = [...firstPage.items];
-
-      console.log(`[Garak API] Total pages to fetch: ${totalPages} (${ACTUAL_PAGE_SIZE} items per page)`);
-
-      // 너무 많은 페이지는 제한 (최대 100페이지 = 1000개)
-      const maxPages = Math.min(totalPages, 100);
-
-      for (let page = 2; page <= maxPages; page++) {
-        const pageData = await fetchAuctionData({
+        // 첫 페이지 조회로 전체 건수 파악
+        const firstPage = await fetchAuctionData({
           date,
           corporationCode: corpCode,
-          productName,
+          productName: singleProduct,
           pageSize: 1000, // API가 무시하지만 호환성을 위해 유지
-          pageIndex: page,
+          pageIndex: 1,
         });
-        allItems = [...allItems, ...pageData.items];
 
-        // 진행 상황 로그 (10페이지마다)
-        if (page % 10 === 0) {
-          console.log(`[Garak API] Progress: ${page}/${maxPages} pages, ${allItems.length} items collected`);
-        }
-      }
+        console.log(`[Garak API] Corp ${corpCode}, Product ${singleProduct || "전체"}: list_total_count=${firstPage.list_total_count}, items=${firstPage.items.length}`);
 
-      if (totalPages > maxPages) {
-        console.log(`[Garak API] Warning: Limited to ${maxPages} pages (${maxPages * ACTUAL_PAGE_SIZE} items) out of ${totalPages} total pages`);
-      }
+        corpTotalCount += firstPage.list_total_count;
 
-      console.log(`[Garak API] Total items to process: ${allItems.length}`);
-      if (allItems.length > 0) {
-        console.log(`[Garak API] First item:`, JSON.stringify(allItems[0]));
-      }
+        // 페이지네이션 처리 (API는 실제로 10개씩 반환)
+        const totalPages = Math.ceil(firstPage.list_total_count / ACTUAL_PAGE_SIZE);
+        let allItems: AuctionItem[] = [...firstPage.items];
 
-      // DB에 저장 (upsert - 기존 데이터도 갱신)
-      let processedCount = 0;
-      for (const item of allItems) {
-        if (!item.PUMMOK || !item.PPRICE || !item.ADJ_DT) continue;
+        console.log(`[Garak API] Total pages to fetch: ${totalPages} (${ACTUAL_PAGE_SIZE} items per page)`);
 
-        try {
-          // 값 정규화 (빈 문자열은 빈 문자열로 통일)
-          const varietyValue = item.PUMJONG?.trim() || "";
-          const originValue = item.SSANGI?.trim() || "";
-          const priceValue = parseInt(item.PPRICE, 10) || 0;
-          const auctionDateValue = parseDate(item.ADJ_DT);
+        // 너무 많은 페이지는 제한 (최대 100페이지 = 1000개)
+        const maxPages = Math.min(totalPages, 100);
 
-          // 첫 번째 아이템 로그
-          if (processedCount === 0) {
-            console.log(`[Garak DB] First item to save:`, {
-              productName: item.PUMMOK,
-              variety: varietyValue,
-              price: priceValue,
-              origin: originValue,
-              auctionDate: auctionDateValue,
-            });
+        for (let page = 2; page <= maxPages; page++) {
+          const pageData = await fetchAuctionData({
+            date,
+            corporationCode: corpCode,
+            productName: singleProduct,
+            pageSize: 1000, // API가 무시하지만 호환성을 위해 유지
+            pageIndex: page,
+          });
+          allItems = [...allItems, ...pageData.items];
+
+          // 진행 상황 로그 (10페이지마다)
+          if (page % 10 === 0) {
+            console.log(`[Garak API] Progress: ${page}/${maxPages} pages, ${allItems.length} items collected`);
           }
-          processedCount++;
+        }
 
-          // 먼저 존재 여부 확인
-          const existing = await prisma.auctionResult.findUnique({
-            where: {
-              productName_variety_corporation_auctionDate_price_origin: {
+        if (totalPages > maxPages) {
+          console.log(`[Garak API] Warning: Limited to ${maxPages} pages (${maxPages * ACTUAL_PAGE_SIZE} items) out of ${totalPages} total pages`);
+        }
+
+        console.log(`[Garak API] Total items to process: ${allItems.length}`);
+        if (allItems.length > 0) {
+          console.log(`[Garak API] First item:`, JSON.stringify(allItems[0]));
+        }
+
+        // DB에 저장 (upsert - 기존 데이터도 갱신)
+        let processedCount = 0;
+        for (const item of allItems) {
+          if (!item.PUMMOK || !item.PPRICE || !item.ADJ_DT) continue;
+
+          try {
+            // 값 정규화 (빈 문자열은 빈 문자열로 통일)
+            const varietyValue = item.PUMJONG?.trim() || "";
+            const originValue = item.SSANGI?.trim() || "";
+            const priceValue = parseInt(item.PPRICE, 10) || 0;
+            const auctionDateValue = parseDate(item.ADJ_DT);
+
+            // 첫 번째 아이템 로그
+            if (processedCount === 0) {
+              console.log(`[Garak DB] First item to save:`, {
                 productName: item.PUMMOK,
                 variety: varietyValue,
-                corporation: item.CORP_NM,
-                auctionDate: auctionDateValue,
                 price: priceValue,
                 origin: originValue,
-              },
-            },
-          });
-
-          if (existing) {
-            // 기존 데이터 갱신
-            await prisma.auctionResult.update({
-              where: { id: existing.id },
-              data: {
-                tempName: item.PUM_NAME_IMSI || null,
-                unit: item.UUN || "kg",
-                grade: item.DDD || null,
-                quantity: parseInt(item.QTY || "1", 10) || 1,
-                certification: item.INJUNG_GUBUN || null,
-              },
-            });
-          } else {
-            // 새 데이터 생성 (variety, origin을 빈 문자열로 저장하여 unique 일관성 유지)
-            await prisma.auctionResult.create({
-              data: {
-                productName: item.PUMMOK,
-                variety: varietyValue,  // 빈 문자열 유지 (null 대신)
-                tempName: item.PUM_NAME_IMSI || null,
-                unit: item.UUN || "kg",
-                grade: item.DDD || null,
-                price: priceValue,
-                origin: originValue,  // 빈 문자열 유지 (null 대신)
-                corporation: item.CORP_NM,
-                corporationCode: corpCode,
                 auctionDate: auctionDateValue,
-                quantity: parseInt(item.QTY || "1", 10) || 1,
-                certification: item.INJUNG_GUBUN || null,
+              });
+            }
+            processedCount++;
+
+            // 먼저 존재 여부 확인
+            const existing = await prisma.auctionResult.findUnique({
+              where: {
+                productName_variety_corporation_auctionDate_price_origin: {
+                  productName: item.PUMMOK,
+                  variety: varietyValue,
+                  corporation: item.CORP_NM,
+                  auctionDate: auctionDateValue,
+                  price: priceValue,
+                  origin: originValue,
+                },
               },
             });
-            corpNewCount++;
+
+            if (existing) {
+              // 기존 데이터 - 중복으로 카운트
+              corpDuplicateCount++;
+            } else {
+              // 새 데이터 생성 (variety, origin을 빈 문자열로 저장하여 unique 일관성 유지)
+              await prisma.auctionResult.create({
+                data: {
+                  productName: item.PUMMOK,
+                  variety: varietyValue,  // 빈 문자열 유지 (null 대신)
+                  tempName: item.PUM_NAME_IMSI || null,
+                  unit: item.UUN || "kg",
+                  grade: item.DDD || null,
+                  price: priceValue,
+                  origin: originValue,  // 빈 문자열 유지 (null 대신)
+                  corporation: item.CORP_NM,
+                  corporationCode: corpCode,
+                  auctionDate: auctionDateValue,
+                  quantity: parseInt(item.QTY || "1", 10) || 1,
+                  certification: item.INJUNG_GUBUN || null,
+                },
+              });
+              corpNewCount++;
+            }
+          } catch (err) {
+            // 중복 키 에러 등은 무시하지 않고 로그 출력
+            console.error("[Garak DB] Save item error:", err);
           }
-        } catch (err) {
-          // 중복 키 에러 등은 무시하지 않고 로그 출력
-          console.error("[Garak DB] Save item error:", err);
         }
-      }
+      } // end of productNames loop
 
-      console.log(`[Garak DB] Corp ${corpCode}: Saved ${corpNewCount} new items`);
+      console.log(`[Garak DB] Corp ${corpCode}: Saved ${corpNewCount} new items, ${corpDuplicateCount} duplicates`);
+      totalCount += corpTotalCount;
       totalNewCount += corpNewCount;
+      totalDuplicateCount += corpDuplicateCount;
 
-      // 수집 로그 저장
+      // 수집 로그 저장 (품목 정보 포함)
       await prisma.dataCollectionLog.create({
         data: {
           targetDate: date,
           corporation: corpCode,
-          totalCount: firstPage.list_total_count,
+          targetProducts: productName || null, // null이면 전체 품목
+          totalCount: corpTotalCount,
           newCount: corpNewCount,
+          duplicateCount: corpDuplicateCount,
           status: "SUCCESS",
           completedAt: new Date(),
         },
@@ -387,8 +397,10 @@ export async function collectAndSaveAuctionData(
         data: {
           targetDate: date,
           corporation: corpCode,
+          targetProducts: productName || null,
           totalCount: 0,
           newCount: 0,
+          duplicateCount: 0,
           status: "FAILED",
           errorMessage: error instanceof Error ? error.message : "Unknown error",
           completedAt: new Date(),
@@ -397,17 +409,28 @@ export async function collectAndSaveAuctionData(
     }
   }
 
-  return { totalCount, newCount: totalNewCount };
+  return { totalCount, newCount: totalNewCount, duplicateCount: totalDuplicateCount };
 }
 
 /**
- * 품목별 일자별 평균가격 조회
+ * 단위 문자열에서 kg 값 추출 (예: "10kg" -> 10, "5KG" -> 5)
+ */
+function parseKgFromUnit(unit: string): number | null {
+  if (!unit) return null;
+  const match = unit.toLowerCase().match(/(\d+(?:\.\d+)?)\s*kg/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+/**
+ * 품목별 일자별 평균가격 조회 (가중평균 + kg당 단가)
  */
 export async function getProductPriceHistory(
   productName: string,
   days: number = 30,
   variety?: string,
-  origin?: string
+  origin?: string,
+  varieties?: string[],
+  unit?: string
 ) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -415,14 +438,18 @@ export async function getProductPriceHistory(
   const where: {
     productName: string;
     auctionDate: { gte: Date };
-    variety?: string;
+    variety?: string | { in: string[] };
     origin?: { contains: string };
+    unit?: string;
   } = {
     productName,
     auctionDate: { gte: startDate },
   };
 
-  if (variety) {
+  // 다중 품종 필터 (varieties 배열)가 있으면 우선 사용
+  if (varieties && varieties.length > 0) {
+    where.variety = { in: varieties };
+  } else if (variety) {
     where.variety = variety;
   }
 
@@ -431,23 +458,68 @@ export async function getProductPriceHistory(
     where.origin = { contains: origin };
   }
 
-  const results = await prisma.auctionResult.groupBy({
-    by: ["auctionDate"],
+  if (unit) {
+    where.unit = unit;
+  }
+
+  // 개별 레코드를 가져와서 가중평균 계산
+  const records = await prisma.auctionResult.findMany({
     where,
-    _avg: { price: true },
-    _max: { price: true },
-    _min: { price: true },
-    _count: { price: true },
+    select: {
+      auctionDate: true,
+      price: true,
+      quantity: true,
+      unit: true,
+    },
     orderBy: { auctionDate: "desc" },
   });
 
-  return results.map((r) => ({
-    date: r.auctionDate,
-    avgPrice: Math.round(r._avg.price || 0),
-    maxPrice: r._max.price || 0,
-    minPrice: r._min.price || 0,
-    tradeCount: r._count.price,
-  }));
+  // 날짜별로 그룹화
+  const dateGroups = new Map<string, typeof records>();
+  for (const record of records) {
+    const dateKey = record.auctionDate.toISOString().split("T")[0];
+    const group = dateGroups.get(dateKey) || [];
+    group.push(record);
+    dateGroups.set(dateKey, group);
+  }
+
+  // 각 날짜별 통계 계산
+  const results = Array.from(dateGroups.entries()).map(([dateKey, items]) => {
+    const prices = items.map(i => i.price);
+
+    // 가중평균: sum(price * quantity) / sum(quantity)
+    const totalWeightedPrice = items.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+    const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
+    const weightedAvgPrice = totalQuantity > 0 ? Math.round(totalWeightedPrice / totalQuantity) : 0;
+
+    // kg당 단가 계산 (단위에서 kg 추출)
+    let totalKg = 0;
+    let totalKgValue = 0;
+    for (const item of items) {
+      const kg = parseKgFromUnit(item.unit || "");
+      if (kg && kg > 0) {
+        const itemTotalKg = kg * item.quantity;
+        totalKg += itemTotalKg;
+        totalKgValue += item.price * item.quantity;
+      }
+    }
+    const pricePerKg = totalKg > 0 ? Math.round(totalKgValue / totalKg) : null;
+
+    return {
+      date: new Date(dateKey),
+      avgPrice: weightedAvgPrice,
+      maxPrice: Math.max(...prices),
+      minPrice: Math.min(...prices),
+      tradeCount: items.length,
+      totalQuantity,
+      pricePerKg, // kg당 단가 (계산 불가시 null)
+    };
+  });
+
+  // 날짜 내림차순 정렬
+  results.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  return results;
 }
 
 /**

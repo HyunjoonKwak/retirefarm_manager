@@ -28,6 +28,9 @@ export async function GET(request: NextRequest) {
     const origin = searchParams.get("origin");
     const days = parseInt(searchParams.get("days") || "30", 10);
     const dateStr = searchParams.get("date");
+    // 새 필터 파라미터
+    const varietiesParam = searchParams.get("varieties"); // 쉼표 구분 다중 품종
+    const unit = searchParams.get("unit");
 
     // 저장된 품목 목록 조회
     if (action === "products") {
@@ -61,17 +64,26 @@ export async function GET(request: NextRequest) {
 
     // 품목 가격 히스토리 조회
     if (action === "history" && productName) {
+      // 다중 품종 파라미터 파싱
+      const varieties = varietiesParam
+        ? varietiesParam.split(",").map(v => v.trim()).filter(Boolean)
+        : undefined;
+
       const history = await getProductPriceHistory(
         productName,
         days,
         variety || undefined,
-        origin || undefined
+        origin || undefined,
+        varieties,
+        unit || undefined
       );
 
       return NextResponse.json({
         productName,
         variety,
+        varieties,
         origin,
+        unit,
         days,
         history,
       });

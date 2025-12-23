@@ -48,6 +48,18 @@ export function formatLargeNumber(value: number | string | undefined | null): st
 }
 
 /**
+ * 숫자를 정확한 원단위로 표시 (예: 70,000원)
+ */
+export function formatExactPrice(value: number | string | undefined | null): string {
+  if (value === undefined || value === null) return "0원";
+
+  const num = typeof value === "string" ? Number(value) : value;
+  if (isNaN(num)) return "0원";
+
+  return num.toLocaleString("ko-KR") + "원";
+}
+
+/**
  * 퍼센트 포맷팅
  */
 export function formatPercent(value: number | undefined | null, decimals: number = 1): string {

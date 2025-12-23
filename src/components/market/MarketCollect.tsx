@@ -91,8 +91,10 @@ interface CollectionLog {
   targetDate: string;
   corporation: string;
   corporationName: string;
+  targetProducts: string | null;
   totalCount: number;
   newCount: number;
+  duplicateCount: number;
   status: string;
   errorMessage?: string;
   startedAt: string;
@@ -401,44 +403,45 @@ export function MarketCollect() {
     <div className="space-y-6">
       {/* 데이터 수집 (수동/자동 통합) */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Download className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Download className="h-4 w-4 sm:h-5 sm:w-5" />
             데이터 수집
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-xs sm:text-sm">
             가락시장 경매 데이터를 수집합니다.
             {dataStats?.newestDate && (
-              <span className="ml-2 text-primary font-medium">
-                최신 데이터: {formatDate(dataStats.newestDate)}
+              <span className="block sm:inline sm:ml-2 text-primary font-medium mt-1 sm:mt-0">
+                최신: {formatDate(dataStats.newestDate)}
               </span>
             )}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4 sm:space-y-6">
           {/* 수집 날짜 */}
           <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
+            <Label className="flex items-center gap-2 text-sm">
+              <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               수집 날짜
             </Label>
             <Input
               type="date"
               value={collectDate}
               onChange={(e) => setCollectDate(e.target.value)}
-              className="w-full md:w-64"
+              className="w-full sm:w-64"
             />
           </div>
 
           {/* 수집 품목 선택 */}
-          <div className="space-y-3">
-            <Label>수집 품목 (선택하지 않으면 전체)</Label>
-            <div className="flex flex-wrap gap-2">
+          <div className="space-y-2 sm:space-y-3">
+            <Label className="text-sm">수집 품목 (미선택시 전체)</Label>
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {AVAILABLE_PRODUCTS.slice(0, 14).map((product) => (
                 <Button
                   key={product}
                   variant={collectProducts.includes(product) ? "default" : "outline"}
                   size="sm"
+                  className="h-7 sm:h-8 text-xs sm:text-sm px-2 sm:px-3"
                   onClick={() => toggleCollectProduct(product)}
                 >
                   {product}
@@ -447,13 +450,13 @@ export function MarketCollect() {
             </div>
             <div className="flex gap-2">
               <Input
-                placeholder="직접 입력 (쉼표로 구분)"
+                placeholder="직접 입력 (쉼표 구분)"
                 value={customProduct}
                 onChange={(e) => setCustomProduct(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddCustomProduct()}
-                className="flex-1"
+                className="flex-1 text-sm"
               />
-              <Button variant="outline" onClick={handleAddCustomProduct}>
+              <Button variant="outline" size="sm" onClick={handleAddCustomProduct}>
                 추가
               </Button>
             </div>
@@ -463,7 +466,7 @@ export function MarketCollect() {
                   <Badge
                     key={p}
                     variant="secondary"
-                    className="cursor-pointer"
+                    className="cursor-pointer text-xs"
                     onClick={() => toggleCollectProduct(p)}
                   >
                     {p} ×
@@ -472,7 +475,7 @@ export function MarketCollect() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 text-xs"
+                  className="h-5 text-[10px] sm:text-xs px-2"
                   onClick={() => setCollectProducts([])}
                 >
                   전체 해제
@@ -482,14 +485,15 @@ export function MarketCollect() {
           </div>
 
           {/* 법인 선택 */}
-          <div className="space-y-3">
-            <Label>수집 법인</Label>
-            <div className="flex flex-wrap gap-2">
+          <div className="space-y-2 sm:space-y-3">
+            <Label className="text-sm">수집 법인</Label>
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {corporations.map((corp) => (
                 <Button
                   key={corp.code}
                   variant={selectedCorps.includes(corp.code) ? "default" : "outline"}
                   size="sm"
+                  className="h-7 sm:h-8 text-xs sm:text-sm px-2 sm:px-3"
                   onClick={() => toggleCollectCorp(corp.code)}
                 >
                   {corp.name}
@@ -500,10 +504,10 @@ export function MarketCollect() {
 
           {/* 수집 진행 상태 */}
           {isCollecting && (
-            <div className="space-y-2 p-4 bg-muted rounded-lg">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{collectProgress}</span>
+            <div className="space-y-2 p-3 sm:p-4 bg-muted rounded-lg">
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                <span className="truncate">{collectProgress}</span>
               </div>
               <div className="w-full bg-secondary rounded-full h-2">
                 <div
@@ -518,8 +522,7 @@ export function MarketCollect() {
           <Button
             onClick={handleCollectData}
             disabled={isCollecting || selectedCorps.length === 0}
-            size="lg"
-            className="w-full md:w-auto"
+            className="w-full sm:w-auto"
           >
             {isCollecting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -713,15 +716,15 @@ export function MarketCollect() {
 
       {/* 저장된 데이터 현황 (날짜별) */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Database className="h-4 w-4 sm:h-5 sm:w-5" />
             저장된 데이터
           </CardTitle>
-          <CardDescription>
-            날짜별로 저장된 시세 데이터 현황입니다.
+          <CardDescription className="text-xs sm:text-sm">
+            날짜별 시세 데이터 현황
             {dataStats && (
-              <span className="ml-2">
+              <span className="ml-2 font-medium text-foreground">
                 총 {dataStats.totalCount.toLocaleString()}건
               </span>
             )}
@@ -729,32 +732,32 @@ export function MarketCollect() {
         </CardHeader>
         <CardContent>
           {dataStats?.dailyData && dataStats.dailyData.length > 0 ? (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto -mx-4 sm:mx-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>날짜</TableHead>
-                    <TableHead className="text-right">데이터 건수</TableHead>
-                    <TableHead className="w-[100px]"></TableHead>
+                    <TableHead className="whitespace-nowrap">날짜</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">건수</TableHead>
+                    <TableHead className="w-[60px] sm:w-[80px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {dataStats.dailyData.map((item) => (
                     <TableRow key={item.date}>
-                      <TableCell className="font-medium">
+                      <TableCell className="font-medium text-xs sm:text-sm whitespace-nowrap">
                         {formatDate(item.date)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right text-xs sm:text-sm whitespace-nowrap">
                         {item.count.toLocaleString()}건
                       </TableCell>
                       <TableCell>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-destructive hover:text-destructive"
+                          className="h-7 w-7 sm:h-8 sm:w-8 p-0 text-destructive hover:text-destructive"
                           onClick={() => setDeleteTargetDate(item.date)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -763,7 +766,7 @@ export function MarketCollect() {
               </Table>
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground text-sm">
               저장된 데이터가 없습니다.
             </div>
           )}
@@ -772,47 +775,62 @@ export function MarketCollect() {
 
       {/* 수집 로그 */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="h-5 w-5" />
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Clock className="h-4 w-4 sm:h-5 sm:w-5" />
             수집 로그
           </CardTitle>
-          <CardDescription>
-            최근 14일간의 데이터 수집 기록입니다.
+          <CardDescription className="text-xs sm:text-sm">
+            최근 14일간 수집 기록 (조회: API에서 가져온 건수 / 저장: 신규 저장 건수 / 중복: 이미 있던 건수)
           </CardDescription>
         </CardHeader>
         <CardContent>
           {logs.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>수집일시</TableHead>
-                  <TableHead>대상 날짜</TableHead>
-                  <TableHead>법인</TableHead>
-                  <TableHead className="text-right">조회/저장</TableHead>
-                  <TableHead>상태</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logs.slice(0, 20).map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="text-sm">
-                      {formatDate(log.startedAt)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatDate(log.targetDate)}
-                    </TableCell>
-                    <TableCell>{log.corporationName}</TableCell>
-                    <TableCell className="text-right">
-                      {log.totalCount.toLocaleString()} / {log.newCount.toLocaleString()}
-                    </TableCell>
-                    <TableCell>{getStatusBadge(log.status)}</TableCell>
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="whitespace-nowrap">수집시간</TableHead>
+                    <TableHead className="whitespace-nowrap hidden sm:table-cell">대상일</TableHead>
+                    <TableHead className="whitespace-nowrap hidden lg:table-cell">품목</TableHead>
+                    <TableHead className="whitespace-nowrap hidden md:table-cell">법인</TableHead>
+                    <TableHead className="text-right whitespace-nowrap">조회/저장/중복</TableHead>
+                    <TableHead className="whitespace-nowrap">상태</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {logs.slice(0, 20).map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-xs sm:text-sm whitespace-nowrap">
+                        {new Date(log.startedAt).toLocaleString("ko-KR", {
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm hidden sm:table-cell whitespace-nowrap">
+                        {formatDate(log.targetDate)}
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm hidden lg:table-cell max-w-[100px] truncate" title={log.targetProducts || "전체"}>
+                        {log.targetProducts || "전체"}
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm hidden md:table-cell">{log.corporationName}</TableCell>
+                      <TableCell className="text-right text-xs sm:text-sm whitespace-nowrap">
+                        <span className="text-muted-foreground">{log.totalCount.toLocaleString()}</span>
+                        {" / "}
+                        <span className="text-green-600 font-medium">{log.newCount.toLocaleString()}</span>
+                        {" / "}
+                        <span className="text-orange-500">{(log.duplicateCount || 0).toLocaleString()}</span>
+                      </TableCell>
+                      <TableCell>{getStatusBadge(log.status)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground text-sm">
               수집 로그가 없습니다.
             </div>
           )}
