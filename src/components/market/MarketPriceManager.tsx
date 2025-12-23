@@ -129,6 +129,21 @@ const PERIOD_OPTIONS = [
 // 요일 이름
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 날짜 문자열을 로컬 Date 객체로 파싱 (시간대 문제 방지)
+const parseLocalDate = (dateStr: string): Date => {
+  const datePart = dateStr.split("T")[0];
+  const [year, month, day] = datePart.split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
+// Date 객체를 YYYY-MM-DD 문자열로 변환 (로컬 시간 기준)
+const formatLocalDateStr = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
 // 정렬 타입
 type SortField = "price" | "quantity" | "origin" | "unit" | "variety" | "corporation";
 type SortDirection = "asc" | "desc";
@@ -236,45 +251,50 @@ export function MarketPriceManager() {
     return priceHistory.some(p => p.pricePerKg != null);
   }, [priceHistory]);
 
-  // 주간 단위로 그룹화된 일별 시세 데이터
+  // 주간 단위로 그룹화된 일별 시세 데이터 (월요일~일요일)
   const weeklyPriceData = useMemo(() => {
     if (priceHistory.length === 0) return { weekStart: new Date(), weekEnd: new Date(), data: [] };
 
     const sortedHistory = [...priceHistory].sort((a, b) =>
-      new Date(b.date).getTime() - new Date(a.date).getTime()
+      parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()
     );
 
     if (sortedHistory.length === 0) return { weekStart: new Date(), weekEnd: new Date(), data: [] };
 
-    // 현재 주의 일요일 찾기
-    const latestDateObj = new Date(sortedHistory[0].date);
-    const dayOfWeek = latestDateObj.getDay();
-    const currentSunday = new Date(latestDateObj);
-    currentSunday.setDate(latestDateObj.getDate() - dayOfWeek);
-    currentSunday.setHours(0, 0, 0, 0);
+    // 최신 데이터 날짜에서 해당 주의 월요일 찾기
+    const latestDateObj = parseLocalDate(sortedHistory[0].date);
+    const dayOfWeek = latestDateObj.getDay(); // 0=일, 1=월, ..., 6=토
+    // 월요일로 이동 (일요일이면 -6, 월요일이면 0, 화요일이면 -1, ...)
+    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const currentMonday = new Date(latestDateObj);
+    currentMonday.setDate(latestDateObj.getDate() + daysToMonday);
+    currentMonday.setHours(0, 0, 0, 0);
 
-    // 데이터를 주간으로 그룹화
-    const weekStart = new Date(currentSunday);
+    // 주 오프셋 적용 (이전 주로 이동)
+    const weekStart = new Date(currentMonday);
     weekStart.setDate(weekStart.getDate() - weekOffset * 7);
 
     const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setDate(weekStart.getDate() + 6); // 월~일 (7일)
 
-    // 해당 주의 데이터 필터링
-    const weekData = sortedHistory.filter(p => {
-      const d = new Date(p.date);
-      return d >= weekStart && d <= weekEnd;
+    // 해당 주의 데이터를 날짜 문자열 기준으로 매핑
+    const weekDataMap = new Map<string, PriceHistory>();
+    sortedHistory.forEach(p => {
+      const dateKey = p.date.split("T")[0];
+      const pDate = parseLocalDate(p.date);
+      if (pDate >= weekStart && pDate <= weekEnd) {
+        weekDataMap.set(dateKey, p);
+      }
     });
 
-    // 일요일부터 토요일까지 빈 슬롯 포함하여 정렬
+    // 월요일부터 일요일까지 빈 슬롯 포함하여 정렬
     const fullWeek: (PriceHistory | null)[] = [];
     for (let i = 0; i < 7; i++) {
       const targetDate = new Date(weekStart);
       targetDate.setDate(weekStart.getDate() + i);
-      const dateStr = targetDate.toISOString().split("T")[0];
+      const dateStr = formatLocalDateStr(targetDate);
 
-      const found = weekData.find(p => p.date.split("T")[0] === dateStr);
-      fullWeek.push(found || null);
+      fullWeek.push(weekDataMap.get(dateStr) || null);
     }
 
     return {
@@ -1169,9 +1189,10 @@ export function MarketPriceManager() {
                   </TableHeader>
                   <TableBody>
                     {weeklyPriceData.data.map((price, index) => {
+                      // weekStart + index로 해당 날짜 계산 (월요일부터 시작)
                       const targetDate = new Date(weeklyPriceData.weekStart);
                       targetDate.setDate(weeklyPriceData.weekStart.getDate() + index);
-                      const dateStr = targetDate.toISOString().split("T")[0];
+                      const dateStr = formatLocalDateStr(targetDate);
                       const dayName = DAY_NAMES[targetDate.getDay()];
 
                       if (!price) {
