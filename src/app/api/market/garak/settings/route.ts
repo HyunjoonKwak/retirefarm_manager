@@ -4,6 +4,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
 import { CORPORATION_CODES } from "@/lib/services/garak-market";
+import { updateSchedule } from "@/lib/scheduler";
 
 const updateSettingsSchema = z.object({
   autoCollectEnabled: z.boolean().optional(),
@@ -127,6 +128,15 @@ export async function PATCH(request: NextRequest) {
         ...updateData,
       },
     });
+
+    // 스케줄 재등록 (자동 수집 설정이 변경되었을 수 있으므로)
+    try {
+      await updateSchedule(settings.id);
+      console.log(`[Settings] Schedule updated for settings: ${settings.id}`);
+    } catch (scheduleError) {
+      console.error("[Settings] Failed to update schedule:", scheduleError);
+      // 스케줄 업데이트 실패해도 설정 저장은 성공으로 처리
+    }
 
     return NextResponse.json({
       message: "설정이 저장되었습니다.",
