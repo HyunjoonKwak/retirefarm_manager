@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
         ? varietiesParam.split(",").map(v => v.trim()).filter(Boolean)
         : undefined;
 
-      const history = await getProductPriceHistory(
+      const { history, noAuctionDates } = await getProductPriceHistory(
         productName,
         days,
         variety || undefined,
@@ -86,6 +86,7 @@ export async function GET(request: NextRequest) {
         unit,
         days,
         history,
+        noAuctionDates,
       });
     }
 

@@ -235,7 +235,7 @@ export async function collectAndSaveAuctionData(
   date: Date,
   corporationCodes: string[] = ["11000101"],
   productName?: string
-): Promise<{ totalCount: number; newCount: number; duplicateCount: number }> {
+): Promise<{ totalCount: number; newCount: number; duplicateCount: number; noAuction: boolean }> {
   let totalCount = 0;
   let totalNewCount = 0;
   let totalDuplicateCount = 0;
@@ -379,6 +379,8 @@ export async function collectAndSaveAuctionData(
       totalDuplicateCount += corpDuplicateCount;
 
       // 수집 로그 저장 (품목 정보 포함)
+      // 경매 없는 날인 경우 NO_AUCTION 상태로 저장
+      const status = corpTotalCount === 0 ? "NO_AUCTION" : "SUCCESS";
       await prisma.dataCollectionLog.create({
         data: {
           targetDate: date,
@@ -387,10 +389,14 @@ export async function collectAndSaveAuctionData(
           totalCount: corpTotalCount,
           newCount: corpNewCount,
           duplicateCount: corpDuplicateCount,
-          status: "SUCCESS",
+          status,
           completedAt: new Date(),
         },
       });
+
+      if (status === "NO_AUCTION") {
+        console.log(`[Garak API] Corp ${corpCode}: No auction data for this date`);
+      }
     } catch (error) {
       // 수집 실패 로그
       await prisma.dataCollectionLog.create({
@@ -409,7 +415,10 @@ export async function collectAndSaveAuctionData(
     }
   }
 
-  return { totalCount, newCount: totalNewCount, duplicateCount: totalDuplicateCount };
+  // 경매 없는 날 여부
+  const noAuction = totalCount === 0;
+
+  return { totalCount, newCount: totalNewCount, duplicateCount: totalDuplicateCount, noAuction };
 }
 
 /**
@@ -519,7 +528,23 @@ export async function getProductPriceHistory(
   // 날짜 내림차순 정렬
   results.sort((a, b) => b.date.getTime() - a.date.getTime());
 
-  return results;
+  // 해당 기간 내 휴장일(NO_AUCTION) 조회
+  const noAuctionLogs = await prisma.dataCollectionLog.findMany({
+    where: {
+      targetDate: { gte: startDate },
+      status: "NO_AUCTION",
+    },
+    select: {
+      targetDate: true,
+    },
+    distinct: ["targetDate"],
+  });
+
+  const noAuctionDates = noAuctionLogs.map(log =>
+    log.targetDate.toISOString().split("T")[0]
+  );
+
+  return { history: results, noAuctionDates };
 }
 
 /**

@@ -48,8 +48,13 @@ export async function POST(request: NextRequest) {
       productName
     );
 
+    // 경매 없는 날인 경우 메시지 변경
+    const message = result.noAuction
+      ? "경매가 없는 날입니다. (휴장일/공휴일)"
+      : "데이터 수집이 완료되었습니다.";
+
     return NextResponse.json({
-      message: "데이터 수집이 완료되었습니다.",
+      message,
       date: targetDate.toISOString().split("T")[0],
       corporations: validCodes.map((code: string) => ({
         code,

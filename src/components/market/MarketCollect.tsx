@@ -113,7 +113,11 @@ interface DataStats {
   dailyData: DailyData[];
 }
 
-export function MarketCollect() {
+interface MarketCollectProps {
+  onCollectComplete?: () => void; // 수집 완료 후 콜백 (시세 데이터 새로고침용)
+}
+
+export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
   const [settings, setSettings] = useState<MarketSettings | null>(null);
   const [originalSettings, setOriginalSettings] = useState<MarketSettings | null>(null);
   const [corporations, setCorporations] = useState<Corporation[]>([]);
@@ -254,6 +258,8 @@ export function MarketCollect() {
     const totalSteps = selectedCorps.length;
     let completedSteps = 0;
     let totalNewRecords = 0;
+    let totalTotalCount = 0;
+    let hasNoAuction = false;
 
     try {
       for (const corpCode of selectedCorps) {
@@ -276,15 +282,34 @@ export function MarketCollect() {
           throw new Error(result.error || `${corpName} 수집 실패`);
         }
 
-        totalNewRecords += result.newRecords || 0;
+        totalNewRecords += result.newCount || 0;
+        totalTotalCount += result.totalCount || 0;
+        if (result.noAuction) {
+          hasNoAuction = true;
+        }
         completedSteps++;
         setCollectProgressPercent(Math.round((completedSteps / totalSteps) * 100));
       }
 
       setCollectProgress("수집 완료!");
-      toast.success(`${totalNewRecords}건의 새 데이터가 저장되었습니다.`);
+
+      // 경매 없는 날인 경우
+      if (hasNoAuction && totalTotalCount === 0) {
+        toast.info(`${collectDate}은(는) 경매가 없는 날입니다. (휴장일/공휴일)`);
+      } else if (totalNewRecords > 0) {
+        toast.success(`${totalNewRecords}건의 새 데이터가 저장되었습니다.`);
+      } else {
+        toast.info("새로운 데이터가 없습니다. (이미 수집된 데이터)");
+      }
+
+      // 데이터 새로고침
       fetchDataStats();
       fetchLogs();
+
+      // 부모 컴포넌트에 수집 완료 알림 (시세 데이터 새로고침용)
+      if (onCollectComplete) {
+        onCollectComplete();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "수집 중 오류가 발생했습니다.";
       setCollectProgress(`오류: ${message}`);
@@ -372,6 +397,13 @@ export function MarketCollect() {
           <Badge variant="default" className="bg-green-500">
             <CheckCircle className="h-3 w-3 mr-1" />
             성공
+          </Badge>
+        );
+      case "NO_AUCTION":
+        return (
+          <Badge variant="secondary" className="bg-gray-400 text-white">
+            <Calendar className="h-3 w-3 mr-1" />
+            휴장
           </Badge>
         );
       case "FAILED":

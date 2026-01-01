@@ -100,6 +100,9 @@ interface PriceHistory {
   pricePerKg?: number | null;
 }
 
+// 휴장일 날짜 목록
+type NoAuctionDates = string[];
+
 interface DailyDetailResult {
   id: string;
   productName: string;
@@ -153,6 +156,7 @@ export function MarketPriceManager() {
   const [varieties, setVarieties] = useState<string[]>([]);
   const [origins, setOrigins] = useState<string[]>([]);
   const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([]);
+  const [noAuctionDates, setNoAuctionDates] = useState<NoAuctionDates>([]);
   const [latestDate, setLatestDate] = useState<string | null>(null);
   const [dailyResults, setDailyResults] = useState<DailyDetailResult[]>([]);
 
@@ -253,16 +257,28 @@ export function MarketPriceManager() {
 
   // 주간 단위로 그룹화된 일별 시세 데이터 (월요일~일요일)
   const weeklyPriceData = useMemo(() => {
-    if (priceHistory.length === 0) return { weekStart: new Date(), weekEnd: new Date(), data: [] };
+    if (priceHistory.length === 0 && noAuctionDates.length === 0) {
+      return { weekStart: new Date(), weekEnd: new Date(), data: [], noAuctionSet: new Set<string>() };
+    }
+
+    // 휴장일 Set 생성 (빠른 조회용)
+    const noAuctionSet = new Set(noAuctionDates);
 
     const sortedHistory = [...priceHistory].sort((a, b) =>
       parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()
     );
 
-    if (sortedHistory.length === 0) return { weekStart: new Date(), weekEnd: new Date(), data: [] };
+    // 최신 날짜 결정 (데이터 또는 휴장일 중 가장 최근)
+    let latestDateObj: Date;
+    if (sortedHistory.length > 0) {
+      latestDateObj = parseLocalDate(sortedHistory[0].date);
+    } else if (noAuctionDates.length > 0) {
+      const sortedNoAuction = [...noAuctionDates].sort().reverse();
+      latestDateObj = parseLocalDate(sortedNoAuction[0]);
+    } else {
+      return { weekStart: new Date(), weekEnd: new Date(), data: [], noAuctionSet };
+    }
 
-    // 최신 데이터 날짜에서 해당 주의 월요일 찾기
-    const latestDateObj = parseLocalDate(sortedHistory[0].date);
     const dayOfWeek = latestDateObj.getDay(); // 0=일, 1=월, ..., 6=토
     // 월요일로 이동 (일요일이면 -6, 월요일이면 0, 화요일이면 -1, ...)
     const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -301,8 +317,9 @@ export function MarketPriceManager() {
       weekStart,
       weekEnd,
       data: fullWeek,
+      noAuctionSet,
     };
-  }, [priceHistory, weekOffset]);
+  }, [priceHistory, weekOffset, noAuctionDates]);
 
   // 필터가 적용된 일별 결과
   const filteredDailyResults = useMemo(() => {
@@ -371,8 +388,9 @@ export function MarketPriceManager() {
     const totalQuantity = filteredDailyResults.reduce((sum, r) => sum + r.quantity, 0);
 
     // 가중평균: sum(price * quantity) / sum(quantity)
-    const totalWeightedPrice = filteredDailyResults.reduce((sum, r) => sum + (r.price * r.quantity), 0);
-    const weightedAvgPrice = totalQuantity > 0 ? Math.round(totalWeightedPrice / totalQuantity) : 0;
+    // totalTradeAmount는 일별 거래금액 (price * quantity의 합계)
+    const totalTradeAmount = filteredDailyResults.reduce((sum, r) => sum + (r.price * r.quantity), 0);
+    const weightedAvgPrice = totalQuantity > 0 ? Math.round(totalTradeAmount / totalQuantity) : 0;
 
     return {
       avgPrice: weightedAvgPrice,
@@ -380,6 +398,7 @@ export function MarketPriceManager() {
       minPrice: Math.min(...prices),
       tradeCount: filteredDailyResults.length,
       totalQuantity,
+      totalTradeAmount, // 일별 거래금액
     };
   }, [filteredDailyResults]);
 
@@ -457,9 +476,11 @@ export function MarketPriceManager() {
       const response = await fetch(url);
       const data = await response.json();
       setPriceHistory(data.history || []);
+      setNoAuctionDates(data.noAuctionDates || []);
     } catch (error) {
       console.error("Failed to fetch price history:", error);
       setPriceHistory([]);
+      setNoAuctionDates([]);
     } finally {
       setLoadingHistory(false);
     }
@@ -490,6 +511,24 @@ export function MarketPriceManager() {
       fetchLatestDate(),
     ]).finally(() => setLoading(false));
   }, [fetchWatchlist, fetchLatestDate]);
+
+  // 페이지가 다시 보이게 되면 데이터 새로고침 (수집 페이지에서 돌아왔을 때)
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        // 페이지가 다시 보이게 되면 최신 날짜 확인 및 시세 데이터 새로고침
+        fetchLatestDate();
+        if (selectedProduct) {
+          fetchPriceHistory(selectedProduct, selectedVarieties, selectedOrigin, viewDays, selectedUnit);
+        }
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchLatestDate, fetchPriceHistory, selectedProduct, selectedVarieties, selectedOrigin, viewDays, selectedUnit]);
 
   useEffect(() => {
     if (selectedProduct) {
@@ -1194,23 +1233,32 @@ export function MarketPriceManager() {
                       targetDate.setDate(weeklyPriceData.weekStart.getDate() + index);
                       const dateStr = formatLocalDateStr(targetDate);
                       const dayName = DAY_NAMES[targetDate.getDay()];
+                      const isNoAuction = weeklyPriceData.noAuctionSet.has(dateStr);
 
                       if (!price) {
                         return (
-                          <TableRow key={dateStr} className="text-muted-foreground">
-                            <TableCell className="text-xs sm:text-sm whitespace-nowrap">{formatDate(dateStr)} ({dayName})</TableCell>
-                            <TableCell className="text-right">-</TableCell>
-                            <TableCell className="text-right hidden lg:table-cell">-</TableCell>
-                            <TableCell className="text-right hidden sm:table-cell">-</TableCell>
-                            <TableCell className="text-right hidden md:table-cell">-</TableCell>
-                            <TableCell className="text-right hidden md:table-cell">-</TableCell>
-                            <TableCell className="text-right">-</TableCell>
+                          <TableRow key={dateStr} className={isNoAuction ? "bg-gray-50" : "text-muted-foreground"}>
+                            <TableCell className="text-xs sm:text-sm whitespace-nowrap">
+                              {formatDate(dateStr)} ({dayName})
+                              {isNoAuction && (
+                                <Badge variant="secondary" className="ml-2 bg-gray-400 text-white text-[10px]">
+                                  휴장
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right text-gray-400" colSpan={6}>
+                              {isNoAuction ? "경매 없는 날" : "-"}
+                            </TableCell>
                           </TableRow>
                         );
                       }
 
-                      // 이전 날짜 데이터 찾기 (변동 계산용)
-                      const prevData = weeklyPriceData.data.slice(0, index).reverse().find(p => p !== null);
+                      // 이전 날짜 데이터 찾기 (변동 계산용) - 전체 priceHistory에서 검색
+                      // 현재 날짜보다 이전이면서 가장 가까운 데이터를 찾음
+                      const currentDateObj = parseLocalDate(price.date);
+                      const prevData = priceHistory
+                        .filter(p => parseLocalDate(p.date).getTime() < currentDateObj.getTime())
+                        .sort((a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime())[0];
                       const change = prevData
                         ? ((price.avgPrice - prevData.avgPrice) / prevData.avgPrice) * 100
                         : null;
@@ -1383,11 +1431,11 @@ export function MarketPriceManager() {
                   </div>
                 </div>
 
-                {/* 통계 요약 (필터 적용됨) */}
+                {/* 통계 요약 (필터 적용됨, 가중평균 사용) */}
                 {filteredDailyStats && (
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 text-center">
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-3 text-center">
                     <div className="p-2 bg-white rounded border">
-                      <p className="text-[10px] sm:text-xs text-muted-foreground">평균가</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground">평균가(가중)</p>
                       <p className="font-bold text-xs sm:text-sm">{formatExactPrice(filteredDailyStats.avgPrice)}</p>
                     </div>
                     <div className="p-2 bg-white rounded border">
@@ -1405,6 +1453,10 @@ export function MarketPriceManager() {
                     <div className="p-2 bg-white rounded border">
                       <p className="text-[10px] sm:text-xs text-muted-foreground">총수량</p>
                       <p className="font-bold text-xs sm:text-sm">{filteredDailyStats.totalQuantity.toLocaleString()}</p>
+                    </div>
+                    <div className="p-2 bg-white rounded border">
+                      <p className="text-[10px] sm:text-xs text-green-600">거래금액</p>
+                      <p className="font-bold text-green-600 text-xs sm:text-sm">{filteredDailyStats.totalTradeAmount.toLocaleString()}원</p>
                     </div>
                   </div>
                 )}
