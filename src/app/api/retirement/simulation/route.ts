@@ -56,7 +56,7 @@ export async function GET() {
         netValue: netValue.toString(),
       };
     } catch {
-      console.log("External portfolio API not available");
+      // External portfolio API not available
     }
 
     // 매도 예정 자산 정보 가져오기
@@ -66,7 +66,7 @@ export async function GET() {
         expectedProceeds = await externalPortfolioClient.getExpectedProceeds(userEmail);
       }
     } catch {
-      console.log("Failed to get expected proceeds");
+      // Failed to get expected proceeds
     }
 
     // 요약 계산

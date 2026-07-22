@@ -50,9 +50,16 @@ export function FundingTimelineVisual({
   totalRequired,
   totalPlanned,
 }: FundingTimelineVisualProps) {
-  const today = new Date();
-  const target = new Date(targetDate);
-  const totalDays = Math.max(1, Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+  const today = useMemo(() => new Date(), []);
+  const target = useMemo(() => new Date(targetDate), [targetDate]);
+  const totalDays = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+      ),
+    [target, today]
+  );
 
   // 연도 구분선 계산
   const yearMarkers = useMemo(() => {
@@ -93,15 +100,23 @@ export function FundingTimelineVisual({
 
   // 누적 금액 계산 (시간순)
   const cumulativeData = useMemo(() => {
-    let cumulative = 0;
-    return timelineItems.map((item) => {
-      cumulative += item.amount;
-      return {
-        ...item,
-        cumulative,
-        coveragePercent: totalRequired > 0 ? (cumulative / totalRequired) * 100 : 0,
-      };
-    });
+    type CumulativeItem = (typeof timelineItems)[number] & {
+      cumulative: number;
+      coveragePercent: number;
+    };
+    return timelineItems.reduce<CumulativeItem[]>((acc, item) => {
+      const cumulative =
+        (acc.length > 0 ? acc[acc.length - 1].cumulative : 0) + item.amount;
+      return [
+        ...acc,
+        {
+          ...item,
+          cumulative,
+          coveragePercent:
+            totalRequired > 0 ? (cumulative / totalRequired) * 100 : 0,
+        },
+      ];
+    }, []);
   }, [timelineItems, totalRequired]);
 
   // 같은 날짜의 아이템을 그룹핑 (마커 표시용)
