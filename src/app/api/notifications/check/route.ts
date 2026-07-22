@@ -3,8 +3,8 @@ import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
 
-// GET: 알림 생성 체크 및 자동 생성
-export async function GET() {
+// POST: 알림 생성 체크 및 자동 생성
+export async function POST() {
   try {
     const session = await getServerSession(authOptions);
 

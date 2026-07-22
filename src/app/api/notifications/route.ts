@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+
+const updateNotificationSchema = z
+  .object({
+    action: z.enum(["markRead", "markAllRead"], {
+      message: "잘못된 요청입니다.",
+    }),
+    notificationId: z.string().min(1).optional(),
+  })
+  .refine(
+    (data) => data.action !== "markRead" || Boolean(data.notificationId),
+    { message: "알림 ID가 필요합니다." }
+  );
 
 // GET: 알림 목록 조회
 export async function GET(request: NextRequest) {
@@ -62,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action, notificationId } = body;
+    const { action, notificationId } = updateNotificationSchema.parse(body);
 
     if (action === "markAllRead") {
       // 모든 알림 읽음 처리
@@ -99,6 +112,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      const firstIssue = error.issues[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "입력값이 올바르지 않습니다." },
+        { status: 400 }
+      );
+    }
+
     console.error("Update notification error:", error);
     return NextResponse.json(
       { error: "알림 업데이트 중 오류가 발생했습니다." },

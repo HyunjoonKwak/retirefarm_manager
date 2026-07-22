@@ -4,8 +4,9 @@
  * 서비스 간 통신용 API Key 인증 사용
  */
 
-const EXTERNAL_API_BASE_URL = process.env.EXTERNAL_PORTFOLIO_API_URL || "https://assets.specialrisk.me";
-const SERVICE_API_KEY = process.env.EXTERNAL_PORTFOLIO_API_KEY || "retirefarm-service-key-2024";
+const EXTERNAL_API_BASE_URL =
+  process.env.EXTERNAL_PORTFOLIO_API_URL || "https://assets.specialrisk.me";
+const SERVICE_API_KEY = process.env.EXTERNAL_PORTFOLIO_API_KEY;
 
 export interface ExternalPortfolioAsset {
   id: string;
@@ -56,6 +57,10 @@ class ExternalPortfolioClient {
    * API Key 인증 사용
    */
   private async fetchService<T>(endpoint: string): Promise<T> {
+    if (!SERVICE_API_KEY) {
+      throw new Error("EXTERNAL_PORTFOLIO_API_KEY 환경변수가 설정되지 않았습니다.");
+    }
+
     const headers: HeadersInit = {
       "Content-Type": "application/json",
       "x-service-api-key": SERVICE_API_KEY,

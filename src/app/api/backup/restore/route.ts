@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { z } from "zod";
 import { authOptions } from "@/lib/auth/options";
 import fs from "fs/promises";
 import path from "path";
 
 const BACKUP_DIR = process.env.BACKUP_DIR || "/backups";
 const SQLITE_PATH = "/app/prisma/data/retirefarm.db";
+
+const restoreSchema = z.object({
+  filename: z
+    .string({ message: "파일명이 필요합니다." })
+    .min(1, "파일명이 필요합니다.")
+    .refine(
+      (val) => !val.includes("/") && !val.includes("\\") && !val.includes(".."),
+      "유효하지 않은 파일명입니다."
+    ),
+});
 
 // POST: 백업 복원
 export async function POST(request: NextRequest) {
@@ -16,13 +27,9 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { filename } = body;
+    const { filename } = restoreSchema.parse(body);
 
-    if (!filename) {
-      return NextResponse.json({ error: "파일명이 필요합니다." }, { status: 400 });
-    }
-
-    // 경로 조작 방지
+    // 경로 조작 방지 (스키마 검증에 더한 이중 안전장치)
     const safeName = path.basename(filename);
     const filePath = path.join(BACKUP_DIR, safeName);
 
@@ -54,6 +61,14 @@ export async function POST(request: NextRequest) {
       preRestoreBackup,
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      const firstIssue = error.issues[0];
+      return NextResponse.json(
+        { error: firstIssue?.message || "입력값이 올바르지 않습니다." },
+        { status: 400 }
+      );
+    }
+
     console.error("Restore backup error:", error);
     return NextResponse.json({ error: "복원에 실패했습니다. 서버 로그를 확인하세요." }, { status: 500 });
   }

@@ -84,7 +84,7 @@ export function NotificationBell() {
 
   const checkNewNotifications = useCallback(async () => {
     try {
-      await fetch("/api/notifications/check");
+      await fetch("/api/notifications/check", { method: "POST" });
       await fetchNotifications();
     } catch (error) {
       console.error("Failed to check notifications:", error);
