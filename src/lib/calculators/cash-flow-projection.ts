@@ -109,7 +109,8 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
   // 월별 예측 생성
   for (let i = 0; i < projectionMonths; i++) {
     const currentMonth = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1);
-    const monthEnd = new Date(startMonth.getFullYear(), startMonth.getMonth() + i + 1, 0);
+    // End of month at 23:59:59.999 so same-day timestamps are included
+    const monthEnd = new Date(startMonth.getFullYear(), startMonth.getMonth() + i + 1, 0, 23, 59, 59, 999);
     const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}`;
 
     const inflowsByType: Record<string, { amount: number; items: { description: string; amount: number }[] }> = {};
@@ -209,6 +210,21 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
     });
   }
 
+  // 빈 예측 기간 방어 (reduce TypeError 방지)
+  if (projections.length === 0) {
+    return {
+      projections: [],
+      summary: {
+        totalInflow: 0,
+        totalOutflow: 0,
+        netCashFlow: 0,
+        lowestPoint: { month: "", amount: initialCash },
+        highestPoint: { month: "", amount: initialCash },
+        breakEvenMonth: undefined,
+      },
+    };
+  }
+
   // 요약 계산
   const totalInflow = projections.reduce((sum, p) => sum + p.totalInflow, 0);
   const totalOutflow = projections.reduce((sum, p) => sum + p.totalOutflow, 0);
@@ -220,15 +236,15 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
     p.cumulativeCashFlow > highest.cumulativeCashFlow ? p : highest
   );
 
-  // 손익분기점 찾기
+  // 손익분기점 찾기 (첫 달에 initialCash 음수에서 회복되는 경우 포함)
   let breakEvenMonth: string | undefined;
-  for (let i = 1; i < projections.length; i++) {
-    const prev = projections[i - 1];
-    const curr = projections[i];
-    if (prev.cumulativeCashFlow < 0 && curr.cumulativeCashFlow >= 0) {
-      breakEvenMonth = curr.month;
+  let previousCumulative = initialCash;
+  for (const projection of projections) {
+    if (previousCumulative < 0 && projection.cumulativeCashFlow >= 0) {
+      breakEvenMonth = projection.month;
       break;
     }
+    previousCumulative = projection.cumulativeCashFlow;
   }
 
   return {

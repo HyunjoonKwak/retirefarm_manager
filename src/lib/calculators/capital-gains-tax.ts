@@ -119,7 +119,8 @@ export function calculateCapitalGainsTax(input: CapitalGainsTaxInput): CapitalGa
       localIncomeTax: 0,
       totalTax: 0,
       effectiveTaxRate: 0,
-      netProceeds: adjustedSalePrice - adjustedPurchasePrice,
+      // Keep the same basis as the normal branch: sale - purchase - expenses
+      netProceeds: capitalGain,
     };
   }
 
@@ -169,7 +170,7 @@ export function calculateCapitalGainsTax(input: CapitalGainsTaxInput): CapitalGa
 
   // 기본공제 (250만원)
   const basicDeduction = 2_500_000;
-  let taxableIncome = capitalGainIncome - basicDeduction;
+  const taxableIncome = capitalGainIncome - basicDeduction;
 
   if (taxableIncome <= 0) {
     return {
@@ -274,5 +275,6 @@ export function calculateHoldingPeriodYears(purchaseDate: Date | string): number
   const now = new Date();
   const diffTime = now.getTime() - purchase.getTime();
   const diffYears = diffTime / (1000 * 60 * 60 * 24 * 365);
-  return Math.floor(diffYears);
+  // Guard against future purchase dates
+  return Math.max(0, Math.floor(diffYears));
 }
