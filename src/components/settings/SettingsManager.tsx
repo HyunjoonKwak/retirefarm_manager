@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   User,
-  Shield,
   Database,
   Loader2,
   Download,
@@ -57,15 +56,6 @@ export function SettingsManager() {
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-
-  // 비밀번호 변경
-  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmPassword: "",
-  });
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   // 데이터 내보내기
   const [isExporting, setIsExporting] = useState(false);
@@ -123,46 +113,6 @@ export function SettingsManager() {
       toast.error("프로필 수정 중 오류가 발생했습니다.");
     } finally {
       setIsSavingProfile(false);
-    }
-  }
-
-  async function handleChangePassword() {
-    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-      toast.error("모든 항목을 입력해주세요.");
-      return;
-    }
-
-    if (passwordForm.newPassword.length < 8) {
-      toast.error("새 비밀번호는 8자 이상이어야 합니다.");
-      return;
-    }
-
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      toast.error("새 비밀번호가 일치하지 않습니다.");
-      return;
-    }
-
-    setIsChangingPassword(true);
-    try {
-      const response = await fetch("/api/settings/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(passwordForm),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        toast.error(result.error || "비밀번호 변경에 실패했습니다.");
-      } else {
-        toast.success("비밀번호가 변경되었습니다.");
-        setIsPasswordDialogOpen(false);
-        setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-      }
-    } catch {
-      toast.error("비밀번호 변경 중 오류가 발생했습니다.");
-    } finally {
-      setIsChangingPassword(false);
     }
   }
 
@@ -234,14 +184,10 @@ export function SettingsManager() {
   return (
     <div className="space-y-6">
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             프로필
-          </TabsTrigger>
-          <TabsTrigger value="security" className="flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            보안
           </TabsTrigger>
           <TabsTrigger value="data" className="flex items-center gap-2">
             <Database className="h-4 w-4" />
@@ -290,27 +236,6 @@ export function SettingsManager() {
                   <LogOut className="mr-2 h-4 w-4" />
                   로그아웃
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* 보안 탭 */}
-        <TabsContent value="security">
-          <Card>
-            <CardHeader>
-              <CardTitle>보안 설정</CardTitle>
-              <CardDescription>비밀번호를 변경하고 계정 보안을 관리합니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div>
-                  <h4 className="font-medium mb-2">비밀번호 변경</h4>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    정기적으로 비밀번호를 변경하여 계정을 안전하게 보호하세요.
-                  </p>
-                  <Button onClick={() => setIsPasswordDialogOpen(true)}>비밀번호 변경</Button>
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -386,52 +311,6 @@ export function SettingsManager() {
             <Button onClick={handleUpdateProfile} disabled={isSavingProfile}>
               {isSavingProfile && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               저장
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 비밀번호 변경 다이얼로그 */}
-      <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>비밀번호 변경</DialogTitle>
-            <DialogDescription>새로운 비밀번호를 설정합니다.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>현재 비밀번호</Label>
-              <Input
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>새 비밀번호</Label>
-              <Input
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-              />
-              <p className="text-xs text-muted-foreground">8자 이상 입력해주세요.</p>
-            </div>
-            <div className="space-y-2">
-              <Label>비밀번호 확인</Label>
-              <Input
-                type="password"
-                value={passwordForm.confirmPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPasswordDialogOpen(false)}>
-              취소
-            </Button>
-            <Button onClick={handleChangePassword} disabled={isChangingPassword}>
-              {isChangingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              변경
             </Button>
           </DialogFooter>
         </DialogContent>

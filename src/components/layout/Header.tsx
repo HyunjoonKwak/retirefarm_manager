@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Menu, LogOut, User, Settings } from "lucide-react";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 
@@ -61,6 +61,9 @@ export function Header({ onMenuClick }: HeaderProps) {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                   <Avatar className="h-8 w-8">
+                    {session.user?.image && (
+                      <AvatarImage src={session.user.image} alt={session.user?.name || "프로필"} />
+                    )}
                     <AvatarFallback>
                       {getInitials(session.user?.name)}
                     </AvatarFallback>
@@ -69,13 +72,21 @@ export function Header({ onMenuClick }: HeaderProps) {
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-56" align="end" forceMount>
                 <DropdownMenuLabel className="font-normal">
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">
-                      {session.user?.name || "사용자"}
-                    </p>
-                    <p className="text-xs leading-none text-muted-foreground">
-                      {session.user?.email}
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      {session.user?.image && (
+                        <AvatarImage src={session.user.image} alt={session.user?.name || "프로필"} />
+                      )}
+                      <AvatarFallback>{getInitials(session.user?.name)}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">
+                        {session.user?.name || "사용자"}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {session.user?.email}
+                      </p>
+                    </div>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -105,14 +116,9 @@ export function Header({ onMenuClick }: HeaderProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" asChild>
-                <Link href="/auth/login">로그인</Link>
-              </Button>
-              <Button asChild>
-                <Link href="/auth/register">회원가입</Link>
-              </Button>
-            </div>
+            <Button variant="ghost" asChild>
+              <Link href="/auth/login">로그인</Link>
+            </Button>
           )}
         </div>
       </div>
