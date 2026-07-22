@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { authOptions } from "@/lib/auth/options";
+import { logger } from "@/lib/logger";
+import { getSessionUser, isAdmin } from "@/lib/auth/guards";
+import { formatDateKey } from "@/lib/services/garak-market";
 
 // GET: 데이터 현황 조회
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user?.id) {
+    const user = await getSessionUser();
+    if (!user) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
       });
 
       const dailyData = dailyStats.map((stat) => ({
-        date: stat.auctionDate.toISOString().split("T")[0],
+        date: formatDateKey(stat.auctionDate),
         count: stat._count.id,
       }));
 
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
     // 월별로 집계
     const monthlyData: Record<string, number> = {};
     monthlyStats.forEach((stat) => {
-      const month = stat.auctionDate.toISOString().substring(0, 7); // YYYY-MM
+      const month = formatDateKey(stat.auctionDate).substring(0, 7); // YYYY-MM
       monthlyData[month] = (monthlyData[month] || 0) + stat._count.id;
     });
 
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest) {
         .map(([month, count]) => ({ month, count })),
     });
   } catch (error) {
-    console.error("Get data stats error:", error);
+    logger.error("Get data stats error:", error);
     return NextResponse.json(
       { error: "데이터 현황 조회 중 오류가 발생했습니다." },
       { status: 500 }
@@ -87,20 +88,26 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST: 오래된 데이터 정리
+const cleanupSchema = z.object({
+  retentionDays: z.coerce.number().int().min(7).max(365).catch(90),
+});
+
+// POST: 오래된 데이터 정리 (전역 공유 데이터이므로 ADMIN 전용)
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user?.id) {
+    const user = await getSessionUser();
+    if (!user) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
+    if (!isAdmin(user)) {
+      return NextResponse.json(
+        { error: "관리자만 데이터를 정리할 수 있습니다." },
+        { status: 403 }
+      );
+    }
 
-    const body = await request.json();
-    const { retentionDays = 90 } = body;
-
-    // 최소 7일, 최대 365일
-    const validRetention = Math.max(7, Math.min(365, retentionDays));
+    const body = await request.json().catch(() => ({}));
+    const { retentionDays: validRetention } = cleanupSchema.parse(body);
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - validRetention);
 
@@ -133,7 +140,7 @@ export async function POST(request: NextRequest) {
       retentionDays: validRetention,
     });
   } catch (error) {
-    console.error("Cleanup data error:", error);
+    logger.error("Cleanup data error:", error);
     return NextResponse.json(
       { error: "데이터 정리 중 오류가 발생했습니다." },
       { status: 500 }
@@ -141,13 +148,18 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// DELETE: 특정 날짜 이전 데이터 삭제 (수동)
+// DELETE: 특정 날짜 이전 데이터 삭제 (전역 공유 데이터이므로 ADMIN 전용)
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user?.id) {
+    const user = await getSessionUser();
+    if (!user) {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+    if (!isAdmin(user)) {
+      return NextResponse.json(
+        { error: "관리자만 데이터를 삭제할 수 있습니다." },
+        { status: 403 }
+      );
     }
 
     const { searchParams } = new URL(request.url);
@@ -180,7 +192,7 @@ export async function DELETE(request: NextRequest) {
       beforeDate,
     });
   } catch (error) {
-    console.error("Delete data error:", error);
+    logger.error("Delete data error:", error);
     return NextResponse.json(
       { error: "데이터 삭제 중 오류가 발생했습니다." },
       { status: 500 }

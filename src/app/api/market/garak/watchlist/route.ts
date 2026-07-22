@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { authOptions } from "@/lib/auth/options";
+import { getWatchlistPriceInfo } from "@/lib/services/garak-market";
 
 const addWatchlistSchema = z.object({
   productName: z.string().min(1, "품목명을 입력해주세요."),
@@ -25,56 +27,21 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
     });
 
-    // 각 관심 품목의 최신 시세 정보 가져오기
+    // 각 관심 품목의 최신 시세 정보 (일자별 가중평균 기준 변동률)
     const watchlistWithPrices = await Promise.all(
       watchlist.map(async (item) => {
-        const latestPrice = await prisma.auctionResult.findFirst({
-          where: {
-            productName: item.productName,
-            ...(item.variety && item.variety !== "" ? { variety: item.variety } : {}),
-            ...(item.origin && item.origin !== "" ? { origin: item.origin } : {}),
-          },
-          orderBy: { auctionDate: "desc" },
-          select: {
-            price: true,
-            auctionDate: true,
-            unit: true,
-            variety: true,
-          },
-        });
-
-        // 이전 날짜 가격 (변동률 계산용)
-        const previousPrice = await prisma.auctionResult.findFirst({
-          where: {
-            productName: item.productName,
-            ...(item.variety && item.variety !== "" ? { variety: item.variety } : {}),
-            ...(item.origin && item.origin !== "" ? { origin: item.origin } : {}),
-            auctionDate: {
-              lt: latestPrice?.auctionDate || new Date(),
-            },
-          },
-          orderBy: { auctionDate: "desc" },
-          select: { price: true },
-        });
-
-        const priceChange = latestPrice && previousPrice
-          ? ((latestPrice.price - previousPrice.price) / previousPrice.price) * 100
-          : null;
-
-        return {
-          ...item,
-          latestPrice: latestPrice?.price || null,
-          latestDate: latestPrice?.auctionDate || null,
-          unit: latestPrice?.unit || null,
-          latestVariety: latestPrice?.variety || null,
-          priceChange,
-        };
+        const priceInfo = await getWatchlistPriceInfo(
+          item.productName,
+          item.variety || undefined,
+          item.origin || undefined
+        );
+        return { ...item, ...priceInfo };
       })
     );
 
     return NextResponse.json({ watchlist: watchlistWithPrices });
   } catch (error) {
-    console.error("Get watchlist error:", error);
+    logger.error("Get watchlist error:", error);
     return NextResponse.json(
       { error: "관심 품목 조회 중 오류가 발생했습니다." },
       { status: 500 }
@@ -135,7 +102,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.error("Add watchlist error:", error);
+    logger.error("Add watchlist error:", error);
     return NextResponse.json(
       { error: "관심 품목 등록 중 오류가 발생했습니다." },
       { status: 500 }
@@ -177,7 +144,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ message: "관심 품목이 삭제되었습니다." });
   } catch (error) {
-    console.error("Delete watchlist error:", error);
+    logger.error("Delete watchlist error:", error);
     return NextResponse.json(
       { error: "관심 품목 삭제 중 오류가 발생했습니다." },
       { status: 500 }

@@ -1,58 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { collectAndSaveAuctionData } from "@/lib/services/garak-market";
+import { logger } from "@/lib/logger";
+import { isValidCronRequest } from "@/lib/auth/guards";
+import {
+  collectAndSaveAuctionData,
+  cleanupOldAuctionData,
+} from "@/lib/services/garak-market";
 
-// Vercel Cron을 위한 설정
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5분
 
 /**
- * GET: 스케줄된 자동 수집 실행
- * Vercel Cron에서 호출되거나 수동 테스트용
+ * 현재 시각을 KST 기준으로 반환.
+ * 컨테이너가 UTC로 동작해도 사용자 설정(KST 기준 HH:mm)과 올바르게 비교되도록 함.
+ */
+function getKstNow(): Date {
+  return new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" })
+  );
+}
+
+/**
+ * GET: 스케줄된 자동 수집 실행 (외부 크론 호출용, CRON_SECRET 필수)
+ * node-cron 스케줄러가 기본 경로이며, 이 엔드포인트는 외부 크론 백업용이다.
  */
 export async function GET(request: NextRequest) {
   try {
-    // Vercel Cron 인증 확인
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-
-    // 개발 환경이 아닌 경우 CRON_SECRET 검증
-    if (process.env.NODE_ENV !== "development" && cronSecret) {
-      if (authHeader !== `Bearer ${cronSecret}`) {
-        return NextResponse.json(
-          { error: "Unauthorized" },
-          { status: 401 }
-        );
-      }
+    if (!isValidCronRequest(request.headers.get("authorization"))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // 현재 시간 기준으로 수집해야 할 사용자 설정 조회
-    const now = new Date();
-    const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const currentDay = now.getDay(); // 0=일, 1=월, ..., 6=토
+    const kstNow = getKstNow();
+    const currentTime = `${String(kstNow.getHours()).padStart(2, "0")}:${String(
+      kstNow.getMinutes()
+    ).padStart(2, "0")}`;
+    const currentDay = kstNow.getDay(); // 0=일, 1=월, ..., 6=토
 
-    // 현재 시간 +/- 5분 범위 내의 설정 조회
     const allSettings = await prisma.marketCollectionSettings.findMany({
-      where: {
-        autoCollectEnabled: true,
-      },
+      where: { autoCollectEnabled: true },
     });
 
-    // 시간 및 요일 비교
+    // 요일 일치 + 설정 시각과 15분 이내인 설정만 실행
     const settingsToRun = allSettings.filter((s) => {
-      // 1. 요일 체크
       const collectDays = s.collectDays.split(",").filter(Boolean).map(Number);
-      if (!collectDays.includes(currentDay)) {
-        return false;
-      }
+      if (!collectDays.includes(currentDay)) return false;
 
-      // 2. 시간 비교 (현재 시간과 15분 이내 차이)
       const [setHour, setMin] = s.collectTime.split(":").map(Number);
-      const [curHour, curMin] = currentTime.split(":").map(Number);
-
       const setMinutes = setHour * 60 + setMin;
-      const curMinutes = curHour * 60 + curMin;
+      const curMinutes = kstNow.getHours() * 60 + kstNow.getMinutes();
 
       return Math.abs(setMinutes - curMinutes) <= 15;
     });
@@ -79,50 +76,26 @@ export async function GET(request: NextRequest) {
         const targetDate = new Date();
         targetDate.setDate(targetDate.getDate() - setting.collectDaysAgo);
 
-        const corporationCodes = setting.corporationCodes.split(",").filter(Boolean);
-        const targetProducts = setting.targetProducts.split(",").filter(Boolean);
+        const corporationCodes = setting.corporationCodes
+          .split(",")
+          .filter(Boolean);
 
-        let totalCount = 0;
-        let newCount = 0;
+        // collectAndSaveAuctionData가 쉼표 구분 다품목을 내부에서 분리 처리함
+        const result = await collectAndSaveAuctionData(
+          targetDate,
+          corporationCodes,
+          setting.targetProducts || undefined
+        );
 
-        // 각 대상 품목별로 수집
-        if (targetProducts.length > 0) {
-          for (const product of targetProducts) {
-            const result = await collectAndSaveAuctionData(
-              targetDate,
-              corporationCodes,
-              product.trim()
-            );
-            totalCount += result.totalCount;
-            newCount += result.newCount;
-          }
-        } else {
-          // 대상 품목이 없으면 전체 수집
-          const result = await collectAndSaveAuctionData(
-            targetDate,
-            corporationCodes
-          );
-          totalCount = result.totalCount;
-          newCount = result.newCount;
-        }
-
-        // 자동 정리가 활성화된 경우 오래된 데이터 정리
         if (setting.autoCleanupEnabled) {
-          const cutoffDate = new Date();
-          cutoffDate.setDate(cutoffDate.getDate() - setting.retentionDays);
-
-          await prisma.auctionResult.deleteMany({
-            where: {
-              auctionDate: { lt: cutoffDate },
-            },
-          });
+          await cleanupOldAuctionData();
         }
 
         results.push({
           userId: setting.userId,
           success: true,
-          totalCount,
-          newCount,
+          totalCount: result.totalCount,
+          newCount: result.newCount,
         });
       } catch (error) {
         results.push({
@@ -139,7 +112,7 @@ export async function GET(request: NextRequest) {
       results,
     });
   } catch (error) {
-    console.error("Cron collection error:", error);
+    logger.error("Cron collection error:", error);
     return NextResponse.json(
       { error: "수집 작업 중 오류가 발생했습니다." },
       { status: 500 }
@@ -147,22 +120,34 @@ export async function GET(request: NextRequest) {
   }
 }
 
+const manualTriggerSchema = z.object({
+  userId: z.string().min(1, "userId가 필요합니다."),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "날짜는 YYYY-MM-DD 형식이어야 합니다.")
+    .optional(),
+  products: z.string().optional(),
+});
+
 /**
- * POST: 수동 수집 트리거 (특정 사용자용)
+ * POST: 수동 수집 트리거 (서비스 간 호출용, CRON_SECRET 필수)
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { userId, date, products } = body;
+    if (!isValidCronRequest(request.headers.get("authorization"))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    if (!userId) {
+    const body = await request.json();
+    const parsed = manualTriggerSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "userId가 필요합니다." },
+        { error: parsed.error.issues[0]?.message || "잘못된 요청입니다." },
         { status: 400 }
       );
     }
+    const { userId, date, products } = parsed.data;
 
-    // 사용자 설정 조회
     const setting = await prisma.marketCollectionSettings.findUnique({
       where: { userId },
     });
@@ -180,41 +165,23 @@ export async function POST(request: NextRequest) {
     }
 
     const corporationCodes = setting.corporationCodes.split(",").filter(Boolean);
-    const targetProducts = products
-      ? products.split(",").filter(Boolean)
-      : setting.targetProducts.split(",").filter(Boolean);
+    const targetProducts = products ?? setting.targetProducts;
 
-    let totalCount = 0;
-    let newCount = 0;
-
-    if (targetProducts.length > 0) {
-      for (const product of targetProducts) {
-        const result = await collectAndSaveAuctionData(
-          targetDate,
-          corporationCodes,
-          product.trim()
-        );
-        totalCount += result.totalCount;
-        newCount += result.newCount;
-      }
-    } else {
-      const result = await collectAndSaveAuctionData(
-        targetDate,
-        corporationCodes
-      );
-      totalCount = result.totalCount;
-      newCount = result.newCount;
-    }
+    const result = await collectAndSaveAuctionData(
+      targetDate,
+      corporationCodes,
+      targetProducts || undefined
+    );
 
     return NextResponse.json({
       message: "수집이 완료되었습니다.",
       targetDate: targetDate.toISOString(),
       targetProducts,
-      totalCount,
-      newCount,
+      totalCount: result.totalCount,
+      newCount: result.newCount,
     });
   } catch (error) {
-    console.error("Manual collection error:", error);
+    logger.error("Manual collection error:", error);
     return NextResponse.json(
       { error: "수집 중 오류가 발생했습니다." },
       { status: 500 }

@@ -5,7 +5,11 @@
 
 import cron, { ScheduledTask } from "node-cron";
 import prisma from "@/lib/prisma";
-import { collectAndSaveAuctionData } from "@/lib/services/garak-market";
+import { logger } from "@/lib/logger";
+import {
+  collectAndSaveAuctionData,
+  cleanupOldAuctionData,
+} from "@/lib/services/garak-market";
 
 // 활성화된 Cron Job들을 저장하는 맵
 const activeCronJobs = new Map<string, ScheduledTask>();
@@ -22,9 +26,12 @@ function toCronExpression(collectTime: string, collectDays: string): string {
 }
 
 /**
- * 다음 실행 시간 계산 (KST 기준)
+ * 다음 실행 시간 계산 (서버 로컬 기준)
  */
-export function getNextRunTime(collectTime: string, collectDays: string): Date | null {
+export function getNextRunTime(
+  collectTime: string,
+  collectDays: string
+): Date | null {
   try {
     const [hours, minutes] = collectTime.split(":").map(Number);
     const daysArray = collectDays.split(",").filter(Boolean).map(Number);
@@ -33,16 +40,12 @@ export function getNextRunTime(collectTime: string, collectDays: string): Date |
 
     const now = new Date();
 
-    // 오늘부터 7일간 확인
     for (let i = 0; i < 7; i++) {
       const targetDate = new Date(now);
       targetDate.setDate(now.getDate() + i);
       targetDate.setHours(hours, minutes, 0, 0);
 
-      const targetDayOfWeek = targetDate.getDay();
-
-      // 해당 요일이 수집 요일에 포함되고, 미래 시간인 경우
-      if (daysArray.includes(targetDayOfWeek) && targetDate > now) {
+      if (daysArray.includes(targetDate.getDay()) && targetDate > now) {
         return targetDate;
       }
     }
@@ -55,101 +58,49 @@ export function getNextRunTime(collectTime: string, collectDays: string): Date |
 
 /**
  * 수집 실행 함수
+ * 수집 자체의 성공/실패 로그는 collectAndSaveAuctionData가 법인별로 기록하므로
+ * 여기서는 별도 SUCCESS 로그를 남기지 않는다 (이중 기록 방지).
  */
 async function executeCollection(settingsId: string) {
-  console.log(`🚀 [Scheduler] Executing collection for settings: ${settingsId}`);
-
   const settings = await prisma.marketCollectionSettings.findUnique({
     where: { id: settingsId },
-    include: { user: { select: { name: true, email: true } } },
   });
 
   if (!settings) {
-    console.error(`❌ [Scheduler] Settings not found: ${settingsId}`);
+    logger.error(`[Scheduler] Settings not found: ${settingsId}`);
     return;
   }
 
   if (!settings.autoCollectEnabled) {
-    console.log(`⏭️ [Scheduler] Auto collection disabled for: ${settingsId}`);
+    logger.info(`[Scheduler] Auto collection disabled: ${settingsId}`);
     return;
   }
 
-  const userName = settings.user?.name || settings.user?.email || "Unknown";
-  console.log(`   User: ${userName}`);
-
   try {
-    // 수집 대상 날짜 계산
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() - settings.collectDaysAgo);
 
-    const corporationCodes = settings.corporationCodes.split(",").filter(Boolean);
-    const targetProducts = settings.targetProducts.split(",").filter(Boolean);
+    const corporationCodes = settings.corporationCodes
+      .split(",")
+      .filter(Boolean);
 
-    console.log(`   Target date: ${targetDate.toISOString().split("T")[0]}`);
-    console.log(`   Corporations: ${corporationCodes.join(", ")}`);
-    console.log(`   Products: ${targetProducts.length > 0 ? targetProducts.join(", ") : "전체"}`);
+    // collectAndSaveAuctionData가 쉼표 구분 다품목을 내부에서 분리 처리함
+    const result = await collectAndSaveAuctionData(
+      targetDate,
+      corporationCodes,
+      settings.targetProducts || undefined
+    );
 
-    let totalCount = 0;
-    let newCount = 0;
+    logger.info(
+      `[Scheduler] Collection done (${settingsId}): total=${result.totalCount}, new=${result.newCount}`
+    );
 
-    // 각 대상 품목별로 수집
-    if (targetProducts.length > 0) {
-      for (const product of targetProducts) {
-        console.log(`   Collecting: ${product}`);
-        const result = await collectAndSaveAuctionData(
-          targetDate,
-          corporationCodes,
-          product.trim()
-        );
-        totalCount += result.totalCount;
-        newCount += result.newCount;
-      }
-    } else {
-      // 대상 품목이 없으면 전체 수집
-      const result = await collectAndSaveAuctionData(
-        targetDate,
-        corporationCodes
-      );
-      totalCount = result.totalCount;
-      newCount = result.newCount;
-    }
-
-    console.log(`✅ [Scheduler] Collection completed: ${totalCount} total, ${newCount} new`);
-
-    // 수집 로그 저장
-    await prisma.dataCollectionLog.create({
-      data: {
-        targetDate,
-        corporation: corporationCodes.join(","),
-        targetProducts: targetProducts.join(",") || null,
-        totalCount,
-        newCount,
-        duplicateCount: totalCount - newCount,
-        status: "SUCCESS",
-        startedAt: new Date(),
-        completedAt: new Date(),
-      },
-    });
-
-    // 자동 정리가 활성화된 경우 오래된 데이터 정리
     if (settings.autoCleanupEnabled) {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - settings.retentionDays);
-
-      const deleted = await prisma.auctionResult.deleteMany({
-        where: {
-          auctionDate: { lt: cutoffDate },
-        },
-      });
-
-      if (deleted.count > 0) {
-        console.log(`🧹 [Scheduler] Cleaned up ${deleted.count} old records`);
-      }
+      await cleanupOldAuctionData();
     }
   } catch (error) {
-    console.error(`❌ [Scheduler] Collection failed:`, error);
+    logger.error(`[Scheduler] Collection failed (${settingsId}):`, error);
 
-    // 실패 로그 저장
     await prisma.dataCollectionLog.create({
       data: {
         targetDate: new Date(),
@@ -170,32 +121,28 @@ async function executeCollection(settingsId: string) {
 /**
  * 스케줄 등록
  */
-export function registerSchedule(settingsId: string, collectTime: string, collectDays: string): boolean {
+export function registerSchedule(
+  settingsId: string,
+  collectTime: string,
+  collectDays: string
+): boolean {
   try {
-    // 기존 스케줄이 있으면 제거
     if (activeCronJobs.has(settingsId)) {
-      console.log(`   Removing existing schedule: ${settingsId}`);
       const existingJob = activeCronJobs.get(settingsId);
       existingJob?.stop();
       activeCronJobs.delete(settingsId);
     }
 
-    // Cron 표현식 생성
     const cronExpr = toCronExpression(collectTime, collectDays);
 
-    // Cron 표현식 검증
     if (!cron.validate(cronExpr)) {
-      console.error(`   ❌ Invalid cron expression: ${cronExpr}`);
+      logger.error(`[Scheduler] Invalid cron expression: ${cronExpr}`);
       return false;
     }
 
-    console.log(`   Creating cron job: ${cronExpr} (timezone: Asia/Seoul)`);
-
-    // Cron Job 생성
     const task = cron.schedule(
       cronExpr,
       () => {
-        console.log(`🕐 [Scheduler] Cron triggered for: ${settingsId}`);
         executeCollection(settingsId);
       },
       {
@@ -204,12 +151,13 @@ export function registerSchedule(settingsId: string, collectTime: string, collec
     );
 
     activeCronJobs.set(settingsId, task);
-    console.log(`   ✅ Schedule registered: ${settingsId}`);
-    console.log(`   Active schedules: ${activeCronJobs.size}`);
+    logger.info(
+      `[Scheduler] Registered ${settingsId} (${cronExpr}, KST). Active: ${activeCronJobs.size}`
+    );
 
     return true;
   } catch (error) {
-    console.error(`   ❌ Failed to register schedule ${settingsId}:`, error);
+    logger.error(`[Scheduler] Failed to register ${settingsId}:`, error);
     return false;
   }
 }
@@ -223,12 +171,12 @@ export function unregisterSchedule(settingsId: string): boolean {
     if (job) {
       job.stop();
       activeCronJobs.delete(settingsId);
-      console.log(`✅ Schedule unregistered: ${settingsId}`);
+      logger.info(`[Scheduler] Unregistered: ${settingsId}`);
       return true;
     }
     return false;
   } catch (error) {
-    console.error(`Failed to unregister schedule ${settingsId}:`, error);
+    logger.error(`[Scheduler] Failed to unregister ${settingsId}:`, error);
     return false;
   }
 }
@@ -238,18 +186,13 @@ export function unregisterSchedule(settingsId: string): boolean {
  */
 export function clearAllSchedules(): number {
   const count = activeCronJobs.size;
-  if (count === 0) {
-    console.log("🧹 No existing cron jobs to clear");
-    return 0;
-  }
+  if (count === 0) return 0;
 
-  console.log(`🧹 Clearing ${count} existing cron job(s)...`);
-  activeCronJobs.forEach((job, settingsId) => {
-    console.log(`   Stopping: ${settingsId}`);
+  activeCronJobs.forEach((job) => {
     job.stop();
   });
   activeCronJobs.clear();
-  console.log("✅ All cron jobs cleared");
+  logger.info(`[Scheduler] Cleared ${count} cron job(s)`);
   return count;
 }
 
@@ -261,48 +204,24 @@ export async function loadAllSchedules(): Promise<number> {
     // 기존 스케줄 모두 정리 (Hot Reload 중복 방지)
     clearAllSchedules();
 
-    console.log("📅 Loading all active market collection schedules...");
-    console.log(`   Current time: ${new Date().toISOString()}`);
-    console.log(`   KST: ${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}`);
-
     const settings = await prisma.marketCollectionSettings.findMany({
-      where: {
-        autoCollectEnabled: true,
-      },
-      include: {
-        user: {
-          select: { name: true, email: true },
-        },
-      },
+      where: { autoCollectEnabled: true },
     });
-
-    console.log(`   Found ${settings.length} active schedule(s) in DB`);
 
     let loadedCount = 0;
     for (const setting of settings) {
-      const userName = setting.user?.name || setting.user?.email || "Unknown";
-      console.log(`   Registering schedule for user: ${userName}`);
-      console.log(`     Time: ${setting.collectTime}`);
-      console.log(`     Days: ${setting.collectDays}`);
-      console.log(`     Products: ${setting.targetProducts || "전체"}`);
-
       const success = registerSchedule(
         setting.id,
         setting.collectTime,
         setting.collectDays
       );
-
-      if (success) {
-        loadedCount++;
-        const nextRun = getNextRunTime(setting.collectTime, setting.collectDays);
-        console.log(`     Next run: ${nextRun ? nextRun.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "N/A"}`);
-      }
+      if (success) loadedCount++;
     }
 
-    console.log(`✅ Loaded ${loadedCount}/${settings.length} schedule(s)`);
+    logger.info(`[Scheduler] Loaded ${loadedCount}/${settings.length} schedule(s)`);
     return loadedCount;
   } catch (error) {
-    console.error("❌ Failed to load schedules:", error);
+    logger.error("[Scheduler] Failed to load schedules:", error);
     return 0;
   }
 }
@@ -312,11 +231,10 @@ export async function loadAllSchedules(): Promise<number> {
  */
 export async function runScheduleNow(settingsId: string): Promise<boolean> {
   try {
-    console.log(`▶️ Running schedule immediately: ${settingsId}`);
     await executeCollection(settingsId);
     return true;
   } catch (error) {
-    console.error(`Failed to run schedule ${settingsId}:`, error);
+    logger.error(`[Scheduler] Failed to run ${settingsId}:`, error);
     return false;
   }
 }
@@ -349,7 +267,7 @@ export async function updateSchedule(settingsId: string): Promise<boolean> {
 
     return registerSchedule(settingsId, setting.collectTime, setting.collectDays);
   } catch (error) {
-    console.error(`Failed to update schedule ${settingsId}:`, error);
+    logger.error(`[Scheduler] Failed to update ${settingsId}:`, error);
     return false;
   }
 }

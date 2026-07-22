@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { authOptions } from "@/lib/auth/options";
 import { CORPORATION_CODES } from "@/lib/services/garak-market";
 import { updateSchedule } from "@/lib/scheduler";
@@ -65,7 +66,7 @@ export async function GET() {
       availableCorporations,
     });
   } catch (error) {
-    console.error("Get market settings error:", error);
+    logger.error("Get market settings error:", error);
     return NextResponse.json(
       { error: "설정 조회 중 오류가 발생했습니다." },
       { status: 500 }
@@ -132,9 +133,8 @@ export async function PATCH(request: NextRequest) {
     // 스케줄 재등록 (자동 수집 설정이 변경되었을 수 있으므로)
     try {
       await updateSchedule(settings.id);
-      console.log(`[Settings] Schedule updated for settings: ${settings.id}`);
     } catch (scheduleError) {
-      console.error("[Settings] Failed to update schedule:", scheduleError);
+      logger.error("[Settings] Failed to update schedule:", scheduleError);
       // 스케줄 업데이트 실패해도 설정 저장은 성공으로 처리
     }
 
@@ -150,7 +150,7 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    console.error("Update market settings error:", error);
+    logger.error("Update market settings error:", error);
     return NextResponse.json(
       { error: "설정 저장 중 오류가 발생했습니다." },
       { status: 500 }

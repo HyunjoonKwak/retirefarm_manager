@@ -1,0 +1,8 @@
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+// GET: 컨테이너 헬스체크용 (인증 불필요)
+export async function GET() {
+  return NextResponse.json({ status: "ok" });
+}

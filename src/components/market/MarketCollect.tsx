@@ -6,14 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -36,21 +28,15 @@ import {
   Loader2,
   Trash2,
   Database,
-  Clock,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  RotateCcw,
-  AlertTriangle,
   Download,
   Play,
   Calendar,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
 import { toast } from "sonner";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { MARKET_PRODUCTS } from "@/lib/constants/market-products";
+import { MarketCollectAutoSettings } from "./MarketCollectAutoSettings";
+import { MarketCollectLogs } from "./MarketCollectLogs";
 
 interface MarketSettings {
   autoCollectEnabled: boolean;
@@ -62,23 +48,7 @@ interface MarketSettings {
   defaultViewDays: number;
 }
 
-// 요일 목록
-const WEEKDAYS = [
-  { value: 0, label: "일" },
-  { value: 1, label: "월" },
-  { value: 2, label: "화" },
-  { value: 3, label: "수" },
-  { value: 4, label: "목" },
-  { value: 5, label: "금" },
-  { value: 6, label: "토" },
-];
-
-// 주요 품목 목록
-const AVAILABLE_PRODUCTS = [
-  "토마토", "포도", "딸기", "수박", "참외", "오이", "고추",
-  "배추", "상추", "시금치", "양배추", "무", "당근",
-  "감자", "고구마", "사과", "배", "감귤", "복숭아", "멜론",
-];
+const AVAILABLE_PRODUCTS: readonly string[] = MARKET_PRODUCTS;
 
 interface Corporation {
   code: string;
@@ -114,7 +84,7 @@ interface DataStats {
 }
 
 interface MarketCollectProps {
-  onCollectComplete?: () => void; // 수집 완료 후 콜백 (시세 데이터 새로고침용)
+  onCollectComplete?: () => void;
 }
 
 export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
@@ -126,7 +96,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // 수집 관련 상태 (수동/자동 통합)
   const [isCollecting, setIsCollecting] = useState(false);
   const [collectProgress, setCollectProgress] = useState<string>("");
   const [collectProgressPercent, setCollectProgressPercent] = useState<number>(0);
@@ -146,17 +115,12 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     return ["11000101"];
   });
 
-  // 수집 품목 직접 입력
   const [customProduct, setCustomProduct] = useState<string>("");
-
-  // 자동 수집 설정 펼침 상태
   const [autoSettingsOpen, setAutoSettingsOpen] = useState(false);
 
-  // 삭제 관련 상태
   const [deleteTargetDate, setDeleteTargetDate] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // localStorage 동기화
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("market_collectProducts", JSON.stringify(collectProducts));
@@ -169,10 +133,10 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     }
   }, [selectedCorps]);
 
-  // 변경사항 감지
-  const hasUnsavedChanges = settings && originalSettings
-    ? JSON.stringify(settings) !== JSON.stringify(originalSettings)
-    : false;
+  const hasUnsavedChanges =
+    settings && originalSettings
+      ? JSON.stringify(settings) !== JSON.stringify(originalSettings)
+      : false;
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -214,7 +178,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
 
   async function handleSaveSettings() {
     if (!settings) return;
-
     setSaving(true);
     try {
       const response = await fetch("/api/market/garak/settings", {
@@ -222,7 +185,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
-
       if (!response.ok) {
         const result = await response.json();
         toast.error(result.error || "설정 저장에 실패했습니다.");
@@ -244,7 +206,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     }
   }
 
-  // 데이터 수집
   async function handleCollectData() {
     if (selectedCorps.length === 0) {
       toast.error("수집할 법인을 선택해주세요.");
@@ -284,16 +245,13 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
 
         totalNewRecords += result.newCount || 0;
         totalTotalCount += result.totalCount || 0;
-        if (result.noAuction) {
-          hasNoAuction = true;
-        }
+        if (result.noAuction) hasNoAuction = true;
         completedSteps++;
         setCollectProgressPercent(Math.round((completedSteps / totalSteps) * 100));
       }
 
       setCollectProgress("수집 완료!");
 
-      // 경매 없는 날인 경우
       if (hasNoAuction && totalTotalCount === 0) {
         toast.info(`${collectDate}은(는) 경매가 없는 날입니다. (휴장일/공휴일)`);
       } else if (totalNewRecords > 0) {
@@ -302,11 +260,9 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
         toast.info("새로운 데이터가 없습니다. (이미 수집된 데이터)");
       }
 
-      // 데이터 새로고침
       fetchDataStats();
       fetchLogs();
 
-      // 부모 컴포넌트에 수집 완료 알림 (시세 데이터 새로고침용)
       if (onCollectComplete) {
         onCollectComplete();
       }
@@ -323,14 +279,10 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     }
   }
 
-  // 특정 날짜 데이터 삭제
   async function handleDeleteDateData(date: string) {
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/market/garak?date=${date}`, {
-        method: "DELETE",
-      });
-
+      const response = await fetch(`/api/market/garak?date=${date}`, { method: "DELETE" });
       const result = await response.json();
 
       if (!response.ok) {
@@ -348,79 +300,23 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     }
   }
 
-  // 수집 품목 토글
   function toggleCollectProduct(product: string) {
     setCollectProducts((prev) =>
       prev.includes(product) ? prev.filter((p) => p !== product) : [...prev, product]
     );
   }
 
-  // 수집 법인 토글
   function toggleCollectCorp(code: string) {
     setSelectedCorps((prev) =>
       prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
     );
   }
 
-  // 직접 입력 품목 추가
   function handleAddCustomProduct() {
     if (!customProduct.trim()) return;
     const products = customProduct.split(",").map((p) => p.trim()).filter(Boolean);
     setCollectProducts((prev) => [...new Set([...prev, ...products])]);
     setCustomProduct("");
-  }
-
-  function toggleCorporation(code: string) {
-    if (!settings) return;
-
-    const newCodes = settings.corporationCodes.includes(code)
-      ? settings.corporationCodes.filter((c) => c !== code)
-      : [...settings.corporationCodes, code];
-
-    setSettings({ ...settings, corporationCodes: newCodes });
-  }
-
-  function toggleProduct(product: string) {
-    if (!settings) return;
-
-    const newProducts = settings.targetProducts.includes(product)
-      ? settings.targetProducts.filter((p) => p !== product)
-      : [...settings.targetProducts, product];
-
-    setSettings({ ...settings, targetProducts: newProducts });
-  }
-
-  function getStatusBadge(status: string) {
-    switch (status) {
-      case "SUCCESS":
-        return (
-          <Badge variant="default" className="bg-green-500">
-            <CheckCircle className="h-3 w-3 mr-1" />
-            성공
-          </Badge>
-        );
-      case "NO_AUCTION":
-        return (
-          <Badge variant="secondary" className="bg-gray-400 text-white">
-            <Calendar className="h-3 w-3 mr-1" />
-            휴장
-          </Badge>
-        );
-      case "FAILED":
-        return (
-          <Badge variant="destructive">
-            <XCircle className="h-3 w-3 mr-1" />
-            실패
-          </Badge>
-        );
-      default:
-        return (
-          <Badge variant="secondary">
-            <AlertCircle className="h-3 w-3 mr-1" />
-            {status}
-          </Badge>
-        );
-    }
   }
 
   if (loading) {
@@ -433,7 +329,7 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
 
   return (
     <div className="space-y-6">
-      {/* 데이터 수집 (수동/자동 통합) */}
+      {/* Data collection card */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -450,7 +346,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 sm:space-y-6">
-          {/* 수집 날짜 */}
           <div className="space-y-2">
             <Label className="flex items-center gap-2 text-sm">
               <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -464,7 +359,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
             />
           </div>
 
-          {/* 수집 품목 선택 */}
           <div className="space-y-2 sm:space-y-3">
             <Label className="text-sm">수집 품목 (미선택시 전체)</Label>
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
@@ -516,7 +410,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
             )}
           </div>
 
-          {/* 법인 선택 */}
           <div className="space-y-2 sm:space-y-3">
             <Label className="text-sm">수집 법인</Label>
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
@@ -534,7 +427,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
             </div>
           </div>
 
-          {/* 수집 진행 상태 */}
           {isCollecting && (
             <div className="space-y-2 p-3 sm:p-4 bg-muted rounded-lg">
               <div className="flex items-center gap-2 text-sm">
@@ -550,7 +442,6 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
             </div>
           )}
 
-          {/* 수집 버튼 */}
           <Button
             onClick={handleCollectData}
             disabled={isCollecting || selectedCorps.length === 0}
@@ -564,189 +455,23 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
             데이터 수집 시작
           </Button>
 
-          {/* 자동 수집 설정 (접이식) */}
           {settings && (
-            <Collapsible open={autoSettingsOpen} onOpenChange={setAutoSettingsOpen}>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" className="w-full justify-between mt-4 border-t pt-4">
-                  <span className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    자동 수집 설정
-                    {settings.autoCollectEnabled && (
-                      <Badge variant="secondary" className="ml-2">
-                        활성화됨 ({settings.collectTime})
-                      </Badge>
-                    )}
-                  </span>
-                  {autoSettingsOpen ? (
-                    <ChevronDown className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-4 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-base">자동 수집</Label>
-                    <p className="text-sm text-muted-foreground">
-                      지정된 시간에 자동으로 데이터를 수집합니다.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.autoCollectEnabled}
-                    onCheckedChange={(checked) =>
-                      setSettings({ ...settings, autoCollectEnabled: checked })
-                    }
-                  />
-                </div>
-
-                {settings.autoCollectEnabled && (
-                  <div className="space-y-4 pl-4 border-l-2">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>수집 시간</Label>
-                        <Input
-                          type="time"
-                          value={settings.collectTime}
-                          onChange={(e) =>
-                            setSettings({ ...settings, collectTime: e.target.value })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>수집 대상</Label>
-                        <Select
-                          value={settings.collectDaysAgo.toString()}
-                          onValueChange={(v) =>
-                            setSettings({ ...settings, collectDaysAgo: parseInt(v, 10) })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">오늘 데이터</SelectItem>
-                            <SelectItem value="1">어제 데이터</SelectItem>
-                            <SelectItem value="2">2일 전 데이터</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {/* 수집 요일 선택 */}
-                    <div className="space-y-2">
-                      <Label>수집 요일</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {WEEKDAYS.map((day) => (
-                          <Button
-                            key={day.value}
-                            variant={settings.collectDays.includes(day.value) ? "default" : "outline"}
-                            size="sm"
-                            className="w-10"
-                            onClick={() => {
-                              const newDays = settings.collectDays.includes(day.value)
-                                ? settings.collectDays.filter((d) => d !== day.value)
-                                : [...settings.collectDays, day.value].sort((a, b) => a - b);
-                              setSettings({ ...settings, collectDays: newDays });
-                            }}
-                          >
-                            {day.label}
-                          </Button>
-                        ))}
-                      </div>
-                      {settings.collectDays.length === 0 && (
-                        <p className="text-xs text-red-500">최소 1개 이상 선택해주세요.</p>
-                      )}
-                    </div>
-
-                    {/* 수집 대상 법인 */}
-                    <div className="space-y-3">
-                      <Label>수집 대상 법인</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {corporations.map((corp) => (
-                          <Button
-                            key={corp.code}
-                            variant={settings.corporationCodes.includes(corp.code) ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => toggleCorporation(corp.code)}
-                          >
-                            {corp.name}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 수집 대상 품목 */}
-                    <div className="space-y-3">
-                      <div>
-                        <Label>수집 대상 품목</Label>
-                        <p className="text-sm text-muted-foreground">
-                          선택하지 않으면 전체 품목을 수집합니다.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {AVAILABLE_PRODUCTS.map((product) => (
-                          <Button
-                            key={product}
-                            variant={settings.targetProducts.includes(product) ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => toggleProduct(product)}
-                          >
-                            {product}
-                          </Button>
-                        ))}
-                      </div>
-                      {settings.targetProducts.length > 0 && (
-                        <p className="text-sm text-muted-foreground">
-                          선택됨: {settings.targetProducts.join(", ")}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* 법인 선택 경고 */}
-                    {settings.corporationCodes.length === 0 && (
-                      <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-                        <AlertTriangle className="h-4 w-4" />
-                        수집 대상 법인을 최소 1개 이상 선택해주세요.
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 저장/취소 버튼 */}
-                <div className="flex items-center justify-between pt-4">
-                  <div className="flex items-center gap-2">
-                    {hasUnsavedChanges && (
-                      <Badge variant="outline" className="text-yellow-600 border-yellow-400">
-                        <AlertCircle className="h-3 w-3 mr-1" />
-                        저장되지 않은 변경사항
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    {hasUnsavedChanges && (
-                      <Button variant="outline" onClick={handleResetSettings}>
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        취소
-                      </Button>
-                    )}
-                    <Button
-                      onClick={handleSaveSettings}
-                      disabled={saving || (settings.autoCollectEnabled && settings.corporationCodes.length === 0)}
-                    >
-                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      설정 저장
-                    </Button>
-                  </div>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
+            <MarketCollectAutoSettings
+              settings={settings}
+              corporations={corporations}
+              saving={saving}
+              hasUnsavedChanges={!!hasUnsavedChanges}
+              autoSettingsOpen={autoSettingsOpen}
+              onAutoSettingsOpenChange={setAutoSettingsOpen}
+              onSettingsChange={setSettings}
+              onSave={handleSaveSettings}
+              onReset={handleResetSettings}
+            />
           )}
         </CardContent>
       </Card>
 
-      {/* 저장된 데이터 현황 (날짜별) */}
+      {/* Stored data stats by date */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -805,71 +530,9 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
         </CardContent>
       </Card>
 
-      {/* 수집 로그 */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-            <Clock className="h-4 w-4 sm:h-5 sm:w-5" />
-            수집 로그
-          </CardTitle>
-          <CardDescription className="text-xs sm:text-sm">
-            최근 14일간 수집 기록 (조회: API에서 가져온 건수 / 저장: 신규 저장 건수 / 중복: 이미 있던 건수)
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {logs.length > 0 ? (
-            <div className="overflow-x-auto -mx-4 sm:mx-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="whitespace-nowrap">수집시간</TableHead>
-                    <TableHead className="whitespace-nowrap hidden sm:table-cell">대상일</TableHead>
-                    <TableHead className="whitespace-nowrap hidden lg:table-cell">품목</TableHead>
-                    <TableHead className="whitespace-nowrap hidden md:table-cell">법인</TableHead>
-                    <TableHead className="text-right whitespace-nowrap">조회/저장/중복</TableHead>
-                    <TableHead className="whitespace-nowrap">상태</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.slice(0, 20).map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-xs sm:text-sm whitespace-nowrap">
-                        {new Date(log.startedAt).toLocaleString("ko-KR", {
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </TableCell>
-                      <TableCell className="text-xs sm:text-sm hidden sm:table-cell whitespace-nowrap">
-                        {formatDate(log.targetDate)}
-                      </TableCell>
-                      <TableCell className="text-xs sm:text-sm hidden lg:table-cell max-w-[100px] truncate" title={log.targetProducts || "전체"}>
-                        {log.targetProducts || "전체"}
-                      </TableCell>
-                      <TableCell className="text-xs sm:text-sm hidden md:table-cell">{log.corporationName}</TableCell>
-                      <TableCell className="text-right text-xs sm:text-sm whitespace-nowrap">
-                        <span className="text-muted-foreground">{log.totalCount.toLocaleString()}</span>
-                        {" / "}
-                        <span className="text-green-600 font-medium">{log.newCount.toLocaleString()}</span>
-                        {" / "}
-                        <span className="text-orange-500">{(log.duplicateCount || 0).toLocaleString()}</span>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(log.status)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground text-sm">
-              수집 로그가 없습니다.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <MarketCollectLogs logs={logs} />
 
-      {/* 삭제 확인 다이얼로그 */}
+      {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTargetDate} onOpenChange={() => setDeleteTargetDate(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

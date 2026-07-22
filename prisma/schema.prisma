@@ -14,14 +14,11 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String?
-  password      String?   // SSO 사용자는 비밀번호 없음
+  image         String?
+  kakaoId       String?   @unique
+  role          String    @default("USER") // "ADMIN" | "USER"
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-
-  // SSO 관련 필드
-  isSsoUser     Boolean   @default(false)
-  portalEmail   String?   @unique  // My Portal 계정 연동용
-  ssoEnabled    Boolean   @default(true)
 
   retirementGoal    RetirementGoal?
   realEstateAssets  RealEstateAsset[]
@@ -122,6 +119,8 @@ model SetupCostItem {
 
   user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   subcategory SetupCostSubcategory @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ==================== 자금 조달 ====================
@@ -140,6 +139,8 @@ model FundingSource {
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   linkedAsset RealEstateAsset? @relation(fields: [linkedAssetId], references: [id])
+
+  @@index([userId])
 }
 
 // ==================== 영농일지 ====================
@@ -176,7 +177,7 @@ model FarmActivity {
   createdAt   DateTime     @default(now())
 
   log            FarmingLog           @relation(fields: [logId], references: [id], onDelete: Cascade)
-  crop           Crop?                @relation(fields: [cropId], references: [id])
+  crop           Crop?                @relation(fields: [cropId], references: [id], onDelete: SetNull)
   materialUsages MaterialUsage[]
 }
 
@@ -187,7 +188,7 @@ model MaterialUsage {
   quantity   Decimal
 
   activity FarmActivity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  item     InventoryItem @relation(fields: [itemId], references: [id])
+  item     InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 }
 
 // ==================== 작물 ====================
@@ -208,6 +209,8 @@ model Crop {
   user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   activities   FarmActivity[]
   transactions FinancialTransaction[]
+
+  @@index([userId, status])
 }
 
 // ==================== 재무 ====================
@@ -226,7 +229,9 @@ model FinancialTransaction {
   createdAt     DateTime        @default(now())
 
   user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  crop Crop? @relation(fields: [relatedCropId], references: [id])
+  crop Crop? @relation(fields: [relatedCropId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
 }
 
 // ==================== 재고 ====================
@@ -248,6 +253,8 @@ model InventoryItem {
   user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions   InventoryTransaction[]
   materialUsages MaterialUsage[]
+
+  @@index([userId])
 }
 
 model InventoryTransaction {
@@ -267,12 +274,12 @@ model InventoryTransaction {
 model AuctionResult {
   id            String   @id @default(cuid())
   productName   String   // PUMMOK 품목명
-  variety       String?  // PUMJONG 품종명
+  variety       String   @default("") // PUMJONG 품종명 (빈 문자열 = 없음)
   tempName      String?  // PUM_NAME_IMSI 임시품목명
   unit          String   // UUN 거래단량
-  grade         String?  // DDD 등급
+  grade         String   @default("") // DDD 등급 (빈 문자열 = 없음)
   price         Int      // PPRICE 경락가
-  origin        String?  // SSANGI 산지명
+  origin        String   @default("") // SSANGI 산지명 (빈 문자열 = 없음)
   corporation   String   // CORP_NM 법인명
   corporationCode String // 법인코드
   auctionDate   DateTime // ADJ_DT 경매일자
@@ -280,7 +287,8 @@ model AuctionResult {
   certification String?  // INJUNG_GUBUN 인증구분
   createdAt     DateTime @default(now())
 
-  @@unique([productName, variety, corporation, auctionDate, price, origin])
+  // 단위/등급/수량이 다른 별개 낙찰 건이 중복으로 버려지지 않도록 키에 포함
+  @@unique([productName, variety, corporation, auctionDate, price, origin, unit, grade, quantity])
   @@index([productName, auctionDate])
   @@index([auctionDate])
   @@index([origin])

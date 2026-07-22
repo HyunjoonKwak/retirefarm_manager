@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 import { authOptions } from "@/lib/auth/options";
 import { CORPORATION_CODES } from "@/lib/services/garak-market";
 
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
       summary,
     });
   } catch (error) {
-    console.error("Get collection logs error:", error);
+    logger.error("Get collection logs error:", error);
     return NextResponse.json(
       { error: "로그 조회 중 오류가 발생했습니다." },
       { status: 500 }
@@ -91,7 +92,7 @@ export async function DELETE(request: NextRequest) {
       deletedCount: result.count,
     });
   } catch (error) {
-    console.error("Delete logs error:", error);
+    logger.error("Delete logs error:", error);
     return NextResponse.json(
       { error: "로그 삭제 중 오류가 발생했습니다." },
       { status: 500 }

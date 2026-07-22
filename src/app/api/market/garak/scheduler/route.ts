@@ -1,40 +1,37 @@
 /**
  * 스케줄러 관리 API
- * 서버 시작 시 스케줄러 초기화 및 상태 확인
+ * 스케줄러 초기화는 src/instrumentation.ts에서 서버 부팅 시 자동 수행되며,
+ * 이 라우트는 상태 확인 / 수동 재초기화 / 즉시 실행용이다.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import prisma from "@/lib/prisma";
+import { logger } from "@/lib/logger";
+import { getSessionUser, isAdmin } from "@/lib/auth/guards";
 import {
   loadAllSchedules,
   getActiveSchedules,
   runScheduleNow,
 } from "@/lib/scheduler";
 
-// 스케줄러 초기화 상태
-let isInitialized = false;
-
-// GET: 스케줄러 상태 조회 및 초기화
+// GET: 스케줄러 상태 조회 및 재초기화
 export async function GET(request: NextRequest) {
   try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const action = searchParams.get("action");
 
-    // 초기화 액션
     if (action === "init") {
-      if (isInitialized) {
-        const activeSchedules = getActiveSchedules();
-        return NextResponse.json({
-          message: "Scheduler already initialized",
-          initialized: true,
-          activeSchedules: activeSchedules.length,
-          scheduleIds: activeSchedules,
-        });
+      // 전역 스케줄 재로드는 ADMIN 전용 (평시에는 instrumentation.ts가 자동 처리)
+      if (!isAdmin(user)) {
+        return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
       }
-
-      console.log("🚀 [API] Initializing scheduler via API call...");
       const count = await loadAllSchedules();
-      isInitialized = true;
-
       return NextResponse.json({
         message: "Scheduler initialized successfully",
         initialized: true,
@@ -43,44 +40,68 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 상태 조회
     const activeSchedules = getActiveSchedules();
     return NextResponse.json({
-      initialized: isInitialized,
+      initialized: true,
       activeSchedules: activeSchedules.length,
       scheduleIds: activeSchedules,
     });
   } catch (error) {
-    console.error("Scheduler API error:", error);
+    logger.error("Scheduler API error:", error);
     return NextResponse.json(
-      { error: "스케줄러 API 오류가 발생했습니다.", details: String(error) },
+      { error: "스케줄러 API 오류가 발생했습니다." },
       { status: 500 }
     );
   }
 }
 
-// POST: 스케줄 즉시 실행
+const runNowSchema = z.object({
+  settingsId: z.string().min(1, "settingsId가 필요합니다."),
+});
+
+// POST: 스케줄 즉시 실행 (본인 설정 또는 ADMIN만)
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { settingsId } = body;
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+    }
 
-    if (!settingsId) {
+    const body = await request.json();
+    const parsed = runNowSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "settingsId가 필요합니다." },
+        { error: parsed.error.issues[0]?.message || "잘못된 요청입니다." },
         { status: 400 }
       );
     }
 
-    console.log(`▶️ [API] Running schedule now: ${settingsId}`);
-    const success = await runScheduleNow(settingsId);
+    const settings = await prisma.marketCollectionSettings.findUnique({
+      where: { id: parsed.data.settingsId },
+      select: { userId: true },
+    });
+
+    if (!settings) {
+      return NextResponse.json(
+        { error: "설정을 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
+
+    if (settings.userId !== user.id && !isAdmin(user)) {
+      return NextResponse.json({ error: "권한이 없습니다." }, { status: 403 });
+    }
+
+    const success = await runScheduleNow(parsed.data.settingsId);
 
     return NextResponse.json({
       success,
-      message: success ? "스케줄이 실행되었습니다." : "스케줄 실행에 실패했습니다.",
+      message: success
+        ? "스케줄이 실행되었습니다."
+        : "스케줄 실행에 실패했습니다.",
     });
   } catch (error) {
-    console.error("Run schedule error:", error);
+    logger.error("Run schedule error:", error);
     return NextResponse.json(
       { error: "스케줄 실행 중 오류가 발생했습니다." },
       { status: 500 }
