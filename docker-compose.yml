@@ -6,19 +6,23 @@ services:
     ports:
       - "3024:3000"
     environment:
+      - TZ=Asia/Seoul
       - DATABASE_URL=file:/app/prisma/data/retirefarm.db
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_URL=${NEXTAUTH_URL}
-      - KAMIS_API_KEY=${KAMIS_API_KEY}
-      - KAMIS_API_ID=${KAMIS_API_ID}
-      - MY_PORTAL_API_URL=${MY_PORTAL_API_URL}
-      - NEXT_PUBLIC_MY_PORTAL_URL=${NEXT_PUBLIC_MY_PORTAL_URL}
+      - KAKAO_CLIENT_ID=${KAKAO_CLIENT_ID}
+      - KAKAO_CLIENT_SECRET=${KAKAO_CLIENT_SECRET}
+      - GARAK_API_ID=${GARAK_API_ID}
+      - GARAK_API_PASSWORD=${GARAK_API_PASSWORD}
+      - CRON_SECRET=${CRON_SECRET}
+      - EXTERNAL_PORTFOLIO_API_URL=${EXTERNAL_PORTFOLIO_API_URL}
+      - EXTERNAL_PORTFOLIO_API_KEY=${EXTERNAL_PORTFOLIO_API_KEY}
       - BACKUP_DIR=/backups
     volumes:
-      - ${BACKUP_PATH:-./backups}:/backups
+      - ${BACKUP_DIR:-./backups}:/backups
       - ${DATA_PATH:-./data}:/app/prisma/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

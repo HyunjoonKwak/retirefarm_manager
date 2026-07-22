@@ -20,11 +20,16 @@ RUN mkdir -p /app/prisma/data
 RUN npx prisma generate
 RUN npm run build
 
+# 런너 이미지 경량화: 빌드 후 devDependencies 제거
+# (prisma CLI는 dependencies에 있어 migrate deploy에 계속 사용 가능)
+RUN npm prune --omit=dev
+
 # Runner
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
+ENV TZ=Asia/Seoul
 
 # OpenSSL for Prisma (SQLite는 별도 클라이언트 불필요)
 RUN apt-get update && apt-get install -y openssl wget && rm -rf /var/lib/apt/lists/*
@@ -50,7 +55,7 @@ USER nextjs
 
 EXPOSE 3000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0"
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
 CMD ["/app/docker-entrypoint.sh"]

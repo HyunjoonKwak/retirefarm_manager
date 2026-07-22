@@ -35,8 +35,8 @@ check_env() {
         echo "필수 환경 변수 (.env 파일에 설정):"
         echo "  NEXTAUTH_SECRET=<랜덤 시크릿>"
         echo "  NEXTAUTH_URL=http://your-nas-ip:3024"
-        echo "  KAMIS_API_KEY=<KAMIS API Key>"
-        echo "  KAMIS_API_ID=<KAMIS API ID>"
+        echo "  KAKAO_CLIENT_ID=<카카오 REST API 키>"
+        echo "  KAKAO_CLIENT_SECRET=<카카오 Client Secret>"
         echo ""
         return 1
     fi
