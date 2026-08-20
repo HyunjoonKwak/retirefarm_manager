@@ -40,13 +40,19 @@
   portfolio_manager `backend/scripts/issue_snapshot_token.py` (retirefarm 명의 신규 발급)
 - retirefarm 컨테이너가 두 서비스에 도달 가능한지 확인 (같은 NAS — 네트워크/도메인)
 
-## Phase 2 — 작기(作期) 캘린더 + 온보딩 마법사
+## Phase 2 — 작기(作期) 캘린더 + 온보딩 마법사 ✅ 완료 2026-08-20
 
-- 작기 캘린더: ssampin의 학기+컬러 라벨 일정 구조 **패턴만** 차용 (GPL — 코드 복사 금지).
-  기존 `Crop`(plantingDate/expectedHarvestDate/status) 위에 월간 캘린더 뷰 +
-  파종·정식·수확 일정 컬러 라벨. react-day-picker 기반이 이미 있음.
-- 온보딩 마법사: 농장 프로필(지역·면적·형태)·재배 작물 선택 → Crop·시세 워치리스트
-  프리셋 생성. 신규 사용자 첫 로그인 흐름.
+- [x] **작기 캘린더**: ssampin의 학기+컬러 라벨 구조 패턴 차용 (코드 복사 없음).
+  `lib/utils/crop-calendar.ts`(순수 로직: 월 행렬·색 배정·작기 판정·이벤트, 테스트 9건) +
+  `CropCalendar`(월간 그리드에 작기 컬러 막대·범례 D-day·이번 달 파종/수확 일정).
+  /farm/crops 페이지를 캘린더/목록 탭으로 재구성. 데이터는 기존 `/api/farm/crops` 재사용.
+- [x] **온보딩 마법사**: `FarmProfile` 모델(지역·재배형태·면적·목표연도·plannedCrops JSON)
+  + `/api/onboarding`(GET 프리필/POST 저장). 3단계 마법사(`OnboardingWizard`,
+  /onboarding) — 완료 시 예정 작물 중 가락시장 수집 품목을 `ProductWatchlist`에
+  자동 등록 (비수집 품목은 안내 후 제외). 대시보드에 프로필 미설정 시 유도 배너
+  (강제 리다이렉트 없음 — 기존 사용자 흐름 보존).
+  **Crop 행은 만들지 않는다** — 예정 단계엔 날짜가 없으므로 실제 파종 시 작물 관리에서 등록.
+- 마이그레이션: `20260820012409_farm_profile_onboarding` (추가만, 파괴 없음)
 
 ## Phase 3 — 운영일지 BlockNote 전환
 

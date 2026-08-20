@@ -21,6 +21,7 @@ model User {
   updatedAt     DateTime  @updatedAt
 
   retirementGoal    RetirementGoal?
+  farmProfile       FarmProfile?
   setupCostItems    SetupCostItem[]
   fundingSources    FundingSource[]
   farmingLogs       FarmingLog[]
@@ -46,6 +47,24 @@ model RetirementGoal {
   monthlyLivingExpense   Decimal? // 월 생활비 (버퍼 계산용)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== 농장 프로필 (온보딩 마법사) ====================
+// 실재배 기록은 Crop이 담당한다. plannedCrops는 재배 예정 작물명 JSON 배열로,
+// 실제 파종 시 작물 관리에서 Crop 행을 만든다 (예정 단계에선 날짜가 없으므로).
+model FarmProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  region          String   // 지역 (시/도 + 시/군)
+  farmingType     String   // OPEN_FIELD | GREENHOUSE | SMART_FARM | ORCHARD | MIXED
+  areaPyeong      Decimal? // 재배(예정) 면적 (평)
+  targetStartYear Int?     // 귀농 목표 연도
+  plannedCrops    String   @default("[]") // 재배 예정 작물명 JSON 배열
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

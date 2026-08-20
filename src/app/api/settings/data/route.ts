@@ -18,6 +18,7 @@ export async function GET() {
     const [
       user,
       retirementGoal,
+      farmProfile,
       setupCostItems,
       fundingSources,
       farmingLogs,
@@ -31,6 +32,7 @@ export async function GET() {
         select: { email: true, name: true, createdAt: true },
       }),
       prisma.retirementGoal.findUnique({ where: { userId } }),
+      prisma.farmProfile.findUnique({ where: { userId } }),
       prisma.setupCostItem.findMany({
         where: { userId },
         include: { subcategory: { include: { category: true } } },
@@ -60,6 +62,7 @@ export async function GET() {
       version: "1.0",
       user: serializeData(user),
       retirementGoal: serializeData(retirementGoal),
+      farmProfile: serializeData(farmProfile),
       setupCostItems: serializeData(setupCostItems),
       fundingSources: serializeData(fundingSources),
       farmingLogs: serializeData(farmingLogs),
