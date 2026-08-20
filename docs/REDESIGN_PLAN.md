@@ -54,18 +54,28 @@
   **Crop 행은 만들지 않는다** — 예정 단계엔 날짜가 없으므로 실제 파종 시 작물 관리에서 등록.
 - 마이그레이션: `20260820012409_farm_profile_onboarding` (추가만, 파괴 없음)
 
-## Phase 3 — 운영일지 BlockNote 전환
+## Phase 3 — 운영일지 BlockNote 전환 ✅ 완료 2026-08-20
 
-- `@blocknote/core`(MPL-2.0, 의존성 사용 OK) 도입.
-- 기존 `FarmingLog`(날짜 unique)+`FarmActivity`+`MaterialUsage` 구조 유지하되
-  자유 서술 본문을 BlockNote JSON으로 저장 (`content` 컬럼 추가).
-- 기존 폼 기반 활동 기록은 구조화 데이터로 병행 유지 (HWP 출력·통계의 원천).
+- [x] `@blocknote/shadcn`(0.54, MPL-2.0 계열 의존성 — 사용 OK, 프로젝트 shadcn 스택과 일치) 도입.
+- [x] `FarmingLog.content` 컬럼(BlockNote 문서 JSON) + 생성/수정 API zod 검증
+  (`blockNoteContentSchema`: 최상위 배열 JSON·200KB 상한).
+- [x] `FarmingLogEditor`(ko 로케일·다크모드 연동·SSR 제외 dynamic import),
+  작성 다이얼로그 본문 에디터, 카드 평문 미리보기 + 읽기 전용 열람 다이얼로그.
+- [x] `blockNoteToPlainText` 재귀 추출 유틸 (미리보기·HWPX 출력 공용).
+- 기존 폼 기반 활동 기록(FarmActivity)은 구조화 데이터로 병행 유지 (HWPX·통계 원천).
+- 마이그레이션: `20260820013243_farming_log_blocknote_content` (추가만)
 
-## Phase 4 — 영농일지·지원서류 HWP 출력
+## Phase 4 — 영농일지 HWP 출력 ✅ 완료 2026-08-20 (지원서류는 잔여)
 
-- `@ubermensch1218/hwpxcore` (MIT) — Skeleton 주입 방식.
-- 영농일지: FarmingLog/FarmActivity → 관청 제출용 영농일지 HWPX.
-- 지원서류: 농업경영체 등록·보조사업 신청 서식 (실서식은 사용자와 확정 필요).
+- [x] `@ubermensch1218/hwpxcore`(MIT, 0.1.3) — Skeleton.hwpx 주입 방식.
+  next.config `serverExternalPackages` 등록 필수 (번들 인라인 시 자산 경로 깨짐),
+  스켈레톤은 `createRequire`로 패키지 엔트리를 해석해 직접 로드
+  (라이브러리 `loadSkeletonHwpx`는 ESM 로더에서 Node 분기 미동작).
+- [x] `GET /api/farm/logs/export?month=YYYY-MM` — 월간 일지·활동·본문(평문)을
+  제목+농장 정보+작업 내역 표(일자/날씨/기온/구분/내용)로 생성. 일지 목록에 HWPX 버튼.
+- [x] 테스트: 행 구성 순수 함수 + 실제 ZIP 바이너리 생성 스모크 (`@vitest-environment node`).
+- [ ] **지원서류 서식** (농업경영체 등록·보조사업 신청 등): 실서식 확정을 사용자와
+  협의 후 별도 작업 — 서식 원본 HWPX를 템플릿으로 넣고 필드 주입하는 구조 권장.
 
 ## Phase 5 — 작물 시세 KAMIS 검토 (§9 열린 질문)
 
