@@ -12,14 +12,18 @@
 
 ## Phase 1 — 자산 허브 계약 정렬 ✅ 완료 2026-08-20
 
-- [x] **스냅샷 소비자 (§2)**: `lib/api/asset-hub-snapshot.ts`(§2.2 계약 zod 검증,
-  source 명의 확인) + `lib/services/external-snapshot.ts`(수집·합산·48h 스테일) +
-  `ExternalAssetSnapshot` 캐시 테이블(last-known-good — 수집 실패가 0으로 잡혀
-  합산이 출렁이면 안 됨). API: `GET/POST /api/assets/snapshot-summary` (POST=수동 갱신).
-- [x] **자본 준비 게이지 (§6)**: `/api/plan`이 `capitalReadiness`(스냅샷 합산 vs
-  목표 자본 = 순설립비 + 생활비 버퍼, targetDate) 반환.
-  `CapitalReadinessGauge`가 plan 대시보드에서 소스별 breakdown·스테일 뱃지·수동
-  갱신 렌더링.
+> ⚠️ 아래 두 항목(스냅샷 소비자·게이지 데이터 원천)은 **Phase 1.5(§8-8)에서 대체됐다.**
+> 현재 구현은 my_portal 순자산 단일 소스다 — 아래는 당시 기록이므로 이걸 기준으로
+> 구현하지 말 것. 나머지 항목(매도 시뮬·고아 모델 제거)은 그대로 유효하다.
+
+- [x] ~~**스냅샷 소비자 (§2)**~~ (→ Phase 1.5로 대체): `asset-hub-snapshot.ts`가
+  portfolio·asset **두 소스**를 §2.2 계약으로 받고, `external-snapshot.ts`가
+  자체 합산 + 48h 스테일 판정, `ExternalAssetSnapshot` 캐시에 저장.
+  API 경로 `GET/POST /api/assets/snapshot-summary`는 전환 후에도 유지(내용만 순자산으로).
+- [x] ~~**자본 준비 게이지 (§6)** 스냅샷 합산 기준~~ (→ Phase 1.5로 대체):
+  `/api/plan`의 `capitalReadiness` + `CapitalReadinessGauge`(plan 대시보드,
+  목표 자본 = 순설립비 + 생활비 버퍼) **구조 자체는 유지**되고,
+  합산 원천만 두 소스 직접 합산 → 허브 순자산으로 바뀌었다.
 - [x] **매도 시뮬 이관 마무리 (§1.5.3-3)**: 로컬 `capital-gains-tax.ts`(asset 원본의
   단순화 복사본)·`sale-simulator.ts`(asset으로 이관 완료본)·양도세 계산기
   라우트/컴포넌트 삭제. `/api/assets/sale-simulator`는 asset_manager
@@ -31,14 +35,25 @@
   (기존 코드는 selectedAssetId를 API가 무시해 물건 연결이 저장된 적 없음 — 이제 저장됨)
 - [x] 마이그레이션: `20260820004144_asset_hub_phase1_snapshot_consumer`
 
-### 운영 반영 필요 (배포 시)
+### 운영 설정 (현행 — Phase 1.5 반영, NAS 적용 완료 2026-08-20)
 
-- NAS `.env`에 추가: `ASSET_MANAGER_URL`, `ASSET_MANAGER_SNAPSHOT_TOKEN`,
-  `PORTFOLIO_MANAGER_URL`, `PORTFOLIO_MANAGER_SNAPSHOT_TOKEN`,
-  `NEXT_PUBLIC_ASSET_MANAGER_URL`
-- 토큰 발급: asset_manager `scripts/issue-snapshot-token.ts`,
-  portfolio_manager `backend/scripts/issue_snapshot_token.py` (retirefarm 명의 신규 발급)
-- retirefarm 컨테이너가 두 서비스에 도달 가능한지 확인 (같은 NAS — 네트워크/도메인)
+| 변수 | 값 | 용도 |
+|---|---|---|
+| `MY_PORTAL_URL` | `http://192.168.1.113:8100` | 자본 게이지 — 허브 순자산(§2.4) |
+| `MY_PORTAL_SNAPSHOT_TOKEN` | (소비자 토큰) | 〃 |
+| `ASSET_MANAGER_URL` | `http://192.168.1.113:3000` | 매도 시뮬·물건 목록 (별개 경로) |
+| `ASSET_MANAGER_SNAPSHOT_TOKEN` | (서비스 토큰) | 〃 |
+| `NEXT_PUBLIC_ASSET_MANAGER_URL` | `https://assets.specialrisk.me` | 브라우저 딥링크 |
+
+- 토큰 발급: my_portal `backend/scripts/issue_snapshot_consumer_token.py issue`,
+  asset_manager `docker exec naver-crawler-web node scripts/issue-snapshot-token.mjs issue`
+  (**.mjs** — .ts 아님). 회전 = 신규 발급 후 구 토큰 revoke.
+  ⚠️ 발급 출력에서 토큰만 뽑을 때 `grep '^token'`은 `token_id` 줄까지 잡는다 —
+  `grep -E '^token[[:space:]]+:'`로 구분할 것.
+- ~~`PORTFOLIO_MANAGER_URL`·`PORTFOLIO_MANAGER_SNAPSHOT_TOKEN`~~ — §8-8 전환으로 **불필요**
+  (portfolio 값은 허브 순자산에 포함돼 들어온다). compose의 `portfolio-net` 외부 네트워크
+  합류도 함께 제거됐다.
+- 두 대상 모두 호스트 포트로 공개돼 있어 컨테이너에서 NAS IP로 직접 접근한다.
 
 ## Phase 1.5 — 허브 순자산 단일 소스 전환 ✅ 완료 2026-08-20 (§8-8)
 
@@ -120,11 +135,15 @@
 
 ## 이 세션에서 내린 결정
 
-1. **레거시 per-item API(`/api/portfolio/service`) 유지**: §2 스냅샷은 집계 전용이라
-   자금 유입 계획(물건별 매도 예정·순수익)에는 물건 단위 조회가 필요하다.
-   읽기 전용이므로 지배 원칙 위반 아님. 집계는 스냅샷, 물건 상세는 레거시 API로 역할 분리.
-2. **my_portal 현금은 게이지 합산에서 제외 (v1)**: my_portal은 §2 제공자 엔드포인트가
-   없다 (수집기만 보유). 필요해지면 my_portal에 provider 구현을 요청하는 별도 과제
-   (ASSET_HUB_INTEGRATION.md §9에 추가 후보).
-3. **스냅샷 캐시는 전역(사용자 무관)**: 가족 단일 가구 사용 전제. 서비스 토큰이
-   제공 서비스 쪽 특정 사용자에 귀속되므로 retirefarm 사용자별 분리는 무의미.
+1. **레거시 per-item API(`/api/portfolio/service`) 유지**: 집계 API는 물건 단위를
+   내려주지 않으므로 자금 유입 계획(물건별 매도 예정·순수익)에는 별도 조회가 필요하다.
+   읽기 전용이므로 지배 원칙 위반 아님. **집계는 허브 순자산(§2.4), 물건 상세는
+   레거시 API**로 역할 분리.
+2. ~~**my_portal 현금은 게이지 합산에서 제외 (v1)**~~ — **무효 (2026-08-20, §8-8 전환).**
+   당시 my_portal에 제공자 엔드포인트가 없어 내린 결정이었으나, §8-7로 허브가
+   `GET /api/assets/net-worth`(§2.4)를 제공하면서 전제가 사라졌다. 지금은 **현금·부채를
+   포함한 허브 순자산을 그대로 받는다** — 게이지에서 제외되는 자산은 없다.
+   (이 제외가 순자산을 6.5억 과대 표시시킨 원인이었다: 49.0억 → 42.6억으로 정정)
+3. **허브 순자산 캐시(`HubNetWorthCache`)는 전역(사용자 무관)**: 가족 단일 가구 사용 전제.
+   소비자 토큰이 허브 쪽 특정 사용자에 귀속되므로 retirefarm 사용자별 분리는 무의미.
+   재계산을 하지 않으니 항목을 쪼갤 이유도 없어 singleton 1행 + payload JSON으로 둔다.
