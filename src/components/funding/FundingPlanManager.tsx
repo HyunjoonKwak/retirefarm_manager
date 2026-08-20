@@ -49,12 +49,8 @@ interface FundingSource {
   expectedDate: string;
   status: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
   notes?: string;
-  linkedAsset?: {
-    id: string;
-    name: string;
-    expectedSalePrice: string;
-    status: string;
-  } | null;
+  // asset_manager Portfolio id — 원장은 asset_manager 소유 (Asset Hub §1.5)
+  externalAssetId?: string | null;
 }
 
 interface FundingSummary {
@@ -158,6 +154,17 @@ export function FundingPlanManager() {
     }
   }, [newSource.type, isAddDialogOpen]);
 
+  // 연결 물건 이름 표시용 — 연결된 자금원이 있으면 물건 목록을 로드
+  useEffect(() => {
+    if (
+      externalAssets.length === 0 &&
+      fundingSources.some((s) => s.externalAssetId)
+    ) {
+      fetchExternalAssets();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fundingSources]);
+
   async function fetchExternalAssets() {
     setLoadingAssets(true);
     try {
@@ -201,7 +208,17 @@ export function FundingPlanManager() {
       const response = await fetch("/api/funding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...newSource, amount: Number(newSource.amount) }),
+        body: JSON.stringify({
+          type: newSource.type,
+          name: newSource.name,
+          amount: Number(newSource.amount),
+          expectedDate: newSource.expectedDate,
+          notes: newSource.notes || undefined,
+          // asset_manager 물건에서 유래한 자금원은 원장 id를 연결해 둔다
+          ...(newSource.selectedAssetId
+            ? { externalAssetId: newSource.selectedAssetId }
+            : {}),
+        }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -438,9 +455,12 @@ export function FundingPlanManager() {
                       <TableCell>
                         <div>
                           <p className="font-medium">{source.name}</p>
-                          {source.linkedAsset && (
+                          {source.externalAssetId && (
                             <p className="text-xs text-muted-foreground">
-                              연결: {source.linkedAsset.name}
+                              연결:{" "}
+                              {externalAssets.find(
+                                (a) => a.id === source.externalAssetId
+                              )?.propertyName ?? "asset_manager 물건"}
                             </p>
                           )}
                         </div>

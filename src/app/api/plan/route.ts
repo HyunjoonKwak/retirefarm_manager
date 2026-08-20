@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/options";
 import prisma from "@/lib/prisma";
 import { smartFarmPlanSchema, calculateSmartFarmPlanSummary } from "@/lib/validations/plan";
 import { externalPortfolioClient } from "@/lib/api/external-portfolio";
+import { getSnapshotSummary, type SnapshotSummary } from "@/lib/services/external-snapshot";
 
 // GET: 스마트팜 준비 계획 조회
 export async function GET() {
@@ -42,7 +43,15 @@ export async function GET() {
       where: { userId },
     });
 
-    // 4. 외부 포트폴리오 조회 (try-catch로 실패해도 진행)
+    // 4. 자본 준비 스냅샷 합산 (Asset Hub §2·§6) — 실패해도 진행 (last-known-good)
+    let snapshotSummary: SnapshotSummary | null = null;
+    try {
+      snapshotSummary = await getSnapshotSummary();
+    } catch (e) {
+      console.error("Snapshot summary fetch failed:", e);
+    }
+
+    // 5. 외부 포트폴리오 조회 (try-catch로 실패해도 진행)
     // email 기반 조회 - userId가 변경되어도 연동 유지
     const userEmail = session.user.email;
     let externalAssets = null;
@@ -77,7 +86,7 @@ export async function GET() {
       console.error("External portfolio fetch failed:", e);
     }
 
-    // 5. 요약 계산
+    // 6. 요약 계산
     const summary = calculateSmartFarmPlanSummary({
       goal: {
         targetDate: goal.targetDate,
@@ -137,6 +146,17 @@ export async function GET() {
       },
       externalAssets,
       expectedProceeds,
+      // §6 자본 준비: 스냅샷 합산값을 목표 자본(순설립비+생활비버퍼) 대비 게이지로
+      capitalReadiness: snapshotSummary
+        ? {
+            totalKrw: snapshotSummary.totalKrw,
+            sources: snapshotSummary.sources,
+            configuredSourceCount: snapshotSummary.configuredSourceCount,
+            errors: snapshotSummary.errors,
+            targetCapital: summary.totalRequiredFunds,
+            targetDate: summary.targetDate.toISOString(),
+          }
+        : null,
     });
   } catch (error) {
     console.error("Get smart farm plan error:", error);

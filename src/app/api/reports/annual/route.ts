@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { externalPortfolioClient } from "@/lib/api/external-portfolio";
 
 // GET: 연간 보고서
 export async function GET(request: NextRequest) {
@@ -27,7 +28,6 @@ export async function GET(request: NextRequest) {
       transactions,
       prevTransactions,
       crops,
-      assets,
     ] = await Promise.all([
       prisma.financialTransaction.findMany({
         where: {
@@ -47,9 +47,6 @@ export async function GET(request: NextRequest) {
           userId,
           plantingDate: { gte: startDate, lte: endDate },
         },
-      }),
-      prisma.realEstateAsset.findMany({
-        where: { userId },
       }),
     ]);
 
@@ -113,14 +110,20 @@ export async function GET(request: NextRequest) {
         : 0,
     };
 
-    // 자산 현황
+    // 자산 현황 — 부동산 원장은 asset_manager 소유, 읽기 전용 소비 (Asset Hub §1.5)
     let totalAssetValue = BigInt(0);
     let totalMortgage = BigInt(0);
-    for (const asset of assets) {
-      if (asset.status !== "SOLD") {
-        totalAssetValue += BigInt(asset.currentPrice.toString());
-        totalMortgage += BigInt(asset.mortgageBalance.toString());
+    let assetCount = 0;
+    try {
+      const email = session.user.email;
+      if (email) {
+        const summary = await externalPortfolioClient.getSummary(email);
+        totalAssetValue = BigInt(summary.totalValue || "0");
+        totalMortgage = BigInt(summary.totalLoanAmount || "0");
+        assetCount = summary.totalAssets;
       }
+    } catch (error) {
+      console.error("External asset summary fetch failed:", error);
     }
 
     // 분기별 요약
@@ -229,7 +232,7 @@ export async function GET(request: NextRequest) {
         totalValue: totalAssetValue.toString(),
         totalMortgage: totalMortgage.toString(),
         netValue: (totalAssetValue - totalMortgage).toString(),
-        count: assets.filter((a) => a.status !== "SOLD").length,
+        count: assetCount,
       },
     });
   } catch (error) {

@@ -1,103 +1,59 @@
+/**
+ * 매도 시뮬레이션 프록시 (Asset Hub Integration §1.5.3)
+ *
+ * 계산의 소유자는 asset_manager — 이 라우트는 세션 검증 후
+ * asset_manager POST /api/simulations/sale로 위임만 한다.
+ * 물건 정보는 asset_manager 원장에서 자동 로드되므로 body에는
+ * 선택·가정만 담는다.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth/options";
-import {
-  analyzeOptimalSaleOrder,
-  previewAssetSale,
-  findMinimumSalesForTarget,
-  type SaleAsset,
-} from "@/lib/calculators/sale-simulator";
+import { runSaleSimulation } from "@/lib/api/asset-simulation";
+import { logger } from "@/lib/logger";
 
-const saleAssetSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  propertyType: z.enum(["HOUSE", "COMMERCIAL", "LAND", "OFFICETEL_RESIDENTIAL"]),
-  purchasePrice: z.number().min(0),
-  currentPrice: z.number().min(0),
-  acquisitionExpenses: z.number().min(0).default(0),
-  holdingPeriodYears: z.number().min(0),
-  isOnlyHouse: z.boolean().default(false),
-  hasResided: z.boolean().default(false),
-  ownershipShare: z.number().min(0).max(100).default(100),
+const simulationRequestSchema = z.object({
+  portfolioIds: z.array(z.string().min(1)).optional(),
+  targetAmount: z.string().regex(/^\d+$/, "목표 금액은 원 단위 정수여야 합니다.").optional(),
+  salePriceOverrides: z.record(z.string(), z.string().regex(/^\d+$/)).optional(),
+  assumptions: z
+    .object({
+      isOnlyHouse: z.boolean().optional(),
+      hasResided: z.boolean().optional(),
+    })
+    .optional(),
 });
 
-const simulatorSchema = z.object({
-  assets: z.array(saleAssetSchema).min(1, "최소 1개 이상의 자산이 필요합니다."),
-  targetAmount: z.number().min(0).optional(),
-  mode: z.enum(["optimal", "preview", "target"]).default("optimal"),
-  previewAssetId: z.string().optional(),
-  previewSalePrice: z.number().optional(),
-});
-
-// POST: 매도 시뮬레이션 실행
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-    }
-
-    const body = await request.json();
-    const validatedData = simulatorSchema.parse(body);
-
-    const assets: SaleAsset[] = validatedData.assets;
-
-    switch (validatedData.mode) {
-      case "optimal": {
-        const result = analyzeOptimalSaleOrder(assets);
-        return NextResponse.json({ result });
-      }
-
-      case "preview": {
-        if (!validatedData.previewAssetId) {
-          return NextResponse.json(
-            { error: "미리보기할 자산 ID가 필요합니다." },
-            { status: 400 }
-          );
-        }
-        const asset = assets.find((a) => a.id === validatedData.previewAssetId);
-        if (!asset) {
-          return NextResponse.json(
-            { error: "해당 자산을 찾을 수 없습니다." },
-            { status: 404 }
-          );
-        }
-        const previewResult = previewAssetSale(asset, validatedData.previewSalePrice);
-        return NextResponse.json({ result: previewResult });
-      }
-
-      case "target": {
-        if (validatedData.targetAmount === undefined) {
-          return NextResponse.json(
-            { error: "목표 금액이 필요합니다." },
-            { status: 400 }
-          );
-        }
-        const targetResult = findMinimumSalesForTarget(assets, validatedData.targetAmount);
-        return NextResponse.json({ result: targetResult });
-      }
-
-      default:
-        return NextResponse.json(
-          { error: "지원하지 않는 모드입니다." },
-          { status: 400 }
-        );
-    }
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const firstIssue = error.issues[0];
       return NextResponse.json(
-        { error: firstIssue?.message || "입력값이 올바르지 않습니다." },
+        { success: false, error: "로그인이 필요합니다." },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const validation = simulationRequestSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: validation.error.issues[0]?.message || "입력값이 올바르지 않습니다.",
+        },
         { status: 400 }
       );
     }
 
-    console.error("Sale simulator error:", error);
-    return NextResponse.json(
-      { error: "시뮬레이션 중 오류가 발생했습니다." },
-      { status: 500 }
-    );
+    const result = await runSaleSimulation(validation.data);
+    return NextResponse.json({ success: true, data: result });
+  } catch (error) {
+    logger.error("Sale simulation proxy error:", error);
+    const message =
+      error instanceof Error ? error.message : "시뮬레이션 중 오류가 발생했습니다.";
+    return NextResponse.json({ success: false, error: message }, { status: 502 });
   }
 }

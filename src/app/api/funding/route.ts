@@ -9,7 +9,8 @@ const createFundingSchema = z.object({
   name: z.string().min(1, "자금원 이름을 입력해주세요."),
   amount: z.number().min(0, "금액은 0 이상이어야 합니다."),
   expectedDate: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요."),
-  linkedAssetId: z.string().optional(),
+  // asset_manager Portfolio id — 원장은 asset_manager 소유 (Asset Hub §1.5)
+  externalAssetId: z.string().optional(),
   status: z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED"]).default("PLANNED"),
   notes: z.string().optional(),
 });
@@ -25,29 +26,12 @@ export async function GET() {
 
     const fundingSources = await prisma.fundingSource.findMany({
       where: { userId: session.user.id },
-      include: {
-        linkedAsset: {
-          select: {
-            id: true,
-            name: true,
-            expectedSalePrice: true,
-            status: true,
-          },
-        },
-      },
       orderBy: { expectedDate: "asc" },
     });
 
-    // BigInt를 문자열로 변환
     const serialized = fundingSources.map((source) => ({
       ...source,
       amount: source.amount.toString(),
-      linkedAsset: source.linkedAsset
-        ? {
-            ...source.linkedAsset,
-            expectedSalePrice: source.linkedAsset.expectedSalePrice.toString(),
-          }
-        : null,
     }));
 
     return NextResponse.json({ fundingSources: serialized });
@@ -72,15 +56,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = createFundingSchema.parse(body);
 
-    // 연결 자산이 있는 경우 중복 확인
-    if (validatedData.linkedAssetId) {
+    // 연결 물건이 있는 경우 중복 확인
+    if (validatedData.externalAssetId) {
       const existingLink = await prisma.fundingSource.findUnique({
-        where: { linkedAssetId: validatedData.linkedAssetId },
+        where: { externalAssetId: validatedData.externalAssetId },
       });
 
       if (existingLink) {
         return NextResponse.json(
-          { error: "해당 자산은 이미 다른 자금원에 연결되어 있습니다." },
+          { error: "해당 물건은 이미 다른 자금원에 연결되어 있습니다." },
           { status: 400 }
         );
       }
@@ -93,19 +77,9 @@ export async function POST(request: NextRequest) {
         name: validatedData.name,
         amount: validatedData.amount,
         expectedDate: new Date(validatedData.expectedDate),
-        linkedAssetId: validatedData.linkedAssetId || null,
+        externalAssetId: validatedData.externalAssetId || null,
         status: validatedData.status,
         notes: validatedData.notes,
-      },
-      include: {
-        linkedAsset: {
-          select: {
-            id: true,
-            name: true,
-            expectedSalePrice: true,
-            status: true,
-          },
-        },
       },
     });
 
@@ -114,12 +88,6 @@ export async function POST(request: NextRequest) {
       fundingSource: {
         ...fundingSource,
         amount: fundingSource.amount.toString(),
-        linkedAsset: fundingSource.linkedAsset
-          ? {
-              ...fundingSource.linkedAsset,
-              expectedSalePrice: fundingSource.linkedAsset.expectedSalePrice.toString(),
-            }
-          : null,
       },
     });
   } catch (error) {

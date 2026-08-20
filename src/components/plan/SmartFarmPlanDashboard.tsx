@@ -29,6 +29,10 @@ import { formatLargeNumber, formatDate, calculateDDay } from "@/lib/utils/format
 import { RetirementGoalForm } from "./RetirementGoalForm";
 import { FundingTimeline } from "./FundingTimeline";
 import { FundingTimelineVisual } from "./FundingTimelineVisual";
+import {
+  CapitalReadinessGauge,
+  type CapitalReadinessData,
+} from "./CapitalReadinessGauge";
 
 interface PlanData {
   goal: {
@@ -104,6 +108,7 @@ interface PlanData {
     }>;
     totalExpectedProceeds: string;
   } | null;
+  capitalReadiness: CapitalReadinessData | null;
 }
 
 export function SmartFarmPlanDashboard() {
@@ -262,6 +267,14 @@ export function SmartFarmPlanDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 자본 준비 게이지 — 스냅샷 합산 vs 목표 자본 (Asset Hub §6) */}
+      {data.capitalReadiness && (
+        <CapitalReadinessGauge
+          data={data.capitalReadiness}
+          onRefreshed={fetchData}
+        />
+      )}
 
       {/* 자금 조달 현황 - 시각적 타임라인 */}
       <Card>

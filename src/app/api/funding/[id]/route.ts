@@ -9,7 +9,8 @@ const updateFundingSchema = z.object({
   name: z.string().min(1).optional(),
   amount: z.number().min(0).optional(),
   expectedDate: z.string().refine((val) => !isNaN(Date.parse(val))).optional(),
-  linkedAssetId: z.string().nullable().optional(),
+  // asset_manager Portfolio id — 원장은 asset_manager 소유 (Asset Hub §1.5)
+  externalAssetId: z.string().nullable().optional(),
   status: z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED"]).optional(),
   notes: z.string().optional(),
 });
@@ -33,16 +34,6 @@ export async function GET(
         id,
         userId: session.user.id,
       },
-      include: {
-        linkedAsset: {
-          select: {
-            id: true,
-            name: true,
-            expectedSalePrice: true,
-            status: true,
-          },
-        },
-      },
     });
 
     if (!fundingSource) {
@@ -53,12 +44,6 @@ export async function GET(
       fundingSource: {
         ...fundingSource,
         amount: fundingSource.amount.toString(),
-        linkedAsset: fundingSource.linkedAsset
-          ? {
-              ...fundingSource.linkedAsset,
-              expectedSalePrice: fundingSource.linkedAsset.expectedSalePrice.toString(),
-            }
-          : null,
       },
     });
   } catch (error) {
@@ -98,15 +83,15 @@ export async function PATCH(
       return NextResponse.json({ error: "자금원을 찾을 수 없습니다." }, { status: 404 });
     }
 
-    // 연결 자산 변경 시 중복 확인
-    if (validatedData.linkedAssetId && validatedData.linkedAssetId !== existingSource.linkedAssetId) {
+    // 연결 물건 변경 시 중복 확인
+    if (validatedData.externalAssetId && validatedData.externalAssetId !== existingSource.externalAssetId) {
       const existingLink = await prisma.fundingSource.findUnique({
-        where: { linkedAssetId: validatedData.linkedAssetId },
+        where: { externalAssetId: validatedData.externalAssetId },
       });
 
       if (existingLink && existingLink.id !== id) {
         return NextResponse.json(
-          { error: "해당 자산은 이미 다른 자금원에 연결되어 있습니다." },
+          { error: "해당 물건은 이미 다른 자금원에 연결되어 있습니다." },
           { status: 400 }
         );
       }
@@ -118,16 +103,6 @@ export async function PATCH(
         ...validatedData,
         expectedDate: validatedData.expectedDate ? new Date(validatedData.expectedDate) : undefined,
       },
-      include: {
-        linkedAsset: {
-          select: {
-            id: true,
-            name: true,
-            expectedSalePrice: true,
-            status: true,
-          },
-        },
-      },
     });
 
     return NextResponse.json({
@@ -135,12 +110,6 @@ export async function PATCH(
       fundingSource: {
         ...fundingSource,
         amount: fundingSource.amount.toString(),
-        linkedAsset: fundingSource.linkedAsset
-          ? {
-              ...fundingSource.linkedAsset,
-              expectedSalePrice: fundingSource.linkedAsset.expectedSalePrice.toString(),
-            }
-          : null,
       },
     });
   } catch (error) {

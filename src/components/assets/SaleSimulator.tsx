@@ -1,11 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+/**
+ * 매도 시뮬레이터 (Asset Hub Integration §1.5.3)
+ *
+ * 계산은 asset_manager 소유 — 이 컴포넌트는 원장(보유 물건)에서 대상을
+ * 고르고 /api/assets/sale-simulator 프록시를 통해 결과만 표시한다.
+ * 취득가·경비·보유기간·지분율은 asset_manager 원장에서 자동 반영된다.
+ */
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -21,30 +37,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Loader2,
-  Plus,
-  Trash2,
-  TrendingUp,
-  Wallet,
-  Target,
-  BarChart3,
-  ArrowRight,
-  Building2,
-} from "lucide-react";
+import { Loader2, TrendingUp, Target, BarChart3, Building2 } from "lucide-react";
 import { formatLargeNumber, formatPercent } from "@/lib/utils/format";
 import { toast } from "sonner";
 
-// 외부 포트폴리오 자산
 interface ExternalAsset {
   id: string;
   propertyType: string;
@@ -52,640 +48,444 @@ interface ExternalAsset {
   address: string;
   purchasePrice: string;
   currentPrice: string;
-  loanAmount?: string;
-  deposit?: string;
-  hasLoan: boolean;
-  estimatedNetProceeds?: string;
 }
 
-const EXTERNAL_PROPERTY_TYPE_MAP: Record<string, SaleAsset["propertyType"]> = {
-  APARTMENT: "HOUSE",
-  VILLA: "HOUSE",
-  OFFICETEL: "OFFICETEL_RESIDENTIAL",
-  COMMERCIAL: "COMMERCIAL",
-  LAND: "LAND",
-  BUILDING: "COMMERCIAL",
-  FACTORY: "COMMERCIAL",
-  STUDIO: "OFFICETEL_RESIDENTIAL",
-  OTHER: "COMMERCIAL",
-};
-
-interface SaleAsset {
+interface ScenarioAsset {
   id: string;
   name: string;
-  propertyType: "HOUSE" | "COMMERCIAL" | "LAND" | "OFFICETEL_RESIDENTIAL";
-  purchasePrice: number;
-  currentPrice: number;
-  acquisitionExpenses: number;
-  holdingPeriodYears: number;
-  isOnlyHouse: boolean;
-  hasResided: boolean;
-  ownershipShare: number;
-}
-
-interface SaleScenario {
-  order: number;
-  asset: {
-    id: string;
-    name: string;
-    salePrice: number;
-    netProceeds: number;
-    taxResult: {
-      capitalGain: number;
-      totalTax: number;
-      effectiveTaxRate: number;
-    };
+  salePrice: string;
+  netProceeds: string;
+  taxResult: {
+    capitalGain: string;
+    totalTax: string;
+    effectiveTaxRate: number;
   };
-  cumulativeNetProceeds: number;
-  cumulativeTax: number;
 }
 
 interface SimulationResult {
-  scenarios: SaleScenario[];
-  totalNetProceeds: number;
-  totalTax: number;
+  scenarios: Array<{
+    order: number;
+    asset: ScenarioAsset;
+    cumulativeNetProceeds: string;
+    cumulativeTax: string;
+  }>;
+  totalNetProceeds: string;
+  totalTax: string;
   totalTaxRate: number;
-  totalCapitalGain: number;
+  totalCapitalGain: string;
 }
 
-interface OptimalResult {
-  byNetProceeds: SimulationResult;
-  byTaxEfficiency: SimulationResult;
-  byTaxRate: SimulationResult;
-  comparison: {
-    maxNetProceeds: number;
-    minNetProceeds: number;
-    difference: number;
+interface SimulationResponse {
+  assumptions: { isOnlyHouse: boolean; hasResided: boolean; assetCount: number };
+  preview: ScenarioAsset[];
+  optimalOrder: {
+    byNetProceeds: SimulationResult;
+    byTaxEfficiency: SimulationResult;
+    byTaxRate: SimulationResult;
+    comparison: {
+      maxNetProceeds: string;
+      minNetProceeds: string;
+      difference: string;
+    };
   };
+  minimumSalesForTarget: {
+    assets: ScenarioAsset[];
+    totalNetProceeds: string;
+    shortfall: string;
+  } | null;
 }
 
-const PROPERTY_TYPE_OPTIONS = [
-  { value: "HOUSE", label: "주택" },
-  { value: "OFFICETEL_RESIDENTIAL", label: "주거용 오피스텔" },
-  { value: "COMMERCIAL", label: "상가" },
-  { value: "LAND", label: "토지" },
+type Strategy = "byNetProceeds" | "byTaxEfficiency" | "byTaxRate";
+
+const STRATEGY_OPTIONS: Array<{ value: Strategy; label: string }> = [
+  { value: "byNetProceeds", label: "순수익 최대화" },
+  { value: "byTaxEfficiency", label: "세금 효율 우선" },
+  { value: "byTaxRate", label: "낮은 세율 우선" },
 ];
 
 export function SaleSimulator() {
-  const [assets, setAssets] = useState<SaleAsset[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<OptimalResult | null>(null);
-  const [selectedStrategy, setSelectedStrategy] = useState<"byNetProceeds" | "byTaxEfficiency" | "byTaxRate">("byNetProceeds");
-
-  // 외부 포트폴리오 자산
   const [externalAssets, setExternalAssets] = useState<ExternalAsset[]>([]);
-  const [loadingExternal, setLoadingExternal] = useState(false);
+  const [loadingAssets, setLoadingAssets] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({});
+  const [targetAmount, setTargetAmount] = useState("");
+  const [onlyHouseExemption, setOnlyHouseExemption] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<SimulationResponse | null>(null);
+  const [strategy, setStrategy] = useState<Strategy>("byNetProceeds");
 
-  // 자산 추가 다이얼로그
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedExternalAssetId, setSelectedExternalAssetId] = useState<string>("");
-  const [newAsset, setNewAsset] = useState<Partial<SaleAsset>>({
-    propertyType: "HOUSE",
-    ownershipShare: 100,
-    isOnlyHouse: false,
-    hasResided: false,
-  });
-
-  // 다이얼로그 열릴 때 외부 자산 불러오기
-  useEffect(() => {
-    if (isAddDialogOpen) {
-      fetchExternalAssets();
-    }
-  }, [isAddDialogOpen]);
-
-  async function fetchExternalAssets() {
-    setLoadingExternal(true);
+  const fetchAssets = useCallback(async () => {
+    setLoadingAssets(true);
     try {
       const response = await fetch("/api/assets/external?tradeType=OWNED");
-      if (response.ok) {
-        const result = await response.json();
-        setExternalAssets(result.assets || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch external assets:", error);
+      if (!response.ok) throw new Error("자산 목록 조회 실패");
+      const data = await response.json();
+      const assets: ExternalAsset[] = data.assets || [];
+      setExternalAssets(assets);
+      setSelectedIds(new Set(assets.map((a) => a.id)));
+    } catch {
+      toast.error("보유 물건을 불러오지 못했습니다.");
     } finally {
-      setLoadingExternal(false);
+      setLoadingAssets(false);
     }
-  }
+  }, []);
 
-  // 외부 자산 선택 시 폼 자동 채우기
-  function handleExternalAssetSelect(assetId: string) {
-    setSelectedExternalAssetId(assetId);
+  useEffect(() => {
+    fetchAssets();
+  }, [fetchAssets]);
 
-    if (assetId === "manual") {
-      setNewAsset({
-        propertyType: "HOUSE",
-        ownershipShare: 100,
-        isOnlyHouse: false,
-        hasResided: false,
-      });
-      return;
-    }
-
-    const asset = externalAssets.find((a) => a.id === assetId);
-    if (asset) {
-      const propertyType = EXTERNAL_PROPERTY_TYPE_MAP[asset.propertyType] || "HOUSE";
-      setNewAsset({
-        name: asset.propertyName,
-        propertyType,
-        purchasePrice: Number(asset.purchasePrice),
-        currentPrice: Number(asset.currentPrice),
-        ownershipShare: 100,
-        isOnlyHouse: propertyType === "HOUSE",
-        hasResided: false,
-        holdingPeriodYears: 0,
-        acquisitionExpenses: 0,
-      });
-    }
-  }
-
-  function handleAddAsset() {
-    if (!newAsset.name || !newAsset.purchasePrice || !newAsset.currentPrice) {
-      toast.error("필수 항목을 입력해주세요.");
-      return;
-    }
-
-    const asset: SaleAsset = {
-      id: crypto.randomUUID(),
-      name: newAsset.name,
-      propertyType: newAsset.propertyType as SaleAsset["propertyType"],
-      purchasePrice: Number(newAsset.purchasePrice),
-      currentPrice: Number(newAsset.currentPrice),
-      acquisitionExpenses: Number(newAsset.acquisitionExpenses) || 0,
-      holdingPeriodYears: Number(newAsset.holdingPeriodYears) || 0,
-      isOnlyHouse: newAsset.isOnlyHouse || false,
-      hasResided: newAsset.hasResided || false,
-      ownershipShare: Number(newAsset.ownershipShare) || 100,
-    };
-
-    setAssets((prev) => [...prev, asset]);
-    setNewAsset({
-      propertyType: "HOUSE",
-      ownershipShare: 100,
-      isOnlyHouse: false,
-      hasResided: false,
+  function toggleAsset(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
     });
-    setSelectedExternalAssetId("");
-    setIsAddDialogOpen(false);
-    setResult(null);
-    toast.success("자산이 추가되었습니다.");
   }
 
-  function handleRemoveAsset(id: string) {
-    setAssets((prev) => prev.filter((a) => a.id !== id));
-    setResult(null);
+  function handleOverrideChange(id: string, value: string) {
+    const digits = value.replace(/[^0-9]/g, "");
+    setPriceOverrides((prev) => {
+      if (!digits) {
+        return Object.fromEntries(
+          Object.entries(prev).filter(([key]) => key !== id)
+        );
+      }
+      return { ...prev, [id]: digits };
+    });
   }
 
-  async function handleSimulate() {
-    if (assets.length === 0) {
-      toast.error("최소 1개 이상의 자산을 추가해주세요.");
+  async function runSimulation() {
+    if (selectedIds.size === 0) {
+      toast.error("시뮬레이션할 물건을 선택하세요.");
       return;
     }
 
-    setLoading(true);
-    setResult(null);
-
+    setRunning(true);
     try {
+      const overrides = Object.fromEntries(
+        Object.entries(priceOverrides).filter(([id]) => selectedIds.has(id))
+      );
       const response = await fetch("/api/assets/sale-simulator", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          assets,
-          mode: "optimal",
+          portfolioIds: [...selectedIds],
+          ...(targetAmount ? { targetAmount } : {}),
+          ...(Object.keys(overrides).length > 0
+            ? { salePriceOverrides: overrides }
+            : {}),
+          ...(onlyHouseExemption
+            ? { assumptions: { isOnlyHouse: true, hasResided: true } }
+            : {}),
         }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        toast.error(data.error || "시뮬레이션 중 오류가 발생했습니다.");
-        return;
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "시뮬레이션 실패");
       }
-
-      setResult(data.result);
-    } catch {
-      toast.error("시뮬레이션 중 오류가 발생했습니다.");
+      setResult(data.data as SimulationResponse);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "시뮬레이션 중 오류가 발생했습니다."
+      );
     } finally {
-      setLoading(false);
+      setRunning(false);
     }
   }
 
-  const currentResult = result?.[selectedStrategy];
+  const activeResult = result?.optimalOrder[strategy];
 
   return (
     <div className="space-y-6">
-      {/* 자산 목록 */}
+      {/* 대상 선택 */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5" />
-                매도 시뮬레이터
-              </CardTitle>
-              <CardDescription>
-                보유 자산의 최적 매도 순서를 분석합니다.
-              </CardDescription>
-            </div>
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  자산 추가
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>자산 추가</DialogTitle>
-                  <DialogDescription>
-                    시뮬레이션할 부동산 자산 정보를 입력하세요.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  {/* 보유 자산에서 선택 */}
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4" />
-                      보유 자산에서 선택
-                    </Label>
-                    {loadingExternal ? (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        불러오는 중...
-                      </div>
-                    ) : externalAssets.length > 0 ? (
-                      <Select
-                        value={selectedExternalAssetId}
-                        onValueChange={handleExternalAssetSelect}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="보유 자산을 선택하세요" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="manual">직접 입력</SelectItem>
-                          {externalAssets.map((asset) => (
-                            <SelectItem key={asset.id} value={asset.id}>
-                              <div className="flex flex-col">
-                                <span>{asset.propertyName}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  현재시세 {formatLargeNumber(asset.currentPrice)}
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <p className="text-sm text-muted-foreground py-2">
-                        보유 중인 자산이 없습니다. 직접 입력해주세요.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="border-t pt-4">
-                    <div className="space-y-2">
-                      <Label>자산명</Label>
-                      <Input
-                        placeholder="예: 강남 아파트"
-                        value={newAsset.name || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, name: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>취득가 (원)</Label>
-                      <Input
-                        type="number"
-                        placeholder="500000000"
-                        value={newAsset.purchasePrice || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, purchasePrice: Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>현재 시세 (원)</Label>
-                      <Input
-                        type="number"
-                        placeholder="700000000"
-                        value={newAsset.currentPrice || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, currentPrice: Number(e.target.value) }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>부동산 유형</Label>
-                      <Select
-                        value={newAsset.propertyType}
-                        onValueChange={(v) => setNewAsset((p) => ({ ...p, propertyType: v as SaleAsset["propertyType"] }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PROPERTY_TYPE_OPTIONS.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>보유기간 (년)</Label>
-                      <Input
-                        type="number"
-                        placeholder="5"
-                        value={newAsset.holdingPeriodYears || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, holdingPeriodYears: Number(e.target.value) }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>취득비용 (원)</Label>
-                      <Input
-                        type="number"
-                        placeholder="취득세, 중개비 등"
-                        value={newAsset.acquisitionExpenses || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, acquisitionExpenses: Number(e.target.value) }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>지분율 (%)</Label>
-                      <Input
-                        type="number"
-                        placeholder="100"
-                        value={newAsset.ownershipShare || ""}
-                        onChange={(e) => setNewAsset((p) => ({ ...p, ownershipShare: Number(e.target.value) }))}
-                      />
-                    </div>
-                  </div>
-                  {(newAsset.propertyType === "HOUSE" || newAsset.propertyType === "OFFICETEL_RESIDENTIAL") && (
-                    <div className="space-y-3 p-3 bg-muted/50 rounded-lg">
-                      <p className="text-sm font-medium">1주택 비과세 조건</p>
-                      <div className="flex items-center gap-4">
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={newAsset.isOnlyHouse || false}
-                            onChange={(e) => setNewAsset((p) => ({ ...p, isOnlyHouse: e.target.checked }))}
-                            className="rounded"
-                          />
-                          <span className="text-sm">1세대 1주택</span>
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={newAsset.hasResided || false}
-                            onChange={(e) => setNewAsset((p) => ({ ...p, hasResided: e.target.checked }))}
-                            className="rounded"
-                          />
-                          <span className="text-sm">2년 이상 거주</span>
-                        </label>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                    취소
-                  </Button>
-                  <Button onClick={handleAddAsset}>추가</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Building2 className="h-4 w-4" />
+            시뮬레이션 대상 (asset_manager 보유 물건)
+          </CardTitle>
+          <CardDescription>
+            취득가·필요경비·보유기간·지분율·임대사업자 정보는 asset_manager 원장에서
+            자동 반영됩니다. 매도 희망가를 비우면 현재 시세로 계산합니다.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          {assets.length > 0 ? (
-            <div className="space-y-4">
+        <CardContent className="space-y-4">
+          {loadingAssets ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> 보유 물건 불러오는 중...
+            </div>
+          ) : externalAssets.length === 0 ? (
+            <p className="py-6 text-sm text-muted-foreground">
+              연동된 보유 물건이 없습니다. asset_manager에서 물건을 등록하세요.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>자산명</TableHead>
-                    <TableHead>유형</TableHead>
-                    <TableHead className="text-right">취득가</TableHead>
-                    <TableHead className="text-right">현재시세</TableHead>
-                    <TableHead className="text-right">예상차익</TableHead>
-                    <TableHead className="text-right">보유기간</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead className="w-10" />
+                    <TableHead>물건</TableHead>
+                    <TableHead className="text-right">현재 시세</TableHead>
+                    <TableHead className="w-44 text-right">매도 희망가 (원)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {assets.map((asset) => (
+                  {externalAssets.map((asset) => (
                     <TableRow key={asset.id}>
-                      <TableCell className="font-medium">{asset.name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">
-                          {PROPERTY_TYPE_OPTIONS.find((o) => o.value === asset.propertyType)?.label}
-                        </Badge>
+                        <Checkbox
+                          checked={selectedIds.has(asset.id)}
+                          onCheckedChange={() => toggleAsset(asset.id)}
+                          aria-label={`${asset.propertyName} 선택`}
+                        />
                       </TableCell>
-                      <TableCell className="text-right">
-                        {formatLargeNumber(asset.purchasePrice)}
+                      <TableCell>
+                        <div className="font-medium">{asset.propertyName}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {asset.address}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         {formatLargeNumber(asset.currentPrice)}
                       </TableCell>
-                      <TableCell className="text-right text-green-600">
-                        {formatLargeNumber(asset.currentPrice - asset.purchasePrice)}
-                      </TableCell>
-                      <TableCell className="text-right">{asset.holdingPeriodYears}년</TableCell>
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-red-500 hover:text-red-700"
-                          onClick={() => handleRemoveAsset(asset.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <Input
+                          inputMode="numeric"
+                          placeholder="시세로 계산"
+                          value={priceOverrides[asset.id] ?? ""}
+                          onChange={(e) =>
+                            handleOverrideChange(asset.id, e.target.value)
+                          }
+                          className="text-right"
+                          disabled={!selectedIds.has(asset.id)}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-
-              <div className="flex justify-end">
-                <Button onClick={handleSimulate} disabled={loading} size="lg">
-                  {loading ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <BarChart3 className="mr-2 h-4 w-4" />
-                  )}
-                  시뮬레이션 실행
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-muted-foreground mb-4">
-                시뮬레이션할 자산을 추가해주세요.
-              </p>
             </div>
           )}
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="target-amount">목표 금액 (원, 선택)</Label>
+              <Input
+                id="target-amount"
+                inputMode="numeric"
+                placeholder="예: 500000000"
+                value={targetAmount}
+                onChange={(e) => setTargetAmount(e.target.value.replace(/[^0-9]/g, ""))}
+              />
+            </div>
+            <div className="flex items-center gap-2 pb-2">
+              <Switch
+                id="only-house"
+                checked={onlyHouseExemption}
+                onCheckedChange={setOnlyHouseExemption}
+              />
+              <Label htmlFor="only-house" className="text-sm">
+                1세대 1주택 비과세 가정 (2년 거주 충족)
+              </Label>
+            </div>
+            <Button onClick={runSimulation} disabled={running || loadingAssets}>
+              {running ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <BarChart3 className="mr-2 h-4 w-4" />
+              )}
+              시뮬레이션 실행
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {/* 시뮬레이션 결과 */}
+      {/* 물건별 프리뷰 */}
       {result && (
-        <>
-          {/* 요약 비교 */}
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-green-500" />
-                  최대 순수익
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <TrendingUp className="h-4 w-4" />
+              물건별 매도 프리뷰
+            </CardTitle>
+            <CardDescription>
+              가정: {result.assumptions.isOnlyHouse ? "1세대 1주택" : "다주택/일반"} ·{" "}
+              {result.assumptions.hasResided ? "거주 요건 충족" : "거주 요건 미충족"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>물건</TableHead>
+                  <TableHead className="text-right">매도가</TableHead>
+                  <TableHead className="text-right">양도차익</TableHead>
+                  <TableHead className="text-right">총 세액</TableHead>
+                  <TableHead className="text-right">실효세율</TableHead>
+                  <TableHead className="text-right">세후 순수익</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {result.preview.map((asset) => (
+                  <TableRow key={asset.id}>
+                    <TableCell className="font-medium">{asset.name}</TableCell>
+                    <TableCell className="text-right">
+                      {formatLargeNumber(asset.salePrice)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatLargeNumber(asset.taxResult.capitalGain)}
+                    </TableCell>
+                    <TableCell className="text-right text-red-500">
+                      {formatLargeNumber(asset.taxResult.totalTax)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {formatPercent(asset.taxResult.effectiveTaxRate)}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatLargeNumber(asset.netProceeds)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 최적 매도 순서 */}
+      {result && activeResult && (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <BarChart3 className="h-4 w-4" />
+                  최적 매도 순서
                 </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {formatLargeNumber(result.comparison.maxNetProceeds)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Wallet className="h-4 w-4 text-blue-500" />
-                  최소 세금
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-600">
-                  {formatLargeNumber(result.byTaxEfficiency.totalTax)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Target className="h-4 w-4 text-orange-500" />
-                  최저 실효세율
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-orange-600">
-                  {formatPercent(result.byTaxRate.totalTaxRate, 2)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">순서별 차이</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatLargeNumber(result.comparison.difference)}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* 전략 선택 및 상세 결과 */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>최적 매도 순서</CardTitle>
-                <Select
-                  value={selectedStrategy}
-                  onValueChange={(v) => setSelectedStrategy(v as typeof selectedStrategy)}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="byNetProceeds">순수익 최대화</SelectItem>
-                    <SelectItem value="byTaxEfficiency">세금 최소화</SelectItem>
-                    <SelectItem value="byTaxRate">세율 최소화</SelectItem>
-                  </SelectContent>
-                </Select>
+                <CardDescription>
+                  전략 간 순수익 차이:{" "}
+                  {formatLargeNumber(result.optimalOrder.comparison.difference)}
+                </CardDescription>
               </div>
-              <CardDescription>
-                {selectedStrategy === "byNetProceeds" && "세후 순수익이 가장 높은 매도 순서입니다."}
-                {selectedStrategy === "byTaxEfficiency" && "총 납부 세금이 가장 낮은 매도 순서입니다."}
-                {selectedStrategy === "byTaxRate" && "실효세율이 가장 낮은 매도 순서입니다."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {currentResult && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {currentResult.scenarios.map((scenario, idx) => (
-                      <div key={scenario.asset.id} className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-sm py-1 px-3">
-                          {scenario.order}. {scenario.asset.name}
-                        </Badge>
-                        {idx < currentResult.scenarios.length - 1 && (
-                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
+              <Select
+                value={strategy}
+                onValueChange={(v) => setStrategy(v as Strategy)}
+              >
+                <SelectTrigger className="w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STRATEGY_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-muted-foreground">총 순수익</p>
+                <p className="font-semibold">
+                  {formatLargeNumber(activeResult.totalNetProceeds)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">총 세액</p>
+                <p className="font-semibold text-red-500">
+                  {formatLargeNumber(activeResult.totalTax)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">총 양도차익</p>
+                <p className="font-semibold">
+                  {formatLargeNumber(activeResult.totalCapitalGain)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">총 세율</p>
+                <p className="font-semibold">
+                  {formatPercent(activeResult.totalTaxRate)}
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-14">순서</TableHead>
+                    <TableHead>물건</TableHead>
+                    <TableHead className="text-right">순수익</TableHead>
+                    <TableHead className="text-right">누적 순수익</TableHead>
+                    <TableHead className="text-right">누적 세액</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {activeResult.scenarios.map((scenario) => (
+                    <TableRow key={scenario.asset.id}>
+                      <TableCell>
+                        <Badge variant="outline">{scenario.order}</Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {scenario.asset.name}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatLargeNumber(scenario.asset.netProceeds)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatLargeNumber(scenario.cumulativeNetProceeds)}
+                      </TableCell>
+                      <TableCell className="text-right text-red-500">
+                        {formatLargeNumber(scenario.cumulativeTax)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>순서</TableHead>
-                        <TableHead>자산명</TableHead>
-                        <TableHead className="text-right">매도가</TableHead>
-                        <TableHead className="text-right">양도차익</TableHead>
-                        <TableHead className="text-right">세금</TableHead>
-                        <TableHead className="text-right">순수익</TableHead>
-                        <TableHead className="text-right">누적 순수익</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {currentResult.scenarios.map((scenario) => (
-                        <TableRow key={scenario.asset.id}>
-                          <TableCell>
-                            <Badge variant="outline">{scenario.order}</Badge>
-                          </TableCell>
-                          <TableCell className="font-medium">{scenario.asset.name}</TableCell>
-                          <TableCell className="text-right">
-                            {formatLargeNumber(scenario.asset.salePrice)}
-                          </TableCell>
-                          <TableCell className="text-right text-green-600">
-                            {formatLargeNumber(scenario.asset.taxResult.capitalGain)}
-                          </TableCell>
-                          <TableCell className="text-right text-red-600">
-                            {formatLargeNumber(scenario.asset.taxResult.totalTax)}
-                          </TableCell>
-                          <TableCell className="text-right text-blue-600">
-                            {formatLargeNumber(scenario.asset.netProceeds)}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {formatLargeNumber(scenario.cumulativeNetProceeds)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow className="bg-muted/50 font-bold">
-                        <TableCell colSpan={4}>합계</TableCell>
-                        <TableCell className="text-right text-red-600">
-                          {formatLargeNumber(currentResult.totalTax)}
-                        </TableCell>
-                        <TableCell className="text-right text-blue-600">
-                          {formatLargeNumber(currentResult.totalNetProceeds)}
-                        </TableCell>
-                        <TableCell></TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-
-                  <div className="flex justify-end gap-4 text-sm text-muted-foreground">
-                    <span>총 양도차익: {formatLargeNumber(currentResult.totalCapitalGain)}</span>
-                    <span>실효세율: {formatPercent(currentResult.totalTaxRate, 2)}</span>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
+      {/* 목표 금액 분석 */}
+      {result?.minimumSalesForTarget && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Target className="h-4 w-4" />
+              목표 금액 달성 분석
+            </CardTitle>
+            <CardDescription>
+              {Number(result.minimumSalesForTarget.shortfall) > 0
+                ? `전량 매도해도 ${formatLargeNumber(result.minimumSalesForTarget.shortfall)} 부족합니다.`
+                : `${result.minimumSalesForTarget.assets.length}건 매도로 목표를 달성합니다.`}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-3 text-sm">
+              달성 순수익:{" "}
+              <span className="font-semibold">
+                {formatLargeNumber(result.minimumSalesForTarget.totalNetProceeds)}
+              </span>
+            </div>
+            <ul className="space-y-1 text-sm">
+              {result.minimumSalesForTarget.assets.map((asset, index) => (
+                <li key={asset.id} className="flex justify-between">
+                  <span>
+                    {index + 1}. {asset.name}
+                  </span>
+                  <span>{formatLargeNumber(asset.netProceeds)}</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

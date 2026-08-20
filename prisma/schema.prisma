@@ -21,7 +21,6 @@ model User {
   updatedAt     DateTime  @updatedAt
 
   retirementGoal    RetirementGoal?
-  realEstateAssets  RealEstateAsset[]
   setupCostItems    SetupCostItem[]
   fundingSources    FundingSource[]
   farmingLogs       FarmingLog[]
@@ -51,28 +50,20 @@ model RetirementGoal {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// ==================== 부동산 자산 ====================
-model RealEstateAsset {
-  id                String      @id @default(cuid())
-  userId            String
-  name              String
-  propertyType      String      // PropertyType enum -> String
-  address           String
-  area              Decimal
-  acquisitionDate   DateTime
-  acquisitionPrice  Decimal
-  currentPrice      Decimal
-  expectedSalePrice Decimal
-  mortgageBalance   Decimal     @default(0)
-  monthlyRent       Decimal?
-  status            String      @default("HOLDING") // AssetStatus enum -> String
-  plannedSaleDate   DateTime?
-  notes             String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+// ==================== 외부 자산 스냅샷 (Asset Hub §2 소비자 캐시) ====================
+// portfolio_manager·asset_manager의 GET /api/assets/snapshot 응답을 카테고리 단위로
+// 캐시한다 (last-known-good). 원장은 각 소유 서비스에 있으며 여기에는 쓰기 UI/API가 없다.
+model ExternalAssetSnapshot {
+  id          String   @id @default(cuid())
+  source      String   // "portfolio_manager" | "asset_manager"
+  category    String   // §2.2 카테고리 레지스트리 (pension_dc, stock_kr, real_estate, ...)
+  label       String
+  valueKrw    BigInt   // 정수(원)
+  asOf        DateTime // 제공 서비스의 평가 기준시각
+  collectedAt DateTime @default(now())
 
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fundingSource FundingSource?
+  @@unique([source, category])
+  @@index([source])
 }
 
 // ==================== 설립 비용 ====================
@@ -131,14 +122,13 @@ model FundingSource {
   name          String
   amount        Decimal
   expectedDate  DateTime
-  linkedAssetId String?       @unique
+  externalAssetId String?     @unique // asset_manager Portfolio id (원장은 asset_manager 소유, FK 없음)
   status        String        @default("PLANNED") // FundingStatus enum -> String
   notes         String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  linkedAsset RealEstateAsset? @relation(fields: [linkedAssetId], references: [id])
 
   @@index([userId])
 }
