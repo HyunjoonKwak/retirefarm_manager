@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { blockNoteContentSchema } from "@/lib/utils/blocknote";
 
 const createLogSchema = z.object({
   date: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요."),
@@ -11,6 +12,7 @@ const createLogSchema = z.object({
   rainfall: z.number().min(0).optional(),
   weather: z.string().optional(),
   notes: z.string().optional(),
+  content: blockNoteContentSchema.optional(),
 });
 
 // GET: 영농일지 목록 조회
@@ -121,6 +123,7 @@ export async function POST(request: NextRequest) {
         rainfall: validatedData.rainfall,
         weather: validatedData.weather,
         notes: validatedData.notes,
+        content: validatedData.content,
       },
       include: {
         activities: true,

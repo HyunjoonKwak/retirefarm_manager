@@ -162,6 +162,7 @@ model FarmingLog {
   rainfall    Decimal?
   weather     String?
   notes       String?
+  content     String?        // BlockNote 문서 JSON (자유 서술 본문)
   photos      String?        // String[] -> String (JSON 형식으로 저장)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt

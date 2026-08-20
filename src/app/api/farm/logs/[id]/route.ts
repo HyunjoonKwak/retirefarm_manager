@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { blockNoteContentSchema } from "@/lib/utils/blocknote";
 
 const updateLogSchema = z.object({
   temperature: z.number().min(-50).max(60).optional(),
@@ -10,6 +11,7 @@ const updateLogSchema = z.object({
   rainfall: z.number().min(0).optional(),
   weather: z.string().optional(),
   notes: z.string().optional(),
+  content: blockNoteContentSchema.optional(),
 });
 
 // GET: 개별 영농일지 조회

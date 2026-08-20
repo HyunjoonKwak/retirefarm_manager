@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +39,18 @@ import {
   CloudSun,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
+import { blockNoteToPlainText } from "@/lib/utils/blocknote";
 import { toast } from "sonner";
+
+// BlockNote는 SSR 불가 — 클라이언트에서만 로드
+const FarmingLogEditor = dynamic(() => import("./FarmingLogEditor"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex min-h-40 items-center justify-center rounded-md border">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  ),
+});
 
 interface FarmActivity {
   id: string;
@@ -59,6 +71,7 @@ interface FarmingLog {
   rainfall: number | null;
   weather: string | null;
   notes: string | null;
+  content: string | null;
   activities: FarmActivity[];
 }
 
@@ -102,6 +115,10 @@ export function FarmingLogManager() {
     weather: "",
     notes: "",
   });
+  const [newContent, setNewContent] = useState("");
+
+  // 본문 열람 다이얼로그 (읽기 전용 에디터)
+  const [viewingLog, setViewingLog] = useState<FarmingLog | null>(null);
 
   async function fetchLogs() {
     try {
@@ -145,6 +162,8 @@ export function FarmingLogManager() {
           temperature: newLog.temperature ? Number(newLog.temperature) : undefined,
           humidity: newLog.humidity ? Number(newLog.humidity) : undefined,
           rainfall: newLog.rainfall ? Number(newLog.rainfall) : undefined,
+          // 빈 문서(문단만 있고 글자 없음)는 저장하지 않는다
+          ...(blockNoteToPlainText(newContent) ? { content: newContent } : {}),
         }),
       });
 
@@ -163,6 +182,7 @@ export function FarmingLogManager() {
           weather: "",
           notes: "",
         });
+        setNewContent("");
         fetchLogs();
       }
     } catch {
@@ -224,7 +244,7 @@ export function FarmingLogManager() {
               일지 작성
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle>영농일지 작성</DialogTitle>
               <DialogDescription>
@@ -290,12 +310,18 @@ export function FarmingLogManager() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>메모</Label>
+                <Label>한 줄 요약</Label>
                 <Textarea
                   placeholder="오늘의 특이사항..."
                   value={newLog.notes}
                   onChange={(e) => setNewLog((p) => ({ ...p, notes: e.target.value }))}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>본문</Label>
+                {isAddDialogOpen && (
+                  <FarmingLogEditor onChange={setNewContent} />
+                )}
               </div>
             </div>
             <DialogFooter>
@@ -364,9 +390,21 @@ export function FarmingLogManager() {
                     )}
                   </div>
 
-                  {/* 메모 */}
+                  {/* 한 줄 요약 */}
                   {log.notes && (
                     <p className="text-sm mb-3">{log.notes}</p>
+                  )}
+
+                  {/* 본문 미리보기 (BlockNote 평문 추출) */}
+                  {log.content && blockNoteToPlainText(log.content, 160) && (
+                    <button
+                      type="button"
+                      onClick={() => setViewingLog(log)}
+                      className="mb-3 block w-full rounded-md bg-muted/50 p-2 text-left text-sm text-muted-foreground hover:bg-muted"
+                    >
+                      {blockNoteToPlainText(log.content, 160)}
+                      <span className="ml-1 text-xs text-primary">본문 보기</span>
+                    </button>
                   )}
 
                   {/* 활동 목록 */}
@@ -416,6 +454,26 @@ export function FarmingLogManager() {
           </CardContent>
         </Card>
       )}
+
+      {/* 본문 열람 (읽기 전용) */}
+      <Dialog
+        open={viewingLog !== null}
+        onOpenChange={(open) => !open && setViewingLog(null)}
+      >
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {viewingLog ? `${formatDate(viewingLog.date)} 일지` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingLog?.content && (
+            <FarmingLogEditor
+              initialContent={viewingLog.content}
+              editable={false}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
