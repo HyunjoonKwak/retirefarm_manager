@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth/options";
 import prisma from "@/lib/prisma";
 import { smartFarmPlanSchema, calculateSmartFarmPlanSummary } from "@/lib/validations/plan";
 import { externalPortfolioClient } from "@/lib/api/external-portfolio";
-import { getSnapshotSummary, type SnapshotSummary } from "@/lib/services/external-snapshot";
+import { getNetWorthSummary, type NetWorthSummary } from "@/lib/services/external-snapshot";
 
 // GET: 스마트팜 준비 계획 조회
 export async function GET() {
@@ -43,12 +43,12 @@ export async function GET() {
       where: { userId },
     });
 
-    // 4. 자본 준비 스냅샷 합산 (Asset Hub §2·§6) — 실패해도 진행 (last-known-good)
-    let snapshotSummary: SnapshotSummary | null = null;
+    // 4. 자본 준비 — 허브 순자산 단일 소스 (Asset Hub §2.4). 실패해도 진행 (last-known-good)
+    let netWorth: NetWorthSummary | null = null;
     try {
-      snapshotSummary = await getSnapshotSummary();
+      netWorth = await getNetWorthSummary();
     } catch (e) {
-      console.error("Snapshot summary fetch failed:", e);
+      console.error("Net worth summary fetch failed:", e);
     }
 
     // 5. 외부 포트폴리오 조회 (try-catch로 실패해도 진행)
@@ -146,13 +146,18 @@ export async function GET() {
       },
       externalAssets,
       expectedProceeds,
-      // §6 자본 준비: 스냅샷 합산값을 목표 자본(순설립비+생활비버퍼) 대비 게이지로
-      capitalReadiness: snapshotSummary
+      // §6 자본 준비: 허브 순자산(현금·투자·부동산−부채)을 목표 자본 대비 게이지로.
+      // net_worth_krw를 그대로 쓴다 — 재계산 금지 (§2.4)
+      capitalReadiness: netWorth
         ? {
-            totalKrw: snapshotSummary.totalKrw,
-            sources: snapshotSummary.sources,
-            configuredSourceCount: snapshotSummary.configuredSourceCount,
-            errors: snapshotSummary.errors,
+            netWorthKrw: netWorth.netWorthKrw,
+            asOf: netWorth.asOf,
+            collectedAt: netWorth.collectedAt,
+            assets: netWorth.assets,
+            liabilities: netWorth.liabilities,
+            sources: netWorth.sources,
+            configured: netWorth.configured,
+            errors: netWorth.errors,
             targetCapital: summary.totalRequiredFunds,
             targetDate: summary.targetDate.toISOString(),
           }

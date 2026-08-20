@@ -40,6 +40,28 @@
   portfolio_manager `backend/scripts/issue_snapshot_token.py` (retirefarm 명의 신규 발급)
 - retirefarm 컨테이너가 두 서비스에 도달 가능한지 확인 (같은 NAS — 네트워크/도메인)
 
+## Phase 1.5 — 허브 순자산 단일 소스 전환 ✅ 완료 2026-08-20 (§8-8)
+
+**문제:** Phase 1의 자본 게이지가 portfolio·asset **부분 소스를 직접 합산**해
+현금과 비부동산 부채가 빠졌다 (49.0억 표시 vs 실제 순자산 42.5억, 약 6.5억 과대).
+
+**전환:** my_portal `GET /api/assets/net-worth`(§2.4) **단일 소스**로 교체.
+- `asset-hub-snapshot.ts`: 2소스 후보 → my_portal 1소스. §2.4 계약 zod 검증
+  (`source: literal("my_portal")`로 부분 소스 직접 소비를 타입 레벨에서 차단,
+  부채 음수 거부, 자산 `origin` 필수). `checkNetWorthIdentity`는 Σassets−Σliabilities
+  항등식을 **확인만** 하고 값은 고치지 않는다 (계약값 우선, 위반 시 warn 로그).
+- `external-snapshot.ts`: **자체 합산 `summarizeSnapshotRows` 제거.**
+  `net_worth_krw`를 그대로 사용. 스테일 판정도 삭제 — 허브의 `sources[].stale`을
+  그대로 UI에 전달한다 (소비자 자체 판단 금지, §2.4).
+- 캐시: `ExternalAssetSnapshot`(source×category 다중 행) → `HubNetWorthCache`
+  (singleton 1행 + 응답 payload JSON). 재계산하지 않으니 항목을 쪼갤 이유가 없다.
+- UI: 순자산 표시 + 자산 항목별 `origin` 뱃지(딥링크 근거) + 부채 내역 + 스테일 뱃지.
+- compose: portfolio-net 외부 네트워크 합류 **제거** (portfolio-backend 직접 호출이
+  사라짐). my_portal은 `0.0.0.0:8100`, asset은 `0.0.0.0:3000`으로 호스트 포트 접근.
+- **매도 시뮬용 asset_manager 연결은 그대로 유지** — 게이지와 별개 경로다 (§1.5.3).
+  물건 단위 원장 조회가 필요해 집계 API로 대체 불가.
+- 마이그레이션: `20260820065859_hub_net_worth_single_source`
+
 ## Phase 2 — 작기(作期) 캘린더 + 온보딩 마법사 ✅ 완료 2026-08-20
 
 - [x] **작기 캘린더**: ssampin의 학기+컬러 라벨 구조 패턴 차용 (코드 복사 없음).

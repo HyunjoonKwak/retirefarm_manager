@@ -1,180 +1,167 @@
 /**
- * 외부 자산 스냅샷 수집·합산 서비스 (Asset Hub Integration §2, §6 자본 준비)
+ * 허브 순자산 수집·캐시 서비스 (Asset Hub Integration §2.4, §6 자본 준비)
  *
- * 수집: 설정된 소스별로 스냅샷을 가져와 ExternalAssetSnapshot 캐시를 통째 교체.
- * 실패한 소스는 마지막 성공값 유지 (last-known-good) — 실패가 0으로 잡혀
- * 합산이 출렁이면 안 된다 (§2.3).
+ * my_portal 단일 소스에서 순자산을 받아 캐시한다. **자체 합산을 하지 않는다** —
+ * `net_worth_krw`를 그대로 쓴다 (§1.5: 합산 로직도 SSOT는 my_portal).
  *
- * 스테일: as_of가 48시간을 넘으면 stale 표시 → UI는 "N일 전 기준" 뱃지.
+ * 실패한 수집은 마지막 성공값을 유지한다 (last-known-good). 실패가 0으로 잡혀
+ * 자본 게이지가 출렁이면 안 된다.
+ *
+ * 스테일 판정도 하지 않는다: 허브가 `sources[].stale`로 내려준 플래그를
+ * 그대로 UI에 전달한다 (소비자 자체 판단 금지 — §2.4).
  */
 
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import {
-  fetchAssetHubSnapshot,
-  getConfiguredSnapshotSources,
+  fetchHubNetWorth,
+  getConfiguredHubSource,
+  checkNetWorthIdentity,
+  hubNetWorthSchema,
+  type HubAssetItem,
+  type HubLiabilityItem,
+  type HubSourceStatus,
 } from "@/lib/api/asset-hub-snapshot";
 
-export const SNAPSHOT_STALE_HOURS = 48;
+const CACHE_ID = "singleton";
 const REFRESH_TTL_HOURS = 6;
 
-export interface SnapshotItemSummary {
-  category: string;
-  label: string;
-  valueKrw: number;
-}
-
-export interface SnapshotSourceSummary {
-  source: string;
+export interface NetWorthSummary {
+  /** 허브가 계산한 순자산 (원). 소비자는 재계산하지 않는다 */
+  netWorthKrw: number;
   asOf: string;
   collectedAt: string;
-  stale: boolean;
-  asOfDaysAgo: number;
-  subtotalKrw: number;
-  items: SnapshotItemSummary[];
-}
-
-export interface SnapshotSummary {
-  totalKrw: number;
-  sources: SnapshotSourceSummary[];
-  configuredSourceCount: number;
+  assets: HubAssetItem[];
+  liabilities: HubLiabilityItem[];
+  /** 허브가 전파한 부분 소스 상태 — stale 판정은 허브 소관 */
+  sources: HubSourceStatus[];
+  /** my_portal 연동 설정 여부 (미설정 시 게이지는 안내 문구만) */
+  configured: boolean;
   errors: string[];
 }
 
-interface SnapshotRow {
-  source: string;
-  category: string;
-  label: string;
-  valueKrw: bigint;
-  asOf: Date;
-  collectedAt: Date;
-}
-
-/** 캐시 행 → 소스별 요약 (순수 함수, 테스트 대상) */
-export function summarizeSnapshotRows(
-  rows: SnapshotRow[],
-  now: Date = new Date()
-): { totalKrw: number; sources: SnapshotSourceSummary[] } {
-  const bySource = new Map<string, SnapshotRow[]>();
-  for (const row of rows) {
-    const group = bySource.get(row.source) ?? [];
-    bySource.set(row.source, [...group, row]);
+/** 캐시 payload → 계약 항목. 파싱 실패 시 빈 값 (캐시는 파생 데이터라 치명적이지 않다) */
+function parsePayload(payload: string): {
+  assets: HubAssetItem[];
+  liabilities: HubLiabilityItem[];
+  sources: HubSourceStatus[];
+} {
+  try {
+    const parsed = hubNetWorthSchema
+      .pick({ assets: true, liabilities: true, sources: true })
+      .safeParse(JSON.parse(payload));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // fall through
   }
-
-  const sources = [...bySource.entries()].map(([source, sourceRows]) => {
-    const asOf = sourceRows.reduce(
-      (latest, r) => (r.asOf > latest ? r.asOf : latest),
-      sourceRows[0].asOf
-    );
-    const collectedAt = sourceRows.reduce(
-      (latest, r) => (r.collectedAt > latest ? r.collectedAt : latest),
-      sourceRows[0].collectedAt
-    );
-    const ageMs = now.getTime() - asOf.getTime();
-    const subtotalKrw = sourceRows.reduce((sum, r) => sum + Number(r.valueKrw), 0);
-
-    return {
-      source,
-      asOf: asOf.toISOString(),
-      collectedAt: collectedAt.toISOString(),
-      stale: ageMs > SNAPSHOT_STALE_HOURS * 60 * 60 * 1000,
-      asOfDaysAgo: Math.max(0, Math.floor(ageMs / (24 * 60 * 60 * 1000))),
-      subtotalKrw,
-      items: sourceRows.map((r) => ({
-        category: r.category,
-        label: r.label,
-        valueKrw: Number(r.valueKrw),
-      })),
-    };
-  });
-
-  const sorted = [...sources].sort((a, b) => a.source.localeCompare(b.source));
-  const totalKrw = sorted.reduce((sum, s) => sum + s.subtotalKrw, 0);
-
-  return { totalKrw, sources: sorted };
+  return { assets: [], liabilities: [], sources: [] };
 }
 
 /**
- * 설정된 모든 소스에서 스냅샷을 수집해 캐시를 교체한다.
- * 소스 단위 트랜잭션 — 한 소스가 실패해도 다른 소스와 기존 캐시는 유지.
+ * 허브에서 순자산을 받아 캐시를 교체한다.
+ * 실패해도 기존 캐시는 건드리지 않는다 (last-known-good).
  */
-export async function collectExternalSnapshots(): Promise<{ errors: string[] }> {
-  const configs = getConfiguredSnapshotSources();
-  const errors: string[] = [];
+export async function collectHubNetWorth(): Promise<{ errors: string[] }> {
+  const config = getConfiguredHubSource();
+  if (!config) return { errors: [] };
 
-  for (const config of configs) {
-    try {
-      const snapshot = await fetchAssetHubSnapshot(config);
-      const asOf = new Date(snapshot.as_of);
-      if (Number.isNaN(asOf.getTime())) {
-        throw new Error(`${config.source} as_of 파싱 실패: ${snapshot.as_of}`);
-      }
+  try {
+    const data = await fetchHubNetWorth(config);
 
-      await prisma.$transaction([
-        prisma.externalAssetSnapshot.deleteMany({
-          where: { source: snapshot.source },
-        }),
-        prisma.externalAssetSnapshot.createMany({
-          data: snapshot.items.map((item) => ({
-            source: snapshot.source,
-            category: item.category,
-            label: item.label,
-            valueKrw: BigInt(item.value_krw),
-            asOf,
-          })),
-        }),
-      ]);
-
-      logger.info(
-        `[snapshot] ${config.source} 수집 완료 (${snapshot.items.length}개 카테고리)`
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : `${config.source} 수집 실패`;
-      logger.error(`[snapshot] ${config.source} 수집 실패:`, error);
-      errors.push(message);
+    const asOf = new Date(data.as_of);
+    if (Number.isNaN(asOf.getTime())) {
+      throw new Error(`as_of 파싱 실패: ${data.as_of}`);
     }
-  }
 
-  return { errors };
+    // 항등식은 허브가 보장하는 계약 — 값을 고치지 않고 위반 사실만 남긴다
+    if (!checkNetWorthIdentity(data)) {
+      logger.warn(
+        "[net-worth] §2.4 항등식 위반: Σassets − Σliabilities ≠ net_worth_krw"
+      );
+    }
+
+    const payload = JSON.stringify({
+      assets: data.assets,
+      liabilities: data.liabilities,
+      sources: data.sources,
+    });
+
+    const row = {
+      netWorthKrw: BigInt(data.net_worth_krw),
+      asOf,
+      collectedAt: new Date(),
+      payload,
+    };
+
+    await prisma.hubNetWorthCache.upsert({
+      where: { id: CACHE_ID },
+      update: row,
+      create: { id: CACHE_ID, ...row },
+    });
+
+    logger.info(`[net-worth] my_portal 수집 완료 (${data.assets.length}개 자산 항목)`);
+    return { errors: [] };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "my_portal 순자산 수집 실패";
+    logger.error("[net-worth] my_portal 수집 실패:", error);
+    return { errors: [message] };
+  }
 }
 
 /**
- * 스냅샷 합산 요약. 캐시가 없거나 REFRESH_TTL을 넘겼으면 수집을 먼저 시도한다.
+ * 자본 게이지용 순자산 요약. 캐시가 없거나 TTL이 지났으면 먼저 수집한다.
  * forceRefresh는 수동 갱신 버튼용.
  */
-export async function getSnapshotSummary(
+export async function getNetWorthSummary(
   options: { forceRefresh?: boolean } = {}
-): Promise<SnapshotSummary> {
-  const configs = getConfiguredSnapshotSources();
+): Promise<NetWorthSummary> {
+  const configured = getConfiguredHubSource() !== null;
   let errors: string[] = [];
 
-  if (configs.length > 0) {
-    const existing = await prisma.externalAssetSnapshot.findFirst({
-      orderBy: { collectedAt: "desc" },
+  if (configured) {
+    const cached = await prisma.hubNetWorthCache.findUnique({
+      where: { id: CACHE_ID },
       select: { collectedAt: true },
     });
     const ttlExpired =
-      !existing ||
-      Date.now() - existing.collectedAt.getTime() >
+      !cached ||
+      Date.now() - cached.collectedAt.getTime() >
         REFRESH_TTL_HOURS * 60 * 60 * 1000;
 
     if (options.forceRefresh || ttlExpired) {
-      const result = await collectExternalSnapshots();
+      const result = await collectHubNetWorth();
       errors = result.errors;
     }
   }
 
-  const rows = await prisma.externalAssetSnapshot.findMany({
-    orderBy: [{ source: "asc" }, { category: "asc" }],
+  const row = await prisma.hubNetWorthCache.findUnique({
+    where: { id: CACHE_ID },
   });
 
-  const { totalKrw, sources } = summarizeSnapshotRows(rows);
+  if (!row) {
+    return {
+      netWorthKrw: 0,
+      asOf: "",
+      collectedAt: "",
+      assets: [],
+      liabilities: [],
+      sources: [],
+      configured,
+      errors,
+    };
+  }
+
+  const { assets, liabilities, sources } = parsePayload(row.payload);
 
   return {
-    totalKrw,
+    netWorthKrw: Number(row.netWorthKrw),
+    asOf: row.asOf.toISOString(),
+    collectedAt: row.collectedAt.toISOString(),
+    assets,
+    liabilities,
     sources,
-    configuredSourceCount: configs.length,
+    configured,
     errors,
   };
 }

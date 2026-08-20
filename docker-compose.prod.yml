@@ -20,13 +20,14 @@ services:
       - CRON_SECRET=${CRON_SECRET}
       - EXTERNAL_PORTFOLIO_API_URL=${EXTERNAL_PORTFOLIO_API_URL}
       - EXTERNAL_PORTFOLIO_API_KEY=${EXTERNAL_PORTFOLIO_API_KEY}
-      # 자산 허브 — 스냅샷 소비 + 매도 시뮬 프록시 (Asset Hub §2·§1.5.3, 읽기 전용).
-      # 미설정 시 해당 기능만 비활성(무해). portfolio-backend는 127.0.0.1 바인딩이라
-      # 네트워크 합류 후 컨테이너명 접근, asset(naver-crawler-web)은 NAS IP로 접근.
+      # 자본 게이지 — 허브 순자산 단일 소스 (Asset Hub §2.4, 읽기 전용).
+      # 부분 소스를 직접 합산하면 현금·비부동산 부채가 빠진다.
+      - MY_PORTAL_URL=${MY_PORTAL_URL:-}
+      - MY_PORTAL_SNAPSHOT_TOKEN=${MY_PORTAL_SNAPSHOT_TOKEN:-}
+      # 매도 시뮬 프록시 — asset_manager 직접 연결 (§1.5.3, 게이지와 별개 경로).
+      # asset(naver-crawler-web)은 0.0.0.0:3000 공개라 NAS IP로 접근.
       - ASSET_MANAGER_URL=${ASSET_MANAGER_URL:-}
       - ASSET_MANAGER_SNAPSHOT_TOKEN=${ASSET_MANAGER_SNAPSHOT_TOKEN:-}
-      - PORTFOLIO_MANAGER_URL=${PORTFOLIO_MANAGER_URL:-}
-      - PORTFOLIO_MANAGER_SNAPSHOT_TOKEN=${PORTFOLIO_MANAGER_SNAPSHOT_TOKEN:-}
       # 브라우저 딥링크용 공개 URL (서버 컴포넌트에서 런타임 참조)
       - NEXT_PUBLIC_ASSET_MANAGER_URL=${NEXT_PUBLIC_ASSET_MANAGER_URL:-}
       - BACKUP_DIR=/backups
@@ -40,15 +41,10 @@ services:
       retries: 3
       start_period: 40s
     networks:
+      # §2.4 전환으로 portfolio-backend 직접 호출이 사라져 외부 네트워크 합류가 불필요해졌다.
+      # my_portal(0.0.0.0:8100)·asset(0.0.0.0:3000) 모두 호스트 포트로 접근한다.
       - retirefarm-network
-      # portfolio-backend가 127.0.0.1:8070에만 바인딩돼 있어 호스트 포트로는 접근 불가 —
-      # portfolio compose의 네트워크에 합류해 컨테이너명으로 직접 호출한다 (my_portal과 동일).
-      # 주의: portfolio 스택이 NAS에 없으면 up이 실패하므로 이 네트워크는 NAS 전용 전제.
-      - portfolio-net
 
 networks:
   retirefarm-network:
     driver: bridge
-  portfolio-net:
-    external: true
-    name: portfolio_manager_portfolio-network

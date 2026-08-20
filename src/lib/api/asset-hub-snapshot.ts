@@ -1,43 +1,54 @@
 /**
- * Asset Hub 스냅샷 소비 클라이언트 (Asset Hub Integration §2)
+ * 허브 순자산 소비 클라이언트 (Asset Hub Integration §2.4)
  *
- * 각 제공 서비스(portfolio_manager, asset_manager)의 GET /api/assets/snapshot을
- * 읽기 전용으로 소비한다. 인증은 웹 세션과 분리된 불투명 Bearer 서비스 토큰
- * (각 제공 서비스가 CLI로 발급, DB엔 sha256만 저장).
+ * my_portal `GET /api/assets/net-worth` **단일 소스**를 읽기 전용으로 소비한다.
  *
- * 지배 원칙(§1.5): 이 클라이언트는 절대 역방향으로 쓰지 않는다.
- * 값이 틀렸으면 소유 서비스에서 고친다.
+ * 순자산 계산은 my_portal에만 존재한다 (§1.5 지배 원칙의 연장 — 합산 로직도 SSOT).
+ * retirefarm은 portfolio/asset을 직접 합산하지 않는다: 그렇게 하면 현금·비부동산
+ * 부채가 빠져 순자산이 과대 표시된다. `net_worth_krw`를 그대로 쓰고 재계산하지 않는다.
  */
 
 import { z } from "zod";
 
-const snapshotOriginalSchema = z.object({
-  currency: z.string().min(1),
-  value: z.number(),
-  fx_rate: z.number(),
-  fx_as_of: z.string(),
-});
-
-const snapshotItemSchema = z.object({
+const assetItemSchema = z.object({
   category: z.string().min(1),
   label: z.string().min(1),
-  value_krw: z.number().int(),
-  original: snapshotOriginalSchema.optional(),
+  value_krw: z.number().int().nonnegative(),
+  // 값의 실제 소유 서비스 — "소유 서비스에서 수정" 딥링크 근거 (§1.5 single writer)
+  origin: z.string().min(1),
 });
 
-export const assetHubSnapshotSchema = z.object({
-  schema_version: z.literal(1),
+const liabilityItemSchema = z.object({
+  category: z.string().min(1),
+  label: z.string().min(1),
+  // 부채는 양수로 표현한다 (음수 금지 — §2.4 부호 규칙)
+  value_krw: z.number().int().nonnegative(),
+});
+
+const sourceStatusSchema = z.object({
   source: z.string().min(1),
   as_of: z.string().min(1),
-  base_currency: z.literal("KRW"),
-  items: z.array(snapshotItemSchema),
+  stale: z.boolean(),
+  last_error: z.string().optional(),
 });
 
-export type AssetHubSnapshot = z.infer<typeof assetHubSnapshotSchema>;
-export type AssetHubSnapshotItem = z.infer<typeof snapshotItemSchema>;
+export const hubNetWorthSchema = z.object({
+  schema_version: z.literal(1),
+  source: z.literal("my_portal"),
+  as_of: z.string().min(1),
+  base_currency: z.literal("KRW"),
+  net_worth_krw: z.number().int(),
+  assets: z.array(assetItemSchema),
+  liabilities: z.array(liabilityItemSchema),
+  sources: z.array(sourceStatusSchema).default([]),
+});
 
-export interface SnapshotSourceConfig {
-  source: string;
+export type HubNetWorth = z.infer<typeof hubNetWorthSchema>;
+export type HubAssetItem = z.infer<typeof assetItemSchema>;
+export type HubLiabilityItem = z.infer<typeof liabilityItemSchema>;
+export type HubSourceStatus = z.infer<typeof sourceStatusSchema>;
+
+export interface HubSourceConfig {
   baseUrl: string;
   token: string;
 }
@@ -45,58 +56,48 @@ export interface SnapshotSourceConfig {
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
- * 환경변수에 URL·토큰이 모두 설정된 소스만 반환한다.
- * 미설정 소스는 조용히 제외 — 대시보드는 설정된 소스만 합산한다.
+ * my_portal 연동 설정. URL·토큰이 모두 있어야 활성 — 미설정이면 null이고
+ * 자본 게이지는 "연동 없음"으로 표시된다 (기능만 비활성, 무해).
  */
-export function getConfiguredSnapshotSources(): SnapshotSourceConfig[] {
-  const candidates = [
-    {
-      source: "portfolio_manager",
-      baseUrl: process.env.PORTFOLIO_MANAGER_URL,
-      token: process.env.PORTFOLIO_MANAGER_SNAPSHOT_TOKEN,
-    },
-    {
-      source: "asset_manager",
-      baseUrl:
-        process.env.ASSET_MANAGER_URL || process.env.EXTERNAL_PORTFOLIO_API_URL,
-      token: process.env.ASSET_MANAGER_SNAPSHOT_TOKEN,
-    },
-  ];
-
-  return candidates
-    .filter((c): c is SnapshotSourceConfig & typeof c => Boolean(c.baseUrl && c.token))
-    .map((c) => ({
-      source: c.source,
-      baseUrl: c.baseUrl.replace(/\/$/, ""),
-      token: c.token,
-    }));
+export function getConfiguredHubSource(): HubSourceConfig | null {
+  const baseUrl = process.env.MY_PORTAL_URL;
+  const token = process.env.MY_PORTAL_SNAPSHOT_TOKEN;
+  if (!baseUrl || !token) return null;
+  return { baseUrl: baseUrl.replace(/\/$/, ""), token };
 }
 
 /**
- * 단일 소스의 스냅샷을 가져와 §2.2 계약으로 검증한다.
- * source 명의가 설정과 다르면 실패 처리 (잘못된 엔드포인트 연결 방지).
+ * Σassets − Σliabilities === net_worth_krw 항등식 확인.
+ * 허브가 보장하는 계약이라 **값을 고치지는 않는다** — 어긋나면 계약 위반이므로
+ * 호출부가 경고를 남길 수 있도록 결과만 돌려준다.
  */
-export async function fetchAssetHubSnapshot(
-  config: SnapshotSourceConfig
-): Promise<AssetHubSnapshot> {
-  const response = await fetch(`${config.baseUrl}/api/assets/snapshot`, {
+export function checkNetWorthIdentity(data: HubNetWorth): boolean {
+  const assets = data.assets.reduce((sum, a) => sum + a.value_krw, 0);
+  const liabilities = data.liabilities.reduce((sum, l) => sum + l.value_krw, 0);
+  return assets - liabilities === data.net_worth_krw;
+}
+
+/**
+ * 허브 순자산 조회. §2.4 계약으로 검증하고 source 명의까지 확인한다
+ * (잘못된 엔드포인트에 연결된 상태를 조용히 통과시키지 않기 위해).
+ */
+export async function fetchHubNetWorth(
+  config: HubSourceConfig
+): Promise<HubNetWorth> {
+  const response = await fetch(`${config.baseUrl}/api/assets/net-worth`, {
     headers: { Authorization: `Bearer ${config.token}` },
     cache: "no-store",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok) {
-    throw new Error(`${config.source} 스냅샷 응답 오류 (HTTP ${response.status})`);
+    throw new Error(`my_portal 순자산 응답 오류 (HTTP ${response.status})`);
   }
 
-  const parsed = assetHubSnapshotSchema.safeParse(await response.json());
+  const parsed = hubNetWorthSchema.safeParse(await response.json());
   if (!parsed.success) {
-    throw new Error(`${config.source} 스냅샷이 §2.2 계약과 불일치: ${parsed.error.issues[0]?.message}`);
-  }
-
-  if (parsed.data.source !== config.source) {
     throw new Error(
-      `스냅샷 source 불일치: 기대 ${config.source}, 실제 ${parsed.data.source}`
+      `my_portal 응답이 §2.4 계약과 불일치: ${parsed.error.issues[0]?.message}`
     );
   }
 

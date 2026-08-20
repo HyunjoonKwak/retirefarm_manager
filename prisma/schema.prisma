@@ -69,20 +69,16 @@ model FarmProfile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-// ==================== 외부 자산 스냅샷 (Asset Hub §2 소비자 캐시) ====================
-// portfolio_manager·asset_manager의 GET /api/assets/snapshot 응답을 카테고리 단위로
-// 캐시한다 (last-known-good). 원장은 각 소유 서비스에 있으며 여기에는 쓰기 UI/API가 없다.
-model ExternalAssetSnapshot {
-  id          String   @id @default(cuid())
-  source      String   // "portfolio_manager" | "asset_manager"
-  category    String   // §2.2 카테고리 레지스트리 (pension_dc, stock_kr, real_estate, ...)
-  label       String
-  valueKrw    BigInt   // 정수(원)
-  asOf        DateTime // 제공 서비스의 평가 기준시각
+// ==================== 허브 순자산 캐시 (Asset Hub §2.4 소비자) ====================
+// my_portal GET /api/assets/net-worth 응답을 통째로 캐시한다 (last-known-good).
+// 단일 행(singleton) — 순자산 계산은 my_portal 소관이고 retirefarm은 재계산하지 않으므로
+// 항목을 쪼개 저장할 이유가 없다. 쓰기 UI/API도 없다 (§1.5 지배 원칙).
+model HubNetWorthCache {
+  id          String   @id @default("singleton")
+  netWorthKrw BigInt   // 계약의 net_worth_krw 원본값 (정수, 원)
+  asOf        DateTime // 허브 집계 시각 (부분 소스 시각은 payload.sources에)
   collectedAt DateTime @default(now())
-
-  @@unique([source, category])
-  @@index([source])
+  payload     String   // §2.4 응답 원문 JSON (assets·liabilities·sources)
 }
 
 // ==================== 설립 비용 ====================
