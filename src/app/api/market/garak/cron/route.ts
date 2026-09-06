@@ -6,6 +6,7 @@ import { isValidCronRequest } from "@/lib/auth/guards";
 import {
   collectAndSaveAuctionData,
   cleanupOldAuctionData,
+  type CollectionStatus,
 } from "@/lib/services/garak-market";
 
 export const runtime = "nodejs";
@@ -66,6 +67,8 @@ export async function GET(request: NextRequest) {
     const results: Array<{
       userId: string;
       success: boolean;
+      status?: CollectionStatus;
+      issues?: string[];
       totalCount?: number;
       newCount?: number;
       error?: string;
@@ -87,13 +90,15 @@ export async function GET(request: NextRequest) {
           setting.targetProducts || undefined
         );
 
-        if (setting.autoCleanupEnabled) {
+        if (setting.autoCleanupEnabled && result.complete) {
           await cleanupOldAuctionData();
         }
 
         results.push({
           userId: setting.userId,
-          success: true,
+          success: result.complete,
+          status: result.status,
+          issues: result.issues,
           totalCount: result.totalCount,
           newCount: result.newCount,
         });
@@ -174,7 +179,11 @@ export async function POST(request: NextRequest) {
     );
 
     return NextResponse.json({
-      message: "수집이 완료되었습니다.",
+      message: result.complete ? "수집 확인이 완료되었습니다." : "수집 상태와 안내를 확인하세요.",
+      status: result.status,
+      complete: result.complete,
+      issues: result.issues,
+      guidance: result.guidance,
       targetDate: targetDate.toISOString(),
       targetProducts,
       totalCount: result.totalCount,

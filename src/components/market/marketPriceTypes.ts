@@ -9,6 +9,7 @@ export interface WatchlistItem {
   latestDate: string | null;
   unit: string | null;
   latestVariety: string | null;
+  latestGrade?: string | null;
   priceChange: number | null;
 }
 
@@ -102,6 +103,7 @@ export interface VarietyFacetsScope {
 
 export interface VarietyFacetsResponse {
   facets: VarietyFacet[];
+  units?: string[];
   scope: VarietyFacetsScope;
   asOf: string;
   collectionState: "stored_records_only";
@@ -114,6 +116,7 @@ export interface VarietyFacetsState {
   /** 요청을 식별하는 키. 늦게 도착한 응답은 키가 다르면 버린다. */
   queryKey: string;
   facets: VarietyFacet[];
+  units?: string[];
   scope: VarietyFacetsScope | null;
   asOf: string | null;
   error: string | null;
@@ -448,6 +451,7 @@ export function facetsStateFromResponse(
     status: "ready",
     queryKey: key,
     facets: data.facets,
+    units: data.units ?? [],
     scope: data.scope ?? null,
     asOf: data.asOf ?? null,
     error: null,

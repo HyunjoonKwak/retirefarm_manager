@@ -220,7 +220,9 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
     let completedSteps = 0;
     let totalNewRecords = 0;
     let totalTotalCount = 0;
-    let hasNoAuction = false;
+    const statuses: string[] = [];
+    const issues: string[] = [];
+    let guidance: string | null = null;
 
     try {
       for (const corpCode of selectedCorps) {
@@ -245,19 +247,44 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
 
         totalNewRecords += result.newCount || 0;
         totalTotalCount += result.totalCount || 0;
-        if (result.noAuction) hasNoAuction = true;
+        // status: SUCCESS | PARTIAL | FAILED | EMPTY (예전 응답은 noAuction만 있음)
+        statuses.push(result.status ?? (result.noAuction ? "EMPTY" : "SUCCESS"));
+        if (Array.isArray(result.issues)) {
+          issues.push(...result.issues.map((issue: string) => `${corpName}: ${issue}`));
+        }
+        if (result.guidance && !guidance) guidance = result.guidance;
         completedSteps++;
         setCollectProgressPercent(Math.round((completedSteps / totalSteps) * 100));
       }
 
-      setCollectProgress("수집 완료!");
+      const overall = statuses.every((s) => s === "FAILED")
+        ? "FAILED"
+        : statuses.some((s) => s === "FAILED" || s === "PARTIAL")
+          ? "PARTIAL"
+          : statuses.every((s) => s === "EMPTY")
+            ? "EMPTY"
+            : "SUCCESS";
+      const issueText = issues.slice(0, 3).join(" / ") + (issues.length > 3 ? ` 외 ${issues.length - 3}건` : "");
 
-      if (hasNoAuction && totalTotalCount === 0) {
-        toast.info(`${collectDate}은(는) 경매가 없는 날입니다. (휴장일/공휴일)`);
-      } else if (totalNewRecords > 0) {
-        toast.success(`${totalNewRecords}건의 새 데이터가 저장되었습니다.`);
+      if (overall === "FAILED") {
+        setCollectProgress(`수집 실패: ${issueText || "원인 확인 필요"}`);
+        toast.error(`수집 실패 — ${issueText || "원인 확인 필요"}`, { duration: 8000 });
+      } else if (overall === "PARTIAL") {
+        setCollectProgress(`일부만 수집됨: ${issueText}`);
+        toast.warning(
+          `일부만 수집되었습니다 (저장 ${totalNewRecords}건). ${issueText}. ${guidance ?? "사유와 조치는 수집 로그의 안내를 확인하세요."}`,
+          { duration: 10000 }
+        );
+      } else if (overall === "EMPTY") {
+        setCollectProgress("수집된 거래 0건");
+        toast.info(`${collectDate} 수집된 거래가 0건입니다. 휴장 여부는 확정하지 않습니다.`);
       } else {
-        toast.info("새로운 데이터가 없습니다. (이미 수집된 데이터)");
+        setCollectProgress("수집 완료!");
+        if (totalNewRecords > 0) {
+          toast.success(`${totalNewRecords}건의 새 데이터가 저장되었습니다. (조회 ${totalTotalCount}건)`);
+        } else {
+          toast.info(`새로운 데이터가 없습니다. (조회 ${totalTotalCount}건 모두 이미 저장됨)`);
+        }
       }
 
       fetchDataStats();

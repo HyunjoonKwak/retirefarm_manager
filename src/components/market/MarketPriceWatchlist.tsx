@@ -58,7 +58,7 @@ export function MarketPriceWatchlist({
             <Star className="h-5 w-5 text-yellow-500" />
             관심 품목
           </CardTitle>
-          <CardDescription>자주 확인하는 품목의 최신 시세입니다.</CardDescription>
+          <CardDescription>최신 거래일의 대표 규격 시세입니다. 등락은 같은 품종·등급·단위의 이전 거래와 비교합니다.</CardDescription>
         </CardHeader>
         <CardContent>
           {watchlist.length > 0 ? (
@@ -93,7 +93,10 @@ export function MarketPriceWatchlist({
                       <div className="text-right">
                         <p className="font-bold text-xs sm:text-sm">
                           {formatExactPrice(item.latestPrice)}
+                          {item.unit && <span className="text-xs font-normal"> / {item.unit}</span>}
                         </p>
+                        <p className="text-[10px] text-muted-foreground">{item.latestVariety || "품종 미상"} · {item.latestGrade || "등급 미상"}</p>
+                        {item.latestDate && <p className="text-[10px] text-muted-foreground">{new Date(item.latestDate).toLocaleDateString("ko-KR")} 거래</p>}
                         {item.priceChange !== null && (
                           <div
                             className={`flex items-center justify-end gap-0.5 text-[10px] sm:text-xs ${getPriceChangeColor(item.priceChange)}`}

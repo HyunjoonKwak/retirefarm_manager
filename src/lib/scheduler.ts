@@ -14,6 +14,13 @@ import {
 // 활성화된 Cron Job들을 저장하는 맵
 const activeCronJobs = new Map<string, ScheduledTask>();
 
+// 설정별 실행 중 표시 — 이전 수집이 끝나기 전에 같은 설정이 다시 트리거되면 건너뛴다
+const runningSettings = new Set<string>();
+
+export function isCollectionRunning(settingsId: string): boolean {
+  return runningSettings.has(settingsId);
+}
+
 /**
  * 수집 시간(HH:mm)을 cron 표현식으로 변환
  * @param collectTime 수집 시간 (HH:mm 형식)
@@ -62,6 +69,19 @@ export function getNextRunTime(
  * 여기서는 별도 SUCCESS 로그를 남기지 않는다 (이중 기록 방지).
  */
 async function executeCollection(settingsId: string) {
+  if (runningSettings.has(settingsId)) {
+    logger.warn(`[Scheduler] 이전 수집이 아직 실행 중이라 건너뜁니다: ${settingsId}`);
+    return;
+  }
+  runningSettings.add(settingsId);
+  try {
+    await executeCollectionInner(settingsId);
+  } finally {
+    runningSettings.delete(settingsId);
+  }
+}
+
+async function executeCollectionInner(settingsId: string) {
   const settings = await prisma.marketCollectionSettings.findUnique({
     where: { id: settingsId },
   });
@@ -92,10 +112,14 @@ async function executeCollection(settingsId: string) {
     );
 
     logger.info(
-      `[Scheduler] Collection done (${settingsId}): total=${result.totalCount}, new=${result.newCount}`
+      `[Scheduler] Collection done (${settingsId}): status=${result.status}, total=${result.totalCount}, new=${result.newCount}`
     );
 
-    if (settings.autoCleanupEnabled) {
+    if (!result.complete) {
+      logger.warn(
+        `[Scheduler] 수집이 완전하지 않아 정리(cleanup)를 건너뜁니다 (${settingsId}): ${result.issues.join(" | ") || result.status}`
+      );
+    } else if (settings.autoCleanupEnabled) {
       await cleanupOldAuctionData();
     }
   } catch (error) {

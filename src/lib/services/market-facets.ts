@@ -57,6 +57,7 @@ export async function getMarketVarietyFacets(
 
   return {
     facets,
+    units: [...new Set(periodGroups.map(row => row.unit).filter(Boolean))].sort(),
     scope: { productName, origin: origin || null, unit: unit || null, days },
     asOf: asOf.toISOString(),
     // Current collection logs cannot prove complete coverage. Do not infer absence.

@@ -34,6 +34,7 @@ import { MarketPriceFilter } from "./MarketPriceFilter";
 import { MarketPriceWeeklyTable } from "./MarketPriceWeeklyTable";
 import { MarketPriceDailyDetail } from "./MarketPriceDailyDetail";
 import { MarketPriceWatchlist } from "./MarketPriceWatchlist";
+import { MarketVarietyAnalysis } from "./MarketVarietyAnalysis";
 
 export function MarketPriceManager() {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -163,9 +164,9 @@ export function MarketPriceManager() {
 
   // 일별 자료에만 있는 단위 목록이라 날짜를 닫으면 비는데, 선택한 단위는 남겨 해제할 수 있게 한다.
   const unitOptions = useMemo(() => {
-    const uniqueUnits = new Set(dailyResults.map((r) => r.unit).filter(Boolean));
+    const uniqueUnits = new Set([...(facetsState.units ?? []), ...dailyResults.map((r) => r.unit).filter(Boolean)]);
     return preserveSelectedUnit(Array.from(uniqueUnits) as string[], selectedUnit);
-  }, [dailyResults, selectedUnit]);
+  }, [dailyResults, selectedUnit, facetsState.units]);
 
   const varietyOptionsResult = useMemo(
     () =>
@@ -698,7 +699,7 @@ export function MarketPriceManager() {
 
       {selectedProduct && (
         <>
-          <MarketPriceChart
+          {selectedUnit && <MarketPriceChart
             selectedProduct={selectedProduct}
             selectedVarieties={selectedVarieties}
             selectedOrigin={selectedOrigin}
@@ -708,7 +709,7 @@ export function MarketPriceManager() {
             loadingHistory={loadingHistory}
             viewDays={viewDays}
             onViewDaysChange={setViewDays}
-          />
+          />}
 
           <MarketPriceFilter
             origins={origins}
@@ -736,7 +737,9 @@ export function MarketPriceManager() {
             onDeletePreset={handleDeleteFilterPreset}
           />
 
-          <MarketPriceWeeklyTable
+          <MarketVarietyAnalysis productName={selectedProduct} origin={selectedOrigin} unit={selectedUnit} days={viewDays} onDaysChange={setViewDays} />
+          {!selectedUnit && <p className="text-sm text-muted-foreground">포장 가격 추이는 단위를 선택하면 표시됩니다. 전체 규격은 위 비교표에서 나눠 확인할 수 있습니다.</p>}
+          {selectedUnit && <MarketPriceWeeklyTable
             weeklyPriceData={weeklyPriceData}
             priceHistory={priceHistory}
             loadingHistory={loadingHistory}
@@ -744,7 +747,7 @@ export function MarketPriceManager() {
             weekOffset={weekOffset}
             onDateSelect={setSelectedDate}
             onWeekOffsetChange={setWeekOffset}
-          />
+          />}
         </>
       )}
 

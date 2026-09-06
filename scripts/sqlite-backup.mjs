@@ -21,14 +21,14 @@ export const backupScheduleSchema = z.object({
 export const defaultSchedule = { enabled: true, dayOfWeek: 0, hour: 2, minute: 0, retentionDays: 30 };
 export const backupFilenameSchema = z.string().regex(/^(backup_|pre_restore_)[A-Za-z0-9_-]+\.db(?:\.gz)?$/, '유효하지 않은 백업 파일명입니다.');
 
-export function backupDirectory() { return path.resolve(process.env.BACKUP_DIR || './backups'); }
-export function configDirectory() { return path.resolve(process.env.CONFIG_DIR || path.join(backupDirectory(), 'config')); }
+export function backupDirectory() { return path.resolve(/* turbopackIgnore: true */ process.env.BACKUP_DIR || './backups'); }
+export function configDirectory() { return path.resolve(/* turbopackIgnore: true */ process.env.CONFIG_DIR || path.join(backupDirectory(), 'config')); }
 export function databasePath() {
   const url = process.env.DATABASE_URL;
   if (!url?.startsWith('file:')) throw new Error('SQLite DATABASE_URL이 필요합니다.');
   const value = url.slice(5);
   if (!value || value.includes('?') || value === ':memory:') throw new Error('파일 SQLite DATABASE_URL이 필요합니다.');
-  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), 'prisma', value);
+  return path.isAbsolute(value) ? value : path.resolve(/* turbopackIgnore: true */ process.cwd(), 'prisma', value);
 }
 export function pendingRestorePath() { return `${databasePath()}.restore-pending`; }
 /** @param {string} file */
@@ -98,7 +98,7 @@ export async function stageRestore(filename) {
   try {
     await fs.mkdir(path.dirname(pending), { recursive: true });
     if (filename.endsWith('.gz')) {
-      await pipeline(createReadStream(source), createGunzip(), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+      await pipeline(createReadStream(/* turbopackIgnore: true */ source), createGunzip(), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
     } else {
       await fs.copyFile(source, temporary, fs.constants.COPYFILE_EXCL);
       await fs.chmod(temporary, 0o600);
@@ -161,7 +161,7 @@ export async function runScheduledBackup(now = new Date()) {
   const backup = await createBackup();
   await fs.writeFile(marker, slot, { mode: 0o600 });
   const cutoff = now.getTime() - schedule.retentionDays * 86400000;
-  for (const name of await fs.readdir(backupDirectory())) {
+  for (const name of await fs.readdir(/* turbopackIgnore: true */ backupDirectory())) {
     if (!name.startsWith('backup_') || !backupFilenameSchema.safeParse(name).success) continue;
     const file = path.join(backupDirectory(), name);
     const stat = await fs.lstat(file);
@@ -170,7 +170,7 @@ export async function runScheduledBackup(now = new Date()) {
   return backup;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && path.resolve(/* turbopackIgnore: true */ process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = process.argv[2];
   try {
     const result = command === 'apply-pending' ? await applyPendingRestore()

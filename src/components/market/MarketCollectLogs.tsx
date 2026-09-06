@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Clock, CheckCircle, XCircle, AlertCircle, Calendar } from "lucide-react";
+import { Clock, CheckCircle, XCircle, AlertCircle, AlertTriangle, CircleDashed } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
 
 interface CollectionLog {
@@ -41,11 +41,20 @@ function getStatusBadge(status: string) {
           성공
         </Badge>
       );
+    case "PARTIAL":
+      return (
+        <Badge variant="secondary" className="bg-amber-500 text-white">
+          <AlertTriangle className="h-3 w-3 mr-1" />
+          일부 수집
+        </Badge>
+      );
+    case "EMPTY":
     case "NO_AUCTION":
+      // 예전 NO_AUCTION 로그도 "0건"일 뿐 휴장 확정이 아니다 (HTML/오류 응답을 0건으로 읽었을 수 있음)
       return (
         <Badge variant="secondary" className="bg-gray-400 text-white">
-          <Calendar className="h-3 w-3 mr-1" />
-          휴장
+          <CircleDashed className="h-3 w-3 mr-1" />
+          0건
         </Badge>
       );
     case "FAILED":
@@ -74,7 +83,9 @@ export function MarketCollectLogs({ logs }: MarketCollectLogsProps) {
           수집 로그
         </CardTitle>
         <CardDescription className="text-xs sm:text-sm">
-          최근 14일간 수집 기록 (조회: API에서 가져온 건수 / 저장: 신규 저장 건수 / 중복: 이미 있던 건수)
+          최근 14일간 수집 기록 (조회: API에서 가져온 건수 / 저장: 신규 저장 건수 / 중복: 이미 있던 건수).
+          일부 수집·실패는 상태에 마우스를 올리면 원인이 보이며, 같은 조건으로 다시 수집하면 누락분이 채워집니다.
+          0건은 휴장 확정이 아닙니다.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -121,7 +132,16 @@ export function MarketCollectLogs({ logs }: MarketCollectLogsProps) {
                       {" / "}
                       <span className="text-orange-500">{(log.duplicateCount || 0).toLocaleString()}</span>
                     </TableCell>
-                    <TableCell>{getStatusBadge(log.status)}</TableCell>
+                    <TableCell>
+                      <span title={log.errorMessage || undefined} className="inline-flex flex-col gap-0.5">
+                        {getStatusBadge(log.status)}
+                        {log.errorMessage && (log.status === "PARTIAL" || log.status === "FAILED") && (
+                          <span className="text-[10px] text-muted-foreground max-w-[180px] truncate">
+                            {log.errorMessage}
+                          </span>
+                        )}
+                      </span>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

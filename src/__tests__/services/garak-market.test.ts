@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   parseXmlResponse,
+  parseGarakResponse,
+  GarakResponseError,
   parseKgFromUnit,
   formatDateKey,
   parseYmdDate,
@@ -63,10 +65,27 @@ describe("parseXmlResponse", () => {
     expect(result.items).toHaveLength(1);
   });
 
-  it("빈 응답은 빈 배열을 반환한다", () => {
-    const result = parseXmlResponse("<response></response>");
+  it("건수 태그가 없는 응답은 0건이 아니라 해석 실패로 본다", () => {
+    expect(() => parseXmlResponse("<response></response>")).toThrow(GarakResponseError);
+    expect(parseGarakResponse("<response></response>")).toMatchObject({ kind: "invalid", reason: "missing_count" });
+  });
+
+  it("건수 0이 명시된 응답만 정상 0건이다", () => {
+    const result = parseXmlResponse("<response><list_total_count>0</list_total_count></response>");
     expect(result.list_total_count).toBe(0);
     expect(result.items).toHaveLength(0);
+  });
+
+  it("HTML·오류 XML·빈 본문·항목 파싱 실패를 각각 구분한다", () => {
+    expect(parseGarakResponse("<!DOCTYPE html><html><body>로그인</body></html>")).toMatchObject({ kind: "invalid", reason: "html" });
+    expect(parseGarakResponse("<html lang=\"ko\"><head><title>서울시농수산식품공사</title></head></html>")).toMatchObject({ kind: "invalid", reason: "html" });
+    const errorXml = parseGarakResponse("<response><error>Invalid ID for secret-user</error></response>");
+    expect(errorXml).toMatchObject({ kind: "invalid", reason: "error_xml", detail: "오류 XML 응답 (<error> 태그)" });
+    // 본문(자격증명이 반사될 수 있음)은 detail에 넣지 않는다
+    expect(JSON.stringify(errorXml)).not.toContain("secret-user");
+    expect(parseGarakResponse("<list_total_count>0</list_total_count><list><PUMMOK>무</PUMMOK><PPRICE>1</PPRICE><CORP_NM>a</CORP_NM><ADJ_DT>20260901</ADJ_DT></list>")).toMatchObject({ kind: "invalid", reason: "count_mismatch" });
+    expect(parseGarakResponse("   ")).toMatchObject({ kind: "invalid", reason: "empty" });
+    expect(parseGarakResponse("<response><list_total_count>5</list_total_count><item>새 형식</item></response>")).toMatchObject({ kind: "invalid", reason: "no_items" });
   });
 });
 
