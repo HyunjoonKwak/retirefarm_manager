@@ -32,7 +32,7 @@ ENV NODE_ENV=production
 ENV TZ=Asia/Seoul
 
 # OpenSSL for Prisma (SQLite는 별도 클라이언트 불필요)
-RUN apt-get update && apt-get install -y openssl wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl wget sqlite3 && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -43,11 +43,12 @@ RUN mkdir -p /app/prisma/data && chown nextjs:nodejs /app/prisma/data
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/prisma ./prisma
+COPY --chown=nextjs:nodejs --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
 # 시작 스크립트 복사
+COPY scripts/sqlite-backup.mjs ./scripts/sqlite-backup.mjs
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && chown nextjs:nodejs /app/docker-entrypoint.sh
 

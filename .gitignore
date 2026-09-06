@@ -54,3 +54,7 @@ data-dev/
 # PWA files (generated during build by next-pwa)
 public/workbox-*.js
 public/workbox-*.js.map
+
+# Local snapshots and staged restore data
+/backups/
+*.restore-pending*

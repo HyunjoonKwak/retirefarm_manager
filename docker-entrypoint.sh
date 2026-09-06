@@ -15,6 +15,9 @@ if [ ! -f "/app/prisma/data/retirefarm.db" ]; then
     touch /app/prisma/data/retirefarm.db
 fi
 
+# 앱 연결 전에 예약 복원 적용. 실패하면 서버를 시작하지 않는다.
+node scripts/sqlite-backup.mjs apply-pending
+
 # Prisma 마이그레이션 실행 (DB 스키마 생성)
 echo "Running Prisma migrations..."
 npx prisma migrate deploy

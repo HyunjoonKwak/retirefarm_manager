@@ -25,7 +25,7 @@ docker compose up -d   # Production Docker
 ## Key Patterns
 
 - DB: SQLite via Prisma singleton (`src/lib/prisma.ts`), always `prisma generate` before build
-- Auth: NextAuth v4 + Portal SSO provider
+- Auth: NextAuth v4 + Kakao OAuth provider (explicit administrator enrollment)
 - UI: shadcn/ui + Radix + Tailwind, mobile-first
 - Validation: Zod schemas for all API input
 - Docker: multi-stage build, non-root user (nextjs), SQLite volume at `/app/prisma/data`
