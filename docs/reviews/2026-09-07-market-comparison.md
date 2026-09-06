@@ -73,4 +73,15 @@ docker exec retirefarm-app node scripts/market-label-audit.cjs --product 토마�
 
 전체 테스트 42파일 281건, 타입 검사 통과. 계정 분리·일별 통계 일치·별칭 도구 원문 보존은 임시 SQLite 통합 테스트로, 계정 전환·늦은 응답·화면 종료·저장 실패는 실제 React 훅 테스트로 확인했다. UTC 환경에서도 한국 거래일 기준의 조회 일치를 검증했다. 시세 컴포넌트는 모두 800줄 미만이다.
 
-운영 배포와 이미지 빌드 결과는 완료 후 기록한다. 실제 로그인한 브라우저의 시각 검증은 이번에 수행하지 않았다.
+실제 로그인한 브라우저의 시각 검증은 이번에 수행하지 않았다.
+
+### 운영 배포 결과
+
+- 구현 커밋 `95ff8a4`를 NAS에 배포했다. amd64/arm64 프로덕션 빌드와 standalone 초기화 파일 포함 검증을 통과했다.
+- 이미지 digest `sha256:869cde573f5ce456019ee3b18a499913379852cac59ffd25f8b726a9f0bf8163`가 NAS 실행 이미지와 일치한다.
+- 배포 전 백업: `/volume1/code_work/retirefarm_manager/backups/backup_20260907_083221.db.gz`.
+- migration `20260907010000_market_comparison_presets` 적용 성공. 기존 거래 **195,490건 보존**, 비교 조건 0건, 보충 대기 작업 0건을 확인했다. 운영 DB에 시험용 조건을 만들지 않았다.
+- Docker 상태 `healthy`, 예약 1/1 등록, `/api/health/ready`의 ready·marketSchedulerReady·marketRecoveryReady 모두 true다. 새 presets API는 비로그인 요청에 401을 반환한다.
+- 배포 이미지의 별칭 검토 CLI를 직접 실행해 토마토 107,993건과 품종 후보 6개 묶음을 다시 확인했다.
+- 최종 lint 오류 0건, 기존 경고 28건. 전체 테스트 281건 이후 정리한 요청 무효화 함수는 해당 훅 테스트 8건을 다시 통과했다.
+- 9월 7일 09:30 KST 정기 실행은 배포 확인 시각 기준 미래이며, 실제 실행 성공을 미리 확인한 것은 아니다.
