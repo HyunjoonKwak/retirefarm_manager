@@ -26,4 +26,8 @@
 
 ## 배포 결과
 
-완료 후 이미지와 운영 점검 결과를 기록한다.
+- 구현 커밋 `492b8d4`를 NAS 운영 환경에 배포했다. amd64/arm64 이미지 빌드와 업로드가 완료됐으며, 운영 이미지 digest는 `sha256:ca45eb69c2f4f7e8fcd3b83f54e1b436f0d1db8b331258ba8493f54a1cece5c7`이다.
+- 배포 전 백업: `/volume1/code_work/retirefarm_manager/backups/backup_20260907_064757.db.gz`.
+- 운영 migration `20260907000000_market_recovery` 적용 성공, Docker 상태 `healthy`, 예약 1/1 등록을 확인했다.
+- `/api/health/ready`에서 `ready`, `marketSchedulerReady`, `marketRecoveryReady` 모두 true를 확인했다. 최초 자동 점검이 정상 완료됐고 보충 작업은 0건이다. 정기 실행 시각 전 점검 결과이며, 09:30 정기 실행 성공을 의미하지 않는다.
+- 기존 거래 195,490건이 보존돼 있다. 타입 검사와 프로덕션 빌드 통과, lint 오류 0건(기존 경고 28건), 전체 테스트 230건 통과.
