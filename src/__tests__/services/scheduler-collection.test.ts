@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, collectMock, cleanupMock } = vi.hoisted(() => ({
+const { prismaMock, collectMock, cleanupMock, cronMock } = vi.hoisted(() => ({
+  cronMock: { validate: vi.fn<(expr: string) => boolean>(() => true), schedule: vi.fn(() => ({ stop: vi.fn() })) },
   prismaMock: {
     marketCollectionSettings: { findUnique: vi.fn(), findMany: vi.fn() },
     dataCollectionLog: { create: vi.fn() },
@@ -15,9 +16,7 @@ vi.mock("@/lib/services/garak-market", () => ({
   collectAndSaveAuctionData: collectMock,
   cleanupOldAuctionData: cleanupMock,
 }));
-vi.mock("node-cron", () => ({
-  default: { validate: () => true, schedule: () => ({ stop: vi.fn() }) },
-}));
+vi.mock("node-cron", () => ({ default: cronMock }));
 
 import { runScheduleNow, isCollectionRunning, clearAllSchedules, loadAllSchedules, getSchedulerStatus } from "@/lib/scheduler";
 
@@ -57,10 +56,26 @@ describe("scheduler readiness", () => {
     expect(getSchedulerStatus().ready).toBe(false);
     prismaMock.marketCollectionSettings.findMany.mockResolvedValue([{ ...SETTINGS, collectTime: "09:30", collectDays: "0,1,2,3,4,5,6" }]);
     expect(await loadAllSchedules()).toBe(1);
-    expect(getSchedulerStatus()).toEqual({ initialized: true, activeCount: 1, expectedCount: 1, ready: true });
+    expect(getSchedulerStatus()).toMatchObject({
+      initialized: true, activeCount: 1, expectedCount: 1, ready: true, lastLoadOk: true, lastError: null,
+    });
+    expect(getSchedulerStatus().lastLoadAt).toEqual(expect.any(String));
     prismaMock.marketCollectionSettings.findMany.mockRejectedValueOnce(new Error("DB unavailable"));
     expect(await loadAllSchedules()).toBe(0);
-    expect(getSchedulerStatus().ready).toBe(false);
+    expect(getSchedulerStatus()).toMatchObject({ ready: false, lastLoadOk: false, lastError: "DB unavailable" });
+  });
+  it("일부 설정의 cron 등록이 실패하면 initialized여도 ready가 아니고 원인이 남는다", async () => {
+    prismaMock.marketCollectionSettings.findMany.mockResolvedValue([
+      { ...SETTINGS, id: "ok", collectTime: "09:30", collectDays: "1" },
+      { ...SETTINGS, id: "bad", collectTime: "99:99", collectDays: "1" },
+    ]);
+    cronMock.validate.mockImplementation((expr: string) => !expr.startsWith("99 99"));
+    expect(await loadAllSchedules()).toBe(1);
+    expect(getSchedulerStatus()).toMatchObject({
+      initialized: true, activeCount: 1, expectedCount: 2, ready: false, lastLoadOk: false,
+      lastError: "1개 설정의 cron 등록 실패",
+    });
+    cronMock.validate.mockImplementation(() => true);
   });
   it("shares registered jobs across independently loaded module instances", async () => {
     prismaMock.marketCollectionSettings.findMany.mockResolvedValue([{ ...SETTINGS, collectTime: "09:30", collectDays: "1" }]);

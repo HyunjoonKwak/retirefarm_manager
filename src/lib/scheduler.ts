@@ -12,20 +12,51 @@ import {
 } from "@/lib/services/garak-market";
 
 // instrumentation과 라우트가 별도 번들로 로드되어도 같은 프로세스 상태를 공유한다.
-const shared = globalThis as typeof globalThis & {
-  marketSchedulerState?: { jobs: Map<string, ScheduledTask>; running: Set<string>; expected: Set<string>; initialized: boolean };
-};
+interface MarketSchedulerState {
+  jobs: Map<string, ScheduledTask>;
+  running: Set<string>;
+  expected: Set<string>;
+  /** loadAllSchedules가 한 번이라도 끝까지 실행됐는지 */
+  initialized: boolean;
+  /** 마지막 로드 시각 (ISO) */
+  lastLoadAt: string | null;
+  /** 마지막 로드가 설정 수만큼 모두 등록했는지 (실패·부분 등록이면 false) */
+  lastLoadOk: boolean | null;
+  lastError: string | null;
+}
+const shared = globalThis as typeof globalThis & { marketSchedulerState?: MarketSchedulerState };
 const state = shared.marketSchedulerState ??= {
   jobs: new Map<string, ScheduledTask>(), running: new Set<string>(), expected: new Set<string>(), initialized: false,
+  lastLoadAt: null, lastLoadOk: null, lastError: null,
 };
+// 핫 리로드로 이전 형태의 상태가 남아 있을 때 새 진단 필드를 채운다
+state.lastLoadAt ??= null;
+state.lastLoadOk ??= null;
+state.lastError ??= null;
 const activeCronJobs = state.jobs;
 const runningSettings = state.running;
 
+/**
+ * 진단 상태. ID·설정 값은 포함하지 않는다 (health 등 공개 응답에서도 안전).
+ * ready = 로드가 끝났고(initialized) 마지막 로드가 완전 성공했으며 등록 job 수가 기대 수와 같다.
+ */
 export function getSchedulerStatus() {
   const activeCount = activeCronJobs.size;
   const expectedCount = state.expected.size;
-  return { initialized: state.initialized, activeCount, expectedCount,
-    ready: state.initialized && activeCount === expectedCount };
+  return {
+    initialized: state.initialized,
+    activeCount,
+    expectedCount,
+    runningCount: runningSettings.size,
+    lastLoadAt: state.lastLoadAt,
+    lastLoadOk: state.lastLoadOk,
+    lastError: state.lastError,
+    ready: state.initialized && state.lastLoadOk === true && activeCount === expectedCount,
+  };
+}
+
+export function isMarketSchedulerReady(): boolean {
+  return getSchedulerStatus().ready;
 }
 
 export function isCollectionRunning(settingsId: string): boolean {
@@ -259,11 +290,17 @@ export async function loadAllSchedules(): Promise<number> {
     }
 
     state.initialized = true;
+    state.lastLoadAt = new Date().toISOString();
+    state.lastLoadOk = loadedCount === settings.length;
+    state.lastError = state.lastLoadOk ? null : `${settings.length - loadedCount}개 설정의 cron 등록 실패`;
     // 부팅 진단은 운영 환경에서도 한 줄 남긴다. 사용자/설정 ID는 포함하지 않는다.
     console.info(`[Scheduler] Loaded ${loadedCount}/${settings.length} schedule(s), ready=${getSchedulerStatus().ready}`);
     return loadedCount;
   } catch (error) {
     state.initialized = false;
+    state.lastLoadAt = new Date().toISOString();
+    state.lastLoadOk = false;
+    state.lastError = error instanceof Error ? error.message : String(error);
     logger.error("[Scheduler] Failed to load schedules:", error);
     return 0;
   }
