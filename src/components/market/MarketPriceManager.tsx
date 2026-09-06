@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +14,20 @@ import {
   NoAuctionDates,
   DailyDetailResult,
   DEFAULT_PRODUCTS,
+  PERIOD_OPTIONS,
   SortField,
   SortDirection,
-  parseLocalDate,
-  formatLocalDateStr,
+  VarietyFacetsState,
+  EMPTY_FACETS_STATE,
+  buildFacetsQueryKey,
+  buildVarietyOptions,
+  preserveSelectedUnit,
+  createLatestRequestGuard,
+  computeWeeklyPriceData,
+  filterAndSortDailyResults,
+  summarizeDailyResults,
+  buildFacetsUrl,
+  facetsStateFromResponse,
 } from "./marketPriceTypes";
 import { MarketPriceChart } from "./MarketPriceChart";
 import { MarketPriceFilter } from "./MarketPriceFilter";
@@ -62,6 +72,16 @@ export function MarketPriceManager() {
   const [selectedOrigin, setSelectedOrigin] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [viewDays, setViewDays] = useState("30");
+
+  // 산지 연동 품종 후보 (facets). 품종 선택에는 의존하지 않는다.
+  const [facetsState, setFacetsState] = useState<VarietyFacetsState>(EMPTY_FACETS_STATE);
+  const [showAllVarieties, setShowAllVarieties] = useState(false);
+
+  // 늦게 도착한 응답이 새 조건의 결과를 덮지 않도록 요청별 가드
+  const facetsGuard = useRef(createLatestRequestGuard());
+  const listsGuard = useRef(createLatestRequestGuard());
+  const historyGuard = useRef(createLatestRequestGuard());
+  const dailyGuard = useRef(createLatestRequestGuard());
 
   // Filter presets
   const [filterPresets, setFilterPresets] = useState<SavedFilterPreset[]>(() => {
@@ -110,115 +130,26 @@ export function MarketPriceManager() {
     localStorage.setItem("market_filterPresets", JSON.stringify(filterPresets));
   }, [filterPresets]);
 
-  // Weekly price data computation
-  const weeklyPriceData = useMemo(() => {
-    if (priceHistory.length === 0 && noAuctionDates.length === 0) {
-      return { weekStart: new Date(), weekEnd: new Date(), data: [], noAuctionSet: new Set<string>() };
-    }
+  // Weekly price data computation (pure helper in marketPriceTypes)
+  const weeklyPriceData = useMemo(
+    () => computeWeeklyPriceData(priceHistory, noAuctionDates, weekOffset),
+    [priceHistory, weekOffset, noAuctionDates]
+  );
 
-    const noAuctionSet = new Set(noAuctionDates);
-    const sortedHistory = [...priceHistory].sort(
-      (a, b) => parseLocalDate(b.date).getTime() - parseLocalDate(a.date).getTime()
-    );
+  // Filtered daily results — 산지는 서버 history/facets와 같은 contains 규칙
+  const filteredDailyResults = useMemo(
+    () =>
+      filterAndSortDailyResults(dailyResults, {
+        selectedVarieties,
+        selectedOrigin,
+        selectedUnit,
+        sortField,
+        sortDirection,
+      }),
+    [dailyResults, selectedVarieties, selectedOrigin, selectedUnit, sortField, sortDirection]
+  );
 
-    let latestDateObj: Date;
-    if (sortedHistory.length > 0) {
-      latestDateObj = parseLocalDate(sortedHistory[0].date);
-    } else if (noAuctionDates.length > 0) {
-      const sortedNoAuction = [...noAuctionDates].sort().reverse();
-      latestDateObj = parseLocalDate(sortedNoAuction[0]);
-    } else {
-      return { weekStart: new Date(), weekEnd: new Date(), data: [], noAuctionSet };
-    }
-
-    const dayOfWeek = latestDateObj.getDay();
-    const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const currentMonday = new Date(latestDateObj);
-    currentMonday.setDate(latestDateObj.getDate() + daysToMonday);
-    currentMonday.setHours(0, 0, 0, 0);
-
-    const weekStart = new Date(currentMonday);
-    weekStart.setDate(weekStart.getDate() - weekOffset * 7);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-
-    const weekDataMap = new Map<string, PriceHistory>();
-    sortedHistory.forEach((p) => {
-      const dateKey = p.date.split("T")[0];
-      const pDate = parseLocalDate(p.date);
-      if (pDate >= weekStart && pDate <= weekEnd) {
-        weekDataMap.set(dateKey, p);
-      }
-    });
-
-    const fullWeek: (PriceHistory | null)[] = [];
-    for (let i = 0; i < 7; i++) {
-      const targetDate = new Date(weekStart);
-      targetDate.setDate(weekStart.getDate() + i);
-      const dateStr = formatLocalDateStr(targetDate);
-      fullWeek.push(weekDataMap.get(dateStr) || null);
-    }
-
-    return { weekStart, weekEnd, data: fullWeek, noAuctionSet };
-  }, [priceHistory, weekOffset, noAuctionDates]);
-
-  // Filtered daily results
-  const filteredDailyResults = useMemo(() => {
-    let results = [...dailyResults];
-
-    if (selectedVarieties.length > 0) {
-      results = results.filter((r) => r.variety && selectedVarieties.includes(r.variety));
-    }
-    if (selectedOrigin) {
-      results = results.filter((r) => r.origin === selectedOrigin);
-    }
-    if (selectedUnit) {
-      results = results.filter((r) => r.unit === selectedUnit);
-    }
-
-    if (sortField) {
-      results.sort((a, b) => {
-        let aVal: string | number = "";
-        let bVal: string | number = "";
-
-        switch (sortField) {
-          case "price": aVal = a.price; bVal = b.price; break;
-          case "quantity": aVal = a.quantity; bVal = b.quantity; break;
-          case "origin": aVal = a.origin || ""; bVal = b.origin || ""; break;
-          case "unit": aVal = a.unit; bVal = b.unit; break;
-          case "variety": aVal = a.variety || ""; bVal = b.variety || ""; break;
-          case "corporation": aVal = a.corporation; bVal = b.corporation; break;
-        }
-
-        if (typeof aVal === "number" && typeof bVal === "number") {
-          return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
-        }
-        const comparison = String(aVal).localeCompare(String(bVal));
-        return sortDirection === "asc" ? comparison : -comparison;
-      });
-    }
-
-    return results;
-  }, [dailyResults, selectedVarieties, selectedOrigin, selectedUnit, sortField, sortDirection]);
-
-  const filteredDailyStats = useMemo(() => {
-    if (filteredDailyResults.length === 0) return null;
-    const prices = filteredDailyResults.map((r) => r.price);
-    const totalQuantity = filteredDailyResults.reduce((sum, r) => sum + r.quantity, 0);
-    const totalTradeAmount = filteredDailyResults.reduce(
-      (sum, r) => sum + r.price * r.quantity,
-      0
-    );
-    const weightedAvgPrice = totalQuantity > 0 ? Math.round(totalTradeAmount / totalQuantity) : 0;
-    return {
-      avgPrice: weightedAvgPrice,
-      maxPrice: Math.max(...prices),
-      minPrice: Math.min(...prices),
-      tradeCount: filteredDailyResults.length,
-      totalQuantity,
-      totalTradeAmount,
-    };
-  }, [filteredDailyResults]);
+  const filteredDailyStats = useMemo(() => summarizeDailyResults(filteredDailyResults), [filteredDailyResults]);
 
   const originOptions = useMemo(() => {
     const uniqueOrigins = new Set(dailyResults.map((r) => r.origin).filter(Boolean));
@@ -230,10 +161,31 @@ export function MarketPriceManager() {
     return Array.from(uniqueVarieties) as string[];
   }, [dailyResults]);
 
+  // 일별 자료에만 있는 단위 목록이라 날짜를 닫으면 비는데, 선택한 단위는 남겨 해제할 수 있게 한다.
   const unitOptions = useMemo(() => {
     const uniqueUnits = new Set(dailyResults.map((r) => r.unit).filter(Boolean));
-    return Array.from(uniqueUnits) as string[];
-  }, [dailyResults]);
+    return preserveSelectedUnit(Array.from(uniqueUnits) as string[], selectedUnit);
+  }, [dailyResults, selectedUnit]);
+
+  const varietyOptionsResult = useMemo(
+    () =>
+      buildVarietyOptions({
+        varieties,
+        facetsState: facetsState.queryKey === buildFacetsQueryKey(selectedProduct || "", selectedOrigin, selectedUnit, viewDays)
+          ? facetsState : { ...EMPTY_FACETS_STATE, status: "loading" },
+        selectedVarieties,
+        showAll: showAllVarieties,
+      }),
+    [varieties, facetsState, selectedVarieties, showAllVarieties, selectedProduct, selectedOrigin, selectedUnit, viewDays]
+  );
+
+  const canExtendPeriod = PERIOD_OPTIONS.findIndex((o) => o.value === viewDays) < PERIOD_OPTIONS.length - 1;
+
+  function handleExtendPeriod() {
+    const index = PERIOD_OPTIONS.findIndex((o) => o.value === viewDays);
+    const next = PERIOD_OPTIONS[index + 1];
+    if (next) setViewDays(next.value);
+  }
 
   const fetchWatchlist = useCallback(async () => {
     try {
@@ -256,27 +208,57 @@ export function MarketPriceManager() {
   }, []);
 
   const fetchVarieties = useCallback(async (productName: string) => {
+    const signal = listsGuard.current.start(productName);
+    setVarieties([]); setOrigins([]);
     try {
       const [varietiesRes, originsRes] = await Promise.all([
         fetch(
-          `/api/market/garak?action=varieties&productName=${encodeURIComponent(productName)}`
+          `/api/market/garak?action=varieties&productName=${encodeURIComponent(productName)}`, { signal }
         ),
         fetch(
-          `/api/market/garak?action=origins&productName=${encodeURIComponent(productName)}`
+          `/api/market/garak?action=origins&productName=${encodeURIComponent(productName)}`, { signal }
         ),
       ]);
       const [varietiesData, originsData] = await Promise.all([
         varietiesRes.json(),
         originsRes.json(),
       ]);
+      if (!listsGuard.current.isLatest(productName, signal)) return;
+      if (!varietiesRes.ok || !originsRes.ok) throw new Error("목록 조회 실패");
       setVarieties(varietiesData.varieties || []);
       setOrigins(originsData.origins || []);
     } catch (error) {
+      if (!listsGuard.current.isLatest(productName, signal)) return;
       console.error("Failed to fetch varieties:", error);
       setVarieties([]);
       setOrigins([]);
     }
   }, []);
+
+  // 품종 후보(facets): 품목·산지·단위·기간에만 의존. 오류는 빈 목록으로 덮지 않고 error 상태로 남긴다.
+  const fetchFacets = useCallback(
+    async (productName: string, origin: string | null, unit: string | null, days: string) => {
+      const key = buildFacetsQueryKey(productName, origin, unit, days);
+      const signal = facetsGuard.current.start(key);
+      setFacetsState({ ...EMPTY_FACETS_STATE, status: "loading", queryKey: key });
+      try {
+        const response = await fetch(buildFacetsUrl(productName, origin, unit, days), { signal });
+        const data = await response.json().catch(() => null);
+        if (!facetsGuard.current.isLatest(key, signal)) return;
+        setFacetsState(facetsStateFromResponse(key, response.ok, response.status, data));
+      } catch (error) {
+        if (signal.aborted || !facetsGuard.current.isLatest(key, signal)) return;
+        console.error("Failed to fetch variety facets:", error);
+        setFacetsState({
+          ...EMPTY_FACETS_STATE,
+          status: "error",
+          queryKey: key,
+          error: error instanceof Error ? error.message : "요청 실패",
+        });
+      }
+    },
+    []
+  );
 
   const fetchPriceHistory = useCallback(
     async (
@@ -286,7 +268,10 @@ export function MarketPriceManager() {
       days?: string,
       unit?: string | null
     ) => {
+      const key = JSON.stringify([productName, varieties ?? [], origin ?? "", days || viewDays, unit ?? ""]);
+      const signal = historyGuard.current.start(key);
       setLoadingHistory(true);
+      setPriceHistory([]); setNoAuctionDates([]);
       try {
         let url = `/api/market/garak?action=history&productName=${encodeURIComponent(productName)}&days=${days || viewDays}`;
         if (varieties && varieties.length > 0) {
@@ -295,33 +280,41 @@ export function MarketPriceManager() {
         if (origin) url += `&origin=${encodeURIComponent(origin)}`;
         if (unit) url += `&unit=${encodeURIComponent(unit)}`;
 
-        const response = await fetch(url);
+        const response = await fetch(url, { signal });
         const data = await response.json();
+        if (!historyGuard.current.isLatest(key, signal)) return;
         setPriceHistory(data.history || []);
         setNoAuctionDates(data.noAuctionDates || []);
       } catch (error) {
+        if (signal.aborted || !historyGuard.current.isLatest(key, signal)) return;
         console.error("Failed to fetch price history:", error);
         setPriceHistory([]);
         setNoAuctionDates([]);
       } finally {
-        setLoadingHistory(false);
+        // 늦은 응답이 새 요청의 로딩 표시를 끄지 않게 한다
+        if (historyGuard.current.isLatest(key, signal)) setLoadingHistory(false);
       }
     },
     [viewDays]
   );
 
   const fetchDailyDetail = useCallback(async (date: string, productName: string) => {
+    const key = JSON.stringify([date, productName]);
+    const signal = dailyGuard.current.start(key);
     setLoadingDaily(true);
+    setDailyResults([]);
     try {
       const url = `/api/market/garak?action=dailyDetail&date=${date}&productName=${encodeURIComponent(productName)}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal });
       const data = await response.json();
+      if (!dailyGuard.current.isLatest(key, signal)) return;
       setDailyResults(data.results || []);
     } catch (error) {
+      if (signal.aborted || !dailyGuard.current.isLatest(key, signal)) return;
       console.error("Failed to fetch daily detail:", error);
       setDailyResults([]);
     } finally {
-      setLoadingDaily(false);
+      if (dailyGuard.current.isLatest(key, signal)) setLoadingDaily(false);
     }
   }, []);
 
@@ -342,20 +335,47 @@ export function MarketPriceManager() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [fetchLatestDate, fetchPriceHistory, selectedProduct, selectedVarieties, selectedOrigin, viewDays, selectedUnit]);
 
+  // 기존 품종/산지 목록 API — 품목이 바뀔 때만
   useEffect(() => {
     if (selectedProduct) {
       fetchVarieties(selectedProduct);
+    } else {
+      listsGuard.current.cancel();
+      setVarieties([]);
+      setOrigins([]);
+    }
+  }, [selectedProduct, fetchVarieties]);
+
+  // 품종 후보(facets) — 품종 선택은 의존성에 넣지 않는다 (A를 골라도 B 후보가 숨지 않게)
+  useEffect(() => {
+    if (selectedProduct) {
+      fetchFacets(selectedProduct, selectedOrigin, selectedUnit, viewDays);
+    } else {
+      facetsGuard.current.cancel();
+      setFacetsState(EMPTY_FACETS_STATE);
+    }
+  }, [selectedProduct, selectedOrigin, selectedUnit, viewDays, fetchFacets]);
+
+  useEffect(() => {
+    if (selectedProduct) {
       fetchPriceHistory(selectedProduct, selectedVarieties, selectedOrigin, viewDays, selectedUnit);
     }
-  }, [selectedProduct, selectedVarieties, selectedOrigin, selectedUnit, viewDays, fetchVarieties, fetchPriceHistory]);
+  }, [selectedProduct, selectedVarieties, selectedOrigin, selectedUnit, viewDays, fetchPriceHistory]);
 
   useEffect(() => {
     if (selectedDate && selectedProduct) {
       fetchDailyDetail(selectedDate, selectedProduct);
     } else {
+      dailyGuard.current.cancel();
       setDailyResults([]);
     }
   }, [selectedDate, selectedProduct, fetchDailyDetail]);
+
+  // 언마운트 시 진행 중 요청 정리
+  useEffect(() => {
+    const guards = [facetsGuard.current, historyGuard.current, dailyGuard.current, listsGuard.current];
+    return () => guards.forEach((guard) => guard.cancel());
+  }, []);
 
   function isAlreadyInWatchlist(productName: string, varieties?: string[], origin?: string) {
     const variety = varieties && varieties.length > 0 ? varieties[0] : undefined;
@@ -440,6 +460,7 @@ export function MarketPriceManager() {
     }
     setSelectedDate("");
     setWeekOffset(0);
+    setShowAllVarieties(false);
   }
 
   function handleSaveFilterPreset() {
@@ -690,17 +711,25 @@ export function MarketPriceManager() {
           />
 
           <MarketPriceFilter
-            varieties={varieties}
             origins={origins}
-            unitOptions={unitOptions}
-            selectedVarieties={selectedVarieties}
             selectedOrigin={selectedOrigin}
+            onOriginChange={setSelectedOrigin}
+            varietyOptions={varietyOptionsResult}
+            selectedVarieties={selectedVarieties}
+            onVarietiesChange={setSelectedVarieties}
+            showAllVarieties={showAllVarieties}
+            onShowAllVarietiesChange={setShowAllVarieties}
+            facetsStatus={facetsState.status}
+            facetsAsOf={facetsState.asOf}
+            facetsError={facetsState.error}
+            facetsScope={facetsState.scope}
+            unitOptions={unitOptions}
             selectedUnit={selectedUnit}
+            onUnitChange={setSelectedUnit}
+            canExtendPeriod={canExtendPeriod}
+            onExtendPeriod={handleExtendPeriod}
             filterPresets={filterPresets}
             presetNameInput={presetNameInput}
-            onVarietiesChange={setSelectedVarieties}
-            onOriginChange={setSelectedOrigin}
-            onUnitChange={setSelectedUnit}
             onPresetNameChange={setPresetNameInput}
             onSavePreset={handleSaveFilterPreset}
             onLoadPreset={handleLoadFilterPreset}

@@ -3,6 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { getSessionUser, isAdmin } from "@/lib/auth/guards";
+import { getMarketVarietyFacets } from "@/lib/services/market-facets";
 import {
   getAvailableProducts,
   getProductPriceHistory,
@@ -22,6 +23,7 @@ const getQuerySchema = z.object({
     .enum([
       "products",
       "varieties",
+      "facets",
       "origins",
       "history",
       "daily",
@@ -69,6 +71,19 @@ export async function GET(request: NextRequest) {
     const { action, productName, variety, origin, days, date: dateStr, unit } =
       parsed.data;
     const varietiesParam = parsed.data.varieties;
+
+    if (action === "facets") {
+      if (!productName?.trim()) {
+        return NextResponse.json({ error: "품목을 선택해 주세요." }, { status: 400 });
+      }
+      // Unlike legacy queries, malformed windows must not silently become 30 days.
+      const facetDays = z.coerce.number().int().min(1).max(730)
+        .safeParse(searchParams.get("days") ?? 30);
+      if (!facetDays.success) {
+        return NextResponse.json({ error: "조회 기간은 1~730일이어야 합니다." }, { status: 400 });
+      }
+      return NextResponse.json(await getMarketVarietyFacets(productName, facetDays.data, origin, unit));
+    }
 
     // 저장된 품목 목록 조회
     if (action === "products") {
