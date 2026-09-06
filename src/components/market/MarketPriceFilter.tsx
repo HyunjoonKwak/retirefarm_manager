@@ -3,7 +3,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -12,9 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Star, X, Loader2, AlertCircle } from "lucide-react";
+import { X, Loader2, AlertCircle } from "lucide-react";
 import {
-  SavedFilterPreset,
   VarietyFacetsScope,
   VarietyFacetsStatus,
   VarietyOption,
@@ -40,15 +38,12 @@ interface MarketPriceFilterProps {
   selectedUnit: string | null;
   onUnitChange: (unit: string | null) => void;
 
+  gradeOptions: string[];
+  selectedGrade: string | null;
+  onGradeChange: (grade: string | null) => void;
+
   canExtendPeriod: boolean;
   onExtendPeriod: () => void;
-
-  filterPresets: SavedFilterPreset[];
-  presetNameInput: string;
-  onPresetNameChange: (name: string) => void;
-  onSavePreset: () => void;
-  onLoadPreset: (preset: SavedFilterPreset) => void;
-  onDeletePreset: (id: string) => void;
 }
 
 function formatAsOf(asOf: string | null): string {
@@ -81,14 +76,11 @@ export function MarketPriceFilter({
   unitOptions,
   selectedUnit,
   onUnitChange,
+  gradeOptions,
+  selectedGrade,
+  onGradeChange,
   canExtendPeriod,
   onExtendPeriod,
-  filterPresets,
-  presetNameInput,
-  onPresetNameChange,
-  onSavePreset,
-  onLoadPreset,
-  onDeletePreset,
 }: MarketPriceFilterProps) {
   function toggleVariety(variety: string) {
     if (selectedVarieties.includes(variety)) {
@@ -98,7 +90,7 @@ export function MarketPriceFilter({
     }
   }
 
-  const hasFilter = selectedVarieties.length > 0 || selectedOrigin || selectedUnit;
+  const hasFilter = selectedVarieties.length > 0 || selectedOrigin || selectedUnit || selectedGrade;
   const { options, hiddenCount, availableCount, selectedUnavailable } = varietyOptions;
   const hasFilteredOut = selectedUnavailable.some((o) => o.status === "filtered_out");
   const hasNoPeriod = selectedUnavailable.some((o) => o.status === "no_period_records");
@@ -155,6 +147,30 @@ export function MarketPriceFilter({
             </div>
           )}
 
+          {gradeOptions.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label className="text-sm whitespace-nowrap" htmlFor="market-grade-select">
+                등급
+              </Label>
+              <Select
+                value={selectedGrade || "_all"}
+                onValueChange={(v) => onGradeChange(v === "_all" ? null : v)}
+              >
+                <SelectTrigger className="w-28" id="market-grade-select">
+                  <SelectValue placeholder="전체" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">전체</SelectItem>
+                  {gradeOptions.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {g}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {hasFilter && (
             <Button
               variant="ghost"
@@ -163,6 +179,7 @@ export function MarketPriceFilter({
                 onVarietiesChange([]);
                 onOriginChange(null);
                 onUnitChange(null);
+                onGradeChange(null);
               }}
             >
               필터 초기화
@@ -301,50 +318,6 @@ export function MarketPriceFilter({
           </div>
         )}
 
-        {hasFilter && (
-          <div className="flex flex-wrap items-center gap-2 pt-3 border-t">
-            <Input
-              placeholder="조합 이름 (선택사항)"
-              value={presetNameInput}
-              onChange={(e) => onPresetNameChange(e.target.value)}
-              className="w-40 h-8 text-sm"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onSavePreset();
-              }}
-            />
-            <Button variant="outline" size="sm" onClick={onSavePreset}>
-              <Star className="h-3 w-3 mr-1" />
-              조합 저장
-            </Button>
-          </div>
-        )}
-
-        {filterPresets.length > 0 && (
-          <div className="space-y-2 pt-3 border-t">
-            <Label className="text-sm text-muted-foreground">저장된 조합</Label>
-            <div className="flex flex-wrap gap-2">
-              {filterPresets.map((preset) => (
-                <Badge
-                  key={preset.id}
-                  variant="outline"
-                  className="cursor-pointer hover:bg-primary hover:text-primary-foreground group"
-                  onClick={() => onLoadPreset(preset)}
-                >
-                  {preset.name}
-                  <button
-                    className="ml-1 opacity-50 group-hover:opacity-100 hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeletePreset(preset.id);
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

@@ -6,9 +6,12 @@
  * 기존 import 경로 호환을 위해 여기서 다시 내보낸다.
  */
 
+import { marketDateKey, marketWindowStart } from "@/lib/market-date";
+import { packageKg } from "@/lib/market-analysis";
+import { summarizeMarketPrices } from "@/lib/market-price-statistics";
 import prisma from "@/lib/prisma";
 import { MARKET_PRODUCTS } from "@/lib/constants/market-products";
-import { formatDateKey, dayRange } from "./garak-parse";
+import { dayRange } from "./garak-parse";
 
 export {
   parseXmlResponse,
@@ -45,9 +48,7 @@ export const MAJOR_PRODUCTS: readonly string[] = MARKET_PRODUCTS;
  * 단위 문자열에서 kg 값 추출 (예: "10kg" -> 10, "5KG" -> 5)
  */
 export function parseKgFromUnit(unit: string): number | null {
-  if (!unit) return null;
-  const match = unit.toLowerCase().match(/(\d+(?:\.\d+)?)\s*kg/);
-  return match ? parseFloat(match[1]) : null;
+  return packageKg(unit);
 }
 
 function weightedAveragePrice(
@@ -71,11 +72,10 @@ export async function getProductPriceHistory(
   variety?: string,
   origin?: string,
   varieties?: string[],
-  unit?: string
+  unit?: string,
+  grade?: string
 ) {
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  startDate.setHours(0, 0, 0, 0);
+  const startDate = marketWindowStart(days);
 
   const where: {
     productName: string;
@@ -83,6 +83,7 @@ export async function getProductPriceHistory(
     variety?: string | { in: string[] };
     origin?: { contains: string };
     unit?: string;
+    grade?: string;
   } = {
     productName,
     auctionDate: { gte: startDate },
@@ -104,6 +105,8 @@ export async function getProductPriceHistory(
     where.unit = unit;
   }
 
+  if (grade) where.grade = grade;
+
   const records = await prisma.auctionResult.findMany({
     where,
     select: {
@@ -115,41 +118,18 @@ export async function getProductPriceHistory(
     orderBy: { auctionDate: "desc" },
   });
 
-  // 날짜별로 그룹화 (서버 로컬 타임존 기준 날짜 키)
+  // 한국 날짜별로 그룹화 (서버 타임존과 무관)
   const dateGroups = new Map<string, typeof records>();
   for (const record of records) {
-    const dateKey = formatDateKey(record.auctionDate);
+    const dateKey = marketDateKey(record.auctionDate);
     const group = dateGroups.get(dateKey) || [];
     group.push(record);
     dateGroups.set(dateKey, group);
   }
 
-  const results = Array.from(dateGroups.entries()).map(([dateKey, items]) => {
-    const prices = items.map((i) => i.price);
-    const totalQuantity = items.reduce((sum, i) => sum + i.quantity, 0);
-    const weightedAvgPrice = weightedAveragePrice(items);
-
-    // kg당 단가 계산 (단위에서 kg 추출)
-    let totalKg = 0;
-    let totalKgValue = 0;
-    for (const item of items) {
-      const kg = parseKgFromUnit(item.unit || "");
-      if (kg && kg > 0) {
-        totalKg += kg * item.quantity;
-        totalKgValue += item.price * item.quantity;
-      }
-    }
-    const pricePerKg = totalKg > 0 ? Math.round(totalKgValue / totalKg) : null;
-
-    return {
-      date: dateKey,
-      avgPrice: weightedAvgPrice,
-      maxPrice: Math.max(...prices),
-      minPrice: Math.min(...prices),
-      tradeCount: items.length,
-      totalQuantity,
-      pricePerKg,
-    };
+  const results = Array.from(dateGroups.entries()).flatMap(([dateKey, items]) => {
+    const stats = summarizeMarketPrices(items);
+    return stats ? [{ date: dateKey, ...stats }] : [];
   });
 
   results.sort((a, b) => b.date.localeCompare(a.date));

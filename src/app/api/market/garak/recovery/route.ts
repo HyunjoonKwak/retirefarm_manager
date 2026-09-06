@@ -1,3 +1,4 @@
+import { marketScheduleIssues } from "@/lib/market-schedule-validation";
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth/guards";
@@ -21,6 +22,7 @@ export async function GET() {
       enabled: setting?.autoCollectEnabled ?? false, lookbackDays: RECOVERY_LOOKBACK_DAYS,
       checkIntervalMinutes: RECOVERY_INTERVAL_MINUTES, graceMinutes: RECOVERY_GRACE_MINUTES,
       maxAttempts: RECOVERY_MAX_ATTEMPTS,
+      configurationErrors: setting?.autoCollectEnabled ? marketScheduleIssues(setting) : [],
       schedulerReady: getSchedulerStatus().ready, ...getRecoveryState(),
       summary: {
         pending: rows.filter(j => j.status === "PENDING" || (["FAILED", "PARTIAL"].includes(j.status) && j.attempts < RECOVERY_MAX_ATTEMPTS)).length,

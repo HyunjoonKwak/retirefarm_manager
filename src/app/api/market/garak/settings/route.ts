@@ -9,14 +9,14 @@ import { updateSchedule } from "@/lib/scheduler";
 
 const updateSettingsSchema = z.object({
   autoCollectEnabled: z.boolean().optional(),
-  collectTime: z.string().regex(/^\d{2}:\d{2}$/, "HH:mm 형식이어야 합니다.").optional(),
-  collectDaysAgo: z.number().min(0).max(7).optional(), // 0=오늘, 1=어제, ...
-  collectDays: z.array(z.number().min(0).max(6)).optional(), // 0=일, 1=월, ..., 6=토
+  collectTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "수집 시각은 00:00~23:59 범위여야 합니다.").optional(),
+  collectDaysAgo: z.number().int().min(0).max(7).optional(), // 0=오늘, 1=어제, ...
+  collectDays: z.array(z.number().int().min(0).max(6)).min(1, "수집 요일을 한 개 이상 선택해 주세요.").max(7).optional(), // 0=일, 1=월, ..., 6=토
   corporationCodes: z.array(z.string()).optional(),
   targetProducts: z.array(z.string()).optional(),
-  retentionDays: z.number().min(7).max(365).optional(),
+  retentionDays: z.number().int().min(7).max(365).optional(),
   autoCleanupEnabled: z.boolean().optional(),
-  defaultViewDays: z.number().min(7).max(90).optional(),
+  defaultViewDays: z.number().int().min(7).max(90).optional(),
 });
 
 // GET: 설정 조회

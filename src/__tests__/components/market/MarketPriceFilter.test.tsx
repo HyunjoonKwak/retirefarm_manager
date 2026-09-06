@@ -23,7 +23,7 @@ const readyState: VarietyFacetsState = {
     { variety: "금실", originPeriodCount: 0, matchingCount: 0, lastSeenAt: "2026-03-10", availability: "no_period_records" },
     { variety: "매향", originPeriodCount: 0, matchingCount: 0, lastSeenAt: null, availability: "unobserved" },
   ],
-  scope: { productName: "딸기", origin: "논산", unit: "2kg", days: 30 },
+  scope: { productName: "딸기", origin: "논산", unit: "2kg", grade: null, days: 30 },
   asOf: "2026-09-06T09:30:00.000Z",
   error: null,
 };
@@ -55,14 +55,11 @@ function renderFilter(overrides: Partial<Parameters<typeof MarketPriceFilter>[0]
     unitOptions: ["2kg"],
     selectedUnit: "2kg",
     onUnitChange: vi.fn(),
+    gradeOptions: ["특", "상"],
+    selectedGrade: null,
+    onGradeChange: vi.fn(),
     canExtendPeriod: true,
     onExtendPeriod: vi.fn(),
-    filterPresets: [],
-    presetNameInput: "",
-    onPresetNameChange: vi.fn(),
-    onSavePreset: vi.fn(),
-    onLoadPreset: vi.fn(),
-    onDeletePreset: vi.fn(),
     ...overrides,
   };
   return { ...render(<MarketPriceFilter {...props} />), props };
@@ -90,7 +87,7 @@ describe("MarketPriceFilter — 산지 연동 품종", () => {
   it("선택됐지만 거래 없는 품종은 안내와 함께 남고, 버튼으로 해제·단위 해제·기간 확장이 가능하다", () => {
     const { props } = renderFilter({ selectedVarieties: ["죽향", "금실"] });
     const note = screen.getByRole("note");
-    expect(note).toHaveTextContent("죽향(단위 외 4건)");
+    expect(note).toHaveTextContent("죽향(조건 외 4건)");
     expect(note).toHaveTextContent("금실(기간 외");
 
     fireEvent.click(screen.getByRole("button", { name: /죽향/ }));
@@ -122,5 +119,18 @@ describe("MarketPriceFilter — 산지 연동 품종", () => {
     expect(screen.getByRole("status")).toHaveTextContent("거래 확인 실패");
     expect(screen.getByRole("button", { name: /매향/ })).toHaveTextContent("확인 필요");
     expect(screen.queryByRole("button", { name: /전체 보기/ })).toBeNull();
+  });
+
+  it("등급을 고를 수 있고 선택한 등급은 초기화 버튼으로 함께 해제된다", () => {
+    const { props } = renderFilter({ selectedGrade: "특" });
+    expect(screen.getByText("등급")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "필터 초기화" }));
+    expect(props.onGradeChange).toHaveBeenCalledWith(null);
+    expect(props.onUnitChange).toHaveBeenCalledWith(null);
+  });
+
+  it("등급 후보가 없으면 등급 선택을 보여주지 않는다", () => {
+    renderFilter({ gradeOptions: [] });
+    expect(screen.queryByText("등급")).toBeNull();
   });
 });

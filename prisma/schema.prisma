@@ -33,6 +33,7 @@ model User {
   notifications            Notification[]
   productWatchlist         ProductWatchlist[]
   marketCollectionSettings MarketCollectionSettings?
+  marketComparisonPresets MarketComparisonPreset[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -444,5 +445,20 @@ model Notification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+// 사용자별 비교 조건. 원문 필터 값을 보존하고 추정 별칭은 병합하지 않는다.
+model MarketComparisonPreset {
+  id          String @id @default(cuid())
+  userId      String
+  name        String
+  productName String
+  varieties   String @default("[]")
+  origin      String?
+  unit        String?
+  grade       String?
+  createdAt   DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId, createdAt])
 }

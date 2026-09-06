@@ -37,6 +37,8 @@ export interface RecoveryStatus {
   checking: boolean;
   lastCheckOk?: boolean | null;
   maxAttempts?: number;
+  /** 서버가 확인한 수집 설정 문제. 없거나 빈 배열이면 표시하지 않는다. */
+  configurationErrors?: string[];
   summary: { pending: number; running: number; failed: number };
   jobs: RecoveryJob[];
 }
@@ -190,6 +192,24 @@ export function MarketRecoveryStatus({ pollIntervalMs = POLL_INTERVAL_MS }: Mark
               <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
                 자동 보충이 꺼져 있습니다. 빠진 날짜는 위에서 직접 수집해 주세요.
               </p>
+            )}
+
+            {status.configurationErrors && status.configurationErrors.length > 0 && (
+              <div
+                className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 space-y-2"
+                role="alert"
+              >
+                <p className="flex items-start gap-2 font-medium">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  수집 설정이 올바르지 않아 자동 수집과 보충이 실행되지 않습니다.
+                </p>
+                <ul className="list-disc pl-6 space-y-1">
+                  {status.configurationErrors.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+                <p>위 수집 설정을 고쳐 저장하면 다음 점검부터 다시 실행됩니다.</p>
+              </div>
             )}
 
             {!status.schedulerReady && (

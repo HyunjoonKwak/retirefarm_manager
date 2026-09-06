@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { summarizeMarketPrices } from "@/lib/market-price-statistics";
+import { marketDayStart } from "@/lib/market-date";
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { getSessionUser, isAdmin } from "@/lib/auth/guards";
@@ -39,6 +41,7 @@ const getQuerySchema = z.object({
   date: dateStrSchema.nullable().catch(null),
   varieties: z.string().max(500).nullable(),
   unit: z.string().max(30).nullable(),
+  grade: z.string().max(30).nullable(),
 });
 
 // GET: 가락시장 경매 데이터 조회
@@ -59,6 +62,7 @@ export async function GET(request: NextRequest) {
       date: searchParams.get("date"),
       varieties: searchParams.get("varieties"),
       unit: searchParams.get("unit"),
+      grade: searchParams.get("grade"),
     });
 
     if (!parsed.success) {
@@ -68,7 +72,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { action, productName, variety, origin, days, date: dateStr, unit } =
+    const { action, productName, variety, origin, days, date: dateStr, unit, grade } =
       parsed.data;
     const varietiesParam = parsed.data.varieties;
 
@@ -82,7 +86,7 @@ export async function GET(request: NextRequest) {
       if (!facetDays.success) {
         return NextResponse.json({ error: "조회 기간은 1~730일이어야 합니다." }, { status: 400 });
       }
-      return NextResponse.json(await getMarketVarietyFacets(productName, facetDays.data, origin, unit));
+      return NextResponse.json(await getMarketVarietyFacets(productName, facetDays.data, origin, unit, grade));
     }
 
     // 저장된 품목 목록 조회
@@ -126,7 +130,8 @@ export async function GET(request: NextRequest) {
         variety || undefined,
         origin || undefined,
         varieties,
-        unit || undefined
+        unit || undefined,
+        grade || undefined
       );
 
       return NextResponse.json({
@@ -135,6 +140,7 @@ export async function GET(request: NextRequest) {
         varieties,
         origin,
         unit,
+        grade,
         days,
         history,
         noAuctionDates,
@@ -157,23 +163,26 @@ export async function GET(request: NextRequest) {
 
     // 특정 날짜의 상세 데이터 조회
     if (action === "dailyDetail" && dateStr && productName) {
-      const date = new Date(dateStr);
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
+      const startOfDay = marketDayStart(dateStr);
+      const endOfDay = new Date(startOfDay.getTime() + 86400000 - 1);
 
       const whereClause: {
         auctionDate: { gte: Date; lte: Date };
         productName: string;
-        variety?: string;
+        variety?: string | { in: string[] };
+        unit?: string;
+        grade?: string;
         origin?: { contains: string };
       } = {
         auctionDate: { gte: startOfDay, lte: endOfDay },
         productName,
       };
 
-      if (variety) whereClause.variety = variety;
+      const selectedVarieties = varietiesParam?.split(",").map(v => v.trim()).filter(Boolean);
+      if (selectedVarieties?.length) whereClause.variety = { in: selectedVarieties };
+      else if (variety) whereClause.variety = variety;
+      if (unit) whereClause.unit = unit;
+      if (grade) whereClause.grade = grade;
       if (origin) whereClause.origin = { contains: origin };
 
       const results = await prisma.auctionResult.findMany({
@@ -181,19 +190,7 @@ export async function GET(request: NextRequest) {
         orderBy: { price: "desc" },
       });
 
-      const prices = results.map((r) => r.price);
-      const stats =
-        prices.length > 0
-          ? {
-              avgPrice: Math.round(
-                prices.reduce((a, b) => a + b, 0) / prices.length
-              ),
-              maxPrice: Math.max(...prices),
-              minPrice: Math.min(...prices),
-              tradeCount: results.length,
-              totalQuantity: results.reduce((sum, r) => sum + r.quantity, 0),
-            }
-          : null;
+      const stats = summarizeMarketPrices(results);
 
       return NextResponse.json({
         date: dateStr,

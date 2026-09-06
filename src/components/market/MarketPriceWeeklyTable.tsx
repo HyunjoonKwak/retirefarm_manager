@@ -16,6 +16,7 @@ import { formatExactPrice, formatDate } from "@/lib/utils/format";
 import {
   PriceHistory,
   DAY_NAMES,
+  STAT_LABELS,
   parseLocalDate,
   formatLocalDateStr,
 } from "./marketPriceTypes";
@@ -114,7 +115,7 @@ export function MarketPriceWeeklyTable({
               <TableHeader>
                 <TableRow>
                   <TableHead className="whitespace-nowrap">날짜</TableHead>
-                  <TableHead className="text-right whitespace-nowrap">평균가</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">평균가({STAT_LABELS.weightedMean})</TableHead>
                   <TableHead className="text-right whitespace-nowrap hidden lg:table-cell text-amber-600">
                     kg당
                   </TableHead>

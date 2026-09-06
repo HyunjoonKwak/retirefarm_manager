@@ -104,11 +104,17 @@ describe("buildVarietyOptions", () => {
 });
 
 describe("buildFacetsQueryKey / preserveSelectedUnit / originMatches", () => {
-  it("품종 선택은 키에 들어가지 않고 산지·단위·기간·품목만 구분한다", () => {
-    const a = buildFacetsQueryKey("딸기", "논산", null, "30");
-    expect(a).toBe(buildFacetsQueryKey("딸기", "논산", null, 30));
-    expect(a).not.toBe(buildFacetsQueryKey("딸기", "진주", null, "30"));
-    expect(a).not.toBe(buildFacetsQueryKey("딸기", "논산", "2kg", "30"));
+  it("품종 선택은 키에 들어가지 않고 산지·단위·등급·기간·품목만 구분한다", () => {
+    const a = buildFacetsQueryKey("딸기", "논산", null, null, "30");
+    expect(a).toBe(buildFacetsQueryKey("딸기", "논산", null, null, 30));
+    expect(a).not.toBe(buildFacetsQueryKey("딸기", "진주", null, null, "30"));
+    expect(a).not.toBe(buildFacetsQueryKey("딸기", "논산", "2kg", null, "30"));
+    expect(a).not.toBe(buildFacetsQueryKey("딸기", "논산", null, "특", "30"));
+  });
+
+  it("선택한 등급이 후보 목록에 없어도 남겨 해제할 수 있게 한다", () => {
+    expect(preserveSelectedUnit(["특", "상"], "특")).toEqual(["특", "상"]);
+    expect(preserveSelectedUnit([], "특")).toEqual(["특"]);
   });
 
   it("선택한 단위가 일별 자료에 없어도 목록에 남긴다", () => {

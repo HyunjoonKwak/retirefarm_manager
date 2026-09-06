@@ -26,7 +26,7 @@ it.each(["", "productName=", "productName=토마토&days=0", "productName=토마
 it("passes the same scope but ignores selected varieties to preserve other candidates", async () => {
   const response = await request("productName=토마토&origin=충남&unit=5kg&days=7&varieties=A");
   expect(response.status).toBe(200);
-  expect(mocks.facets).toHaveBeenCalledWith("토마토", 7, "충남", "5kg");
+  expect(mocks.facets).toHaveBeenCalledWith("토마토", 7, "충남", "5kg", null);
 });
 it("returns a failure status rather than empty availability on database error", async () => {
   mocks.facets.mockRejectedValue(new Error("offline"));

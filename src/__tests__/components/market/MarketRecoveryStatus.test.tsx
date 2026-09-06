@@ -173,4 +173,34 @@ describe("MarketRecoveryStatus", () => {
     unmount();
     expect(signal.aborted).toBe(true);
   });
+
+  it("수집 설정 문제가 오면 구체 문구와 수정 안내를 경고로 보여준다", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        ok(
+          status({
+            configurationErrors: [
+              "수집 시각을 00:00~23:59 범위로 다시 저장해 주세요.",
+              "수집 요일을 한 개 이상 다시 선택해 주세요.",
+            ],
+          })
+        )
+      )
+    );
+    render(<MarketRecoveryStatus />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("수집 설정이 올바르지 않아 자동 수집과 보충이 실행되지 않습니다.");
+    expect(alert).toHaveTextContent("수집 시각을 00:00~23:59 범위로 다시 저장해 주세요.");
+    expect(alert).toHaveTextContent("수집 요일을 한 개 이상 다시 선택해 주세요.");
+    expect(alert).toHaveTextContent("수집 설정을 고쳐 저장하면 다음 점검부터 다시 실행됩니다.");
+  });
+
+  it("수집 설정 문제가 없으면 경고를 만들지 않는다", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(status({ configurationErrors: [] }))));
+    render(<MarketRecoveryStatus />);
+    await screen.findByText(/보충이 필요한 날짜가 없습니다|자동 보충/);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

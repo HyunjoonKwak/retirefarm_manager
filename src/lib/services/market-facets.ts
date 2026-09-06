@@ -1,3 +1,4 @@
+import { marketWindowStart } from "@/lib/market-date";
 import prisma from "@/lib/prisma";
 
 /** Availability in stored auction records, never a claim about regional production. */
@@ -6,12 +7,11 @@ export async function getMarketVarietyFacets(
   days: number,
   origin?: string | null,
   unit?: string | null,
+  grade?: string | null,
 ) {
   const asOf = new Date();
-  // Match the history endpoint's local-calendar window.
-  const startDate = new Date(asOf);
-  startDate.setDate(startDate.getDate() - days);
-  startDate.setHours(0, 0, 0, 0);
+  // Match the history endpoint's Korean calendar window.
+  const startDate = marketWindowStart(days, asOf);
   const productWhere = { productName, variety: { not: "" } };
   // Keep the existing history/daily origin semantics until region codes are introduced.
   const originWhere = { ...productWhere, ...(origin ? { origin: { contains: origin } } : {}) };
@@ -26,7 +26,7 @@ export async function getMarketVarietyFacets(
       _max: { auctionDate: true },
     }),
     prisma.auctionResult.groupBy({
-      by: ["variety", "unit"],
+      by: ["variety", "unit", "grade"],
       where: { ...originWhere, auctionDate: { gte: startDate } },
       _count: { _all: true },
     }),
@@ -37,7 +37,7 @@ export async function getMarketVarietyFacets(
   for (const row of periodGroups) {
     const count = counts.get(row.variety) ?? { period: 0, matching: 0 };
     count.period += row._count._all;
-    if (!unit || row.unit === unit) count.matching += row._count._all;
+    if ((!unit || row.unit === unit) && (!grade || row.grade === grade)) count.matching += row._count._all;
     counts.set(row.variety, count);
   }
 
@@ -58,7 +58,8 @@ export async function getMarketVarietyFacets(
   return {
     facets,
     units: [...new Set(periodGroups.map(row => row.unit).filter(Boolean))].sort(),
-    scope: { productName, origin: origin || null, unit: unit || null, days },
+    grades: [...new Set(periodGroups.map(row => row.grade).filter(Boolean))].sort(),
+    scope: { productName, origin: origin || null, unit: unit || null, grade: grade || null, days },
     asOf: asOf.toISOString(),
     // Current collection logs cannot prove complete coverage. Do not infer absence.
     collectionState: "stored_records_only" as const,

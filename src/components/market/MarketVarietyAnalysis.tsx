@@ -4,26 +4,27 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VarietyPriceSummary } from "@/lib/market-analysis";
+import { STAT_LABELS, buildAnalysisUrl } from "./marketPriceTypes";
 
 interface AnalysisResult {
   summaries: VarietyPriceSummary[]; excludedCount: number; analyzedCount: number; truncated: boolean;
 }
 const money = (value: number) => `${Math.round(value).toLocaleString("ko-KR")}원`;
 
-export function MarketVarietyAnalysis({ productName, origin, unit, days, onDaysChange }: {
-  productName: string; origin: string | null; unit: string | null; days: string;
+export function MarketVarietyAnalysis({ productName, origin, unit, grade, varieties, days, onDaysChange }: {
+  productName: string; origin: string | null; unit: string | null; grade: string | null;
+  varieties: string[]; days: string;
   onDaysChange: (days: string) => void;
 }) {
   const [state, setState] = useState<{ key: string; data?: AnalysisResult; error?: string }>({ key: "" });
   const [perKg, setPerKg] = useState(false);
   const [retry, setRetry] = useState(0);
-  const key = JSON.stringify([productName, origin, unit, days, retry]);
+  // 선택하지 않은 조건은 요청에 넣지 않는다. 늦게 도착한 이전 조건의 응답은 키로 걸러낸다.
+  const url = buildAnalysisUrl(productName, days, { origin, unit, grade, varieties });
+  const key = JSON.stringify([url, retry]);
   useEffect(() => {
     const controller = new AbortController();
-    const query = new URLSearchParams({ productName, days });
-    if (origin) query.set("origin", origin);
-    if (unit) query.set("unit", unit);
-    fetch(`/api/market/garak/analysis?${query}`, { signal: controller.signal })
+    fetch(url, { signal: controller.signal })
       .then(async response => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "분석 조회 실패");
@@ -32,14 +33,18 @@ export function MarketVarietyAnalysis({ productName, origin, unit, days, onDaysC
         if (!controller.signal.aborted) setState({ key, error: error.message });
       });
     return () => controller.abort();
-  }, [productName, origin, unit, days, key]);
+  }, [url, key]);
   const current = state.key === key ? state : null;
   const summaries = current?.data?.summaries ?? [];
 
   return <Card>
     <CardHeader>
       <CardTitle className="text-base">품종·등급별 가격 비교</CardTitle>
-      <p className="text-sm text-muted-foreground">{productName} · {origin || "전체 산지"} · 최근 {days}일 · {unit || "규격별 구분"}</p>
+      <p className="text-sm text-muted-foreground">
+        {productName} · {varieties.length ? `선택 품종 ${varieties.join(", ")}` : "전체 품종"} · {origin || "전체 산지"}
+        {" · "}{unit || "규격별 구분"} · {grade ? `${grade} 등급` : "전체 등급"} · 최근 {days}일
+      </p>
+      <p className="text-xs text-muted-foreground">현재 선택한 조건 안에서의 비교입니다.</p>
     </CardHeader>
     <CardContent className="space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -47,7 +52,7 @@ export function MarketVarietyAnalysis({ productName, origin, unit, days, onDaysC
         <Button size="sm" variant={perKg ? "outline" : "default"} aria-pressed={!perKg} onClick={() => setPerKg(false)}>포장 가격</Button>
         <Button size="sm" variant={perKg ? "default" : "outline"} aria-pressed={perKg} onClick={() => setPerKg(true)}>kg당 가격</Button>
       </div>
-      <p className="text-xs text-muted-foreground">품종·등급·포장 규격을 나눠 계산합니다. 중심 가격은 물량 가중 중앙값, 주요 거래 구간은 P25~P75입니다. 서로 다른 품종·등급의 가격 차이가 품질이나 수익성 순위를 의미하지는 않습니다.</p>
+      <p className="text-xs text-muted-foreground">품종·등급·포장 규격을 나눠 계산합니다. 중심 가격은 {STAT_LABELS.weightedMedian}(물량 기준), 주요 거래 구간은 P25~P75입니다. 카드·차트·주간표·일별 요약의 {STAT_LABELS.weightedMean}과 다른 통계입니다. 서로 다른 품종·등급의 가격 차이가 품질이나 수익성 순위를 의미하지는 않습니다.</p>
       {!current && <p role="status">분포를 확인하는 중입니다.</p>}
       {current?.error && <div role="alert">{current.error} <Button variant="outline" size="sm" onClick={() => setRetry(n => n + 1)}>다시 시도</Button></div>}
       {current?.data && <>

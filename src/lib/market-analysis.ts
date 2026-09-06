@@ -9,7 +9,7 @@ export interface VarietyPriceSummary {
 }
 
 export function packageKg(unit: string): number | null {
-  const match = unit.trim().match(/^(\d+(?:\.\d+)?)\s*(kg|g|킬로그램|그램)$/i);
+  const match = unit.trim().match(/^((?:\d+(?:\.\d+)?|\.\d+))\s*(kg|g|킬로그램|그램)$/i);
   if (!match) return null;
   const weight = Number(match[1]) / (/^(g|그램)$/i.test(match[2]) ? 1000 : 1);
   return weight > 0 ? weight : null;

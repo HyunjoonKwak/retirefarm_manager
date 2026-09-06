@@ -20,6 +20,47 @@ export interface SavedFilterPreset {
   varieties: string[];
   origin: string | null;
   unit: string | null;
+  grade: string | null;
+}
+
+/** 계정 저장 요청 본문. 서버가 정하는 id·userId는 보내지 않는다. */
+export type PresetPayload = Omit<SavedFilterPreset, "id">;
+
+export function toPresetPayload(preset: SavedFilterPreset | PresetPayload): PresetPayload {
+  return {
+    name: preset.name,
+    productName: preset.productName,
+    varieties: [...preset.varieties],
+    origin: preset.origin,
+    unit: preset.unit,
+    grade: preset.grade ?? null,
+  };
+}
+
+/** 저장된 조건을 화면 상태로 되돌릴 때 쓰는 필터 값. */
+export interface MarketFilterSelection {
+  varieties: string[];
+  origin: string | null;
+  unit: string | null;
+  grade: string | null;
+}
+
+export const EMPTY_SELECTION: MarketFilterSelection = { varieties: [], origin: null, unit: null, grade: null };
+
+/** localStorage에 남아 있는 이전 형식(등급 없음)도 읽을 수 있게 정규화한다. */
+export function normalizeStoredPreset(value: unknown, fallbackId: string): SavedFilterPreset | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.productName !== "string" || !row.productName) return null;
+  return {
+    id: typeof row.id === "string" && row.id ? row.id : fallbackId,
+    name: typeof row.name === "string" && row.name ? row.name : row.productName,
+    productName: row.productName,
+    varieties: Array.isArray(row.varieties) ? row.varieties.filter((v): v is string => typeof v === "string") : [],
+    origin: typeof row.origin === "string" ? row.origin : null,
+    unit: typeof row.unit === "string" ? row.unit : null,
+    grade: typeof row.grade === "string" ? row.grade : null,
+  };
 }
 
 export interface PriceHistory {
@@ -47,6 +88,7 @@ export interface DailyDetailResult {
 }
 
 import { MARKET_PRODUCTS } from "@/lib/constants/market-products";
+import { summarizeMarketPrices } from "@/lib/market-price-statistics";
 
 export const DEFAULT_PRODUCTS: readonly string[] = MARKET_PRODUCTS;
 
@@ -58,6 +100,14 @@ export const PERIOD_OPTIONS = [
 ];
 
 export const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** 화면마다 통계 정의가 다르므로 라벨을 한 곳에서 정한다. */
+export const STAT_LABELS = {
+  /** 카드·차트·주간표·일별 요약: 거래량으로 가중한 평균 */
+  weightedMean: "수량 가중평균",
+  /** 품종·등급 분포표: 물량으로 가중한 중앙값 */
+  weightedMedian: "가중 중앙값",
+} as const;
 
 export type SortField = "price" | "quantity" | "origin" | "unit" | "variety" | "corporation";
 export type SortDirection = "asc" | "desc";
@@ -98,12 +148,14 @@ export interface VarietyFacetsScope {
   productName: string;
   origin: string | null;
   unit: string | null;
+  grade?: string | null;
   days: number;
 }
 
 export interface VarietyFacetsResponse {
   facets: VarietyFacet[];
   units?: string[];
+  grades?: string[];
   scope: VarietyFacetsScope;
   asOf: string;
   collectionState: "stored_records_only";
@@ -117,6 +169,7 @@ export interface VarietyFacetsState {
   queryKey: string;
   facets: VarietyFacet[];
   units?: string[];
+  grades?: string[];
   scope: VarietyFacetsScope | null;
   asOf: string | null;
   error: string | null;
@@ -135,9 +188,10 @@ export function buildFacetsQueryKey(
   productName: string,
   origin: string | null,
   unit: string | null,
+  grade: string | null,
   days: string | number
 ): string {
-  return JSON.stringify([productName, origin ?? "", unit ?? "", String(days)]);
+  return JSON.stringify([productName, origin ?? "", unit ?? "", grade ?? "", String(days)]);
 }
 
 export type VarietyOptionStatus = VarietyAvailability | "unknown";
@@ -175,20 +229,23 @@ function formatLastSeen(lastSeenAt: string | null): string {
 
 export function describeAvailability(
   facet: Pick<VarietyOption, "status" | "matchingCount" | "originPeriodCount" | "lastSeenAt">,
-  scope: Pick<VarietyFacetsScope, "unit" | "days"> | null,
+  scope: Pick<VarietyFacetsScope, "unit" | "grade" | "days"> | null,
   mode: VarietyFacetsStatus
 ): { shortLabel: string; reason: string } {
   const days = scope?.days ?? "선택한";
+  const narrowed = [scope?.unit ? `단위 '${scope.unit}'` : null, scope?.grade ? `등급 '${scope.grade}'` : null]
+    .filter(Boolean)
+    .join(" · ");
   switch (facet.status) {
     case "available":
       return {
         shortLabel: `${facet.matchingCount}건`,
-        reason: `현재 산지·단위·기간 조건에서 수집된 거래 ${facet.matchingCount}건`,
+        reason: `현재 산지·단위·등급·기간 조건에서 수집된 거래 ${facet.matchingCount}건`,
       };
     case "filtered_out":
       return {
-        shortLabel: `단위 외 ${facet.originPeriodCount}건`,
-        reason: `산지·기간에는 ${facet.originPeriodCount}건 있으나 단위 '${scope?.unit ?? ""}' 조건에서 0건 — 단위를 해제하면 표시됩니다`,
+        shortLabel: `조건 외 ${facet.originPeriodCount}건`,
+        reason: `산지·기간에는 ${facet.originPeriodCount}건 있으나 ${narrowed || "선택한 조건"}에서 0건 — 해당 조건을 해제하면 표시됩니다`,
       };
     case "no_period_records":
       return {
@@ -267,11 +324,14 @@ export function buildVarietyOptions(input: {
   };
 }
 
-/** 보유 단위가 현재 일별 자료에 없어 사라지지 않도록 선택값을 목록에 보존한다. */
-export function preserveSelectedUnit(unitOptions: string[], selectedUnit: string | null): string[] {
-  if (!selectedUnit || unitOptions.includes(selectedUnit)) return unitOptions;
-  return [...unitOptions, selectedUnit];
+/** 선택값이 현재 목록에 없어도 사라지지 않게 보존한다 (해제할 수 있어야 한다). */
+export function preserveSelectedOption(options: string[], selected: string | null): string[] {
+  if (!selected || options.includes(selected)) return options;
+  return [...options, selected];
 }
+
+/** 보유 단위가 현재 일별 자료에 없어 사라지지 않도록 선택값을 목록에 보존한다. */
+export const preserveSelectedUnit = preserveSelectedOption;
 
 /** 서버 history/facets의 origin contains 규칙과 같은 판정 (표준 산지코드 도입 전). */
 export function originMatches(recordOrigin: string | null | undefined, selectedOrigin: string | null): boolean {
@@ -364,6 +424,7 @@ export interface DailyFilterOptions {
   selectedVarieties: string[];
   selectedOrigin: string | null;
   selectedUnit: string | null;
+  selectedGrade: string | null;
   sortField: SortField | null;
   sortDirection: SortDirection;
 }
@@ -384,12 +445,13 @@ export function filterAndSortDailyResults(
   dailyResults: DailyDetailResult[],
   options: DailyFilterOptions
 ): DailyDetailResult[] {
-  const { selectedVarieties, selectedOrigin, selectedUnit, sortField, sortDirection } = options;
+  const { selectedVarieties, selectedOrigin, selectedUnit, selectedGrade, sortField, sortDirection } = options;
   const filtered = dailyResults.filter(
     (r) =>
       (selectedVarieties.length === 0 || (r.variety !== null && selectedVarieties.includes(r.variety))) &&
       originMatches(r.origin, selectedOrigin) &&
-      (!selectedUnit || r.unit === selectedUnit)
+      (!selectedUnit || r.unit === selectedUnit) &&
+      (!selectedGrade || r.grade === selectedGrade)
   );
 
   if (!sortField) return filtered;
@@ -405,36 +467,63 @@ export function filterAndSortDailyResults(
   });
 }
 
-export interface DailyStats {
-  avgPrice: number;
-  maxPrice: number;
-  minPrice: number;
-  tradeCount: number;
-  totalQuantity: number;
-  totalTradeAmount: number;
-}
+/** 서버 history·dailyDetail 카드와 같은 유효 표본·같은 집계를 쓴다 (추가 필드 포함). */
+export type DailyStats = NonNullable<ReturnType<typeof summarizeMarketPrices>>;
 
-/** 수량 가중 평균가와 범위. 결과가 없으면 null. */
+/** 수량 가중 평균가와 범위. 유효 표본이 없으면 null. */
 export function summarizeDailyResults(results: DailyDetailResult[]): DailyStats | null {
-  if (results.length === 0) return null;
-  const prices = results.map((r) => r.price);
-  const totalQuantity = results.reduce((sum, r) => sum + r.quantity, 0);
-  const totalTradeAmount = results.reduce((sum, r) => sum + r.price * r.quantity, 0);
-  return {
-    avgPrice: totalQuantity > 0 ? Math.round(totalTradeAmount / totalQuantity) : 0,
-    maxPrice: Math.max(...prices),
-    minPrice: Math.min(...prices),
-    tradeCount: results.length,
-    totalQuantity,
-    totalTradeAmount,
-  };
+  return summarizeMarketPrices(results);
 }
 
-export function buildFacetsUrl(productName: string, origin: string | null, unit: string | null, days: string): string {
-  let url = `/api/market/garak?action=facets&productName=${encodeURIComponent(productName)}&days=${days}`;
-  if (origin) url += `&origin=${encodeURIComponent(origin)}`;
-  if (unit) url += `&unit=${encodeURIComponent(unit)}`;
-  return url;
+/** 선택하지 않은 조건은 파라미터 자체를 넣지 않는다 (빈 문자열·"null" 금지). */
+export function marketQueryString(params: Record<string, string | string[] | null | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined) continue;
+    const text = Array.isArray(value) ? value.filter(Boolean).join(",") : value;
+    if (!text) continue;
+    search.set(key, text);
+  }
+  return search.toString();
+}
+
+export interface MarketRequestFilters {
+  varieties?: string[];
+  origin?: string | null;
+  unit?: string | null;
+  grade?: string | null;
+}
+
+/** facets는 후보를 보존하기 위해 선택 품종을 보내지 않는다. */
+export function buildFacetsUrl(
+  productName: string,
+  origin: string | null,
+  unit: string | null,
+  grade: string | null,
+  days: string
+): string {
+  return `/api/market/garak?${marketQueryString({ action: "facets", productName, days, origin, unit, grade })}`;
+}
+
+export function buildHistoryUrl(productName: string, days: string, filters: MarketRequestFilters): string {
+  return `/api/market/garak?${marketQueryString({
+    action: "history", productName, days,
+    varieties: filters.varieties, origin: filters.origin, unit: filters.unit, grade: filters.grade,
+  })}`;
+}
+
+export function buildDailyDetailUrl(date: string, productName: string, filters: MarketRequestFilters): string {
+  return `/api/market/garak?${marketQueryString({
+    action: "dailyDetail", date, productName,
+    varieties: filters.varieties, origin: filters.origin, unit: filters.unit, grade: filters.grade,
+  })}`;
+}
+
+export function buildAnalysisUrl(productName: string, days: string, filters: MarketRequestFilters): string {
+  return `/api/market/garak/analysis?${marketQueryString({
+    productName, days,
+    varieties: filters.varieties, origin: filters.origin, unit: filters.unit, grade: filters.grade,
+  })}`;
 }
 
 /** facets 응답을 상태로 바꾼다. 형식이 어긋나거나 실패하면 error 상태 (빈 목록으로 덮지 않음). */
@@ -452,6 +541,7 @@ export function facetsStateFromResponse(
     queryKey: key,
     facets: data.facets,
     units: data.units ?? [],
+    grades: data.grades ?? [],
     scope: data.scope ?? null,
     asOf: data.asOf ?? null,
     error: null,

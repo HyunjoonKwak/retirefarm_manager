@@ -37,7 +37,7 @@ describe("market variety availability", () => {
       expect.objectContaining({ variety: "D", lastSeenAt: null, availability: "unobserved" }),
     ]);
     expect(result.collectionState).toBe("stored_records_only");
-    expect(result.scope).toEqual({ productName: "토마토", origin: "충남", unit: "5kg", days: 30 });
+    expect(result.scope).toEqual({ productName: "토마토", origin: "충남", unit: "5kg", grade: null, days: 30 });
   });
 
   it("applies origin and history window without filtering away alternative varieties or units", async () => {
@@ -46,7 +46,7 @@ describe("market variety availability", () => {
     expect(groupBy.mock.calls[0][0].where).toEqual({ productName: "토마토", variety: { not: "" } });
     expect(groupBy.mock.calls[2][0].where).toEqual({
       productName: "토마토", variety: { not: "" }, origin: { contains: "충남 논산" },
-      auctionDate: { gte: new Date(2026, 7, 30) },
+      auctionDate: { gte: new Date("2026-08-30T00:00:00+09:00") },
     });
   });
 

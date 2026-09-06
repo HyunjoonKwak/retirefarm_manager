@@ -20,16 +20,7 @@ import {
 } from "@/components/ui/table";
 import { Loader2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { formatExactPrice } from "@/lib/utils/format";
-import { DailyDetailResult, DAY_NAMES, SortField, SortDirection } from "./marketPriceTypes";
-
-interface DailyStats {
-  avgPrice: number;
-  maxPrice: number;
-  minPrice: number;
-  tradeCount: number;
-  totalQuantity: number;
-  totalTradeAmount: number;
-}
+import { DailyDetailResult, DailyStats, DAY_NAMES, SortField, SortDirection, STAT_LABELS } from "./marketPriceTypes";
 
 interface MarketPriceDailyDetailProps {
   selectedDate: string;
@@ -37,12 +28,14 @@ interface MarketPriceDailyDetailProps {
   selectedVarieties: string[];
   selectedOrigin: string | null;
   selectedUnit: string | null;
+  selectedGrade: string | null;
   dailyResults: DailyDetailResult[];
   filteredDailyResults: DailyDetailResult[];
   filteredDailyStats: DailyStats | null;
   originOptions: string[];
   varietyOptions: string[];
   unitOptions: string[];
+  gradeOptions: string[];
   loadingDaily: boolean;
   sortField: SortField | null;
   sortDirection: SortDirection;
@@ -50,6 +43,7 @@ interface MarketPriceDailyDetailProps {
   onVarietiesChange: (v: string[]) => void;
   onOriginChange: (o: string | null) => void;
   onUnitChange: (u: string | null) => void;
+  onGradeChange: (g: string | null) => void;
   onToggleSort: (field: SortField) => void;
 }
 
@@ -66,12 +60,14 @@ export function MarketPriceDailyDetail({
   selectedVarieties,
   selectedOrigin,
   selectedUnit,
+  selectedGrade,
   dailyResults,
   filteredDailyResults,
   filteredDailyStats,
   originOptions,
   varietyOptions,
   unitOptions,
+  gradeOptions,
   loadingDaily,
   sortField,
   sortDirection,
@@ -79,6 +75,7 @@ export function MarketPriceDailyDetail({
   onVarietiesChange,
   onOriginChange,
   onUnitChange,
+  onGradeChange,
   onToggleSort,
 }: MarketPriceDailyDetailProps) {
   function getSortIcon(field: SortField) {
@@ -91,7 +88,7 @@ export function MarketPriceDailyDetail({
     );
   }
 
-  const hasFilter = selectedVarieties.length > 0 || selectedOrigin || selectedUnit;
+  const hasFilter = selectedVarieties.length > 0 || selectedOrigin || selectedUnit || selectedGrade;
 
   return (
     <Card className="border-blue-200 bg-blue-50/30">
@@ -107,6 +104,7 @@ export function MarketPriceDailyDetail({
               {selectedVarieties.length > 0 && ` / ${selectedVarieties.join(", ")}`}
               {selectedOrigin && ` / ${selectedOrigin}`}
               {selectedUnit && ` / ${selectedUnit}`}
+              {selectedGrade && ` / ${selectedGrade} 등급`}
             </CardDescription>
           </div>
           <Button
@@ -195,6 +193,28 @@ export function MarketPriceDailyDetail({
                   </div>
                 )}
 
+                {gradeOptions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm whitespace-nowrap">등급</Label>
+                    <Select
+                      value={selectedGrade || "_all"}
+                      onValueChange={(v) => onGradeChange(v === "_all" ? null : v)}
+                    >
+                      <SelectTrigger className="w-28">
+                        <SelectValue placeholder="전체" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_all">전체</SelectItem>
+                        {gradeOptions.map((g) => (
+                          <SelectItem key={g} value={g}>
+                            {g}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 {hasFilter && (
                   <Button
                     variant="ghost"
@@ -203,6 +223,7 @@ export function MarketPriceDailyDetail({
                       onVarietiesChange([]);
                       onOriginChange(null);
                       onUnitChange(null);
+                      onGradeChange(null);
                     }}
                   >
                     필터 초기화
@@ -215,7 +236,7 @@ export function MarketPriceDailyDetail({
             {filteredDailyStats && (
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-3 text-center">
                 <div className="p-2 bg-white rounded border">
-                  <p className="text-[10px] sm:text-xs text-muted-foreground">평균가(가중)</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">평균가({STAT_LABELS.weightedMean})</p>
                   <p className="font-bold text-xs sm:text-sm">
                     {formatExactPrice(filteredDailyStats.avgPrice)}
                   </p>
@@ -248,6 +269,11 @@ export function MarketPriceDailyDetail({
                     {filteredDailyStats.totalTradeAmount.toLocaleString()}원
                   </p>
                 </div>
+                {filteredDailyStats.excludedCount > 0 && (
+                  <p className="col-span-3 sm:col-span-6 text-[10px] sm:text-xs text-muted-foreground text-left">
+                    가격·수량이 유효하지 않은 {filteredDailyStats.excludedCount}행은 집계에서 제외했습니다. 원본은 아래 표에 남아 있습니다.
+                  </p>
+                )}
               </div>
             )}
 
@@ -345,9 +371,28 @@ export function MarketPriceDailyDetail({
             </div>
           </div>
         ) : (
-          <p className="text-center text-muted-foreground py-8">
-            해당 날짜의 거래 내역이 없습니다.
-          </p>
+          <div className="py-8 text-center space-y-2">
+            {/* 조건 때문에 빈 것과 그날 거래가 없는 것을 구분한다. */}
+            <p className="text-muted-foreground">
+              {hasFilter
+                ? "선택한 조건에 맞는 거래가 없습니다. 조건을 넓혀 확인해 주세요."
+                : "해당 날짜의 거래 내역이 없습니다."}
+            </p>
+            {hasFilter && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onVarietiesChange([]);
+                  onOriginChange(null);
+                  onUnitChange(null);
+                  onGradeChange(null);
+                }}
+              >
+                필터 초기화
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

@@ -50,6 +50,7 @@ COPY --from=builder /app/package.json ./package.json
 # 시작 스크립트 복사
 COPY scripts/sqlite-backup.mjs ./scripts/sqlite-backup.mjs
 COPY scripts/market-backfill.cjs ./scripts/market-backfill.cjs
+COPY scripts/market-label-audit.cjs ./scripts/market-label-audit.cjs
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && chown nextjs:nodejs /app/docker-entrypoint.sh
 

@@ -17,7 +17,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { formatExactPrice, formatDate } from "@/lib/utils/format";
-import { PERIOD_OPTIONS, PriceHistory } from "./marketPriceTypes";
+import { PERIOD_OPTIONS, PriceHistory, STAT_LABELS } from "./marketPriceTypes";
 import { useMemo, useState } from "react";
 
 // 식별 시리즈 색 (light/dark 모두 검증 통과)
@@ -44,6 +44,7 @@ interface MarketPriceChartProps {
   selectedVarieties: string[];
   selectedOrigin: string | null;
   selectedUnit: string | null;
+  selectedGrade: string | null;
   latestDate: string | null;
   priceHistory: PriceHistory[];
   loadingHistory: boolean;
@@ -124,6 +125,7 @@ export function MarketPriceChart({
   selectedVarieties,
   selectedOrigin,
   selectedUnit,
+  selectedGrade,
   latestDate,
   priceHistory,
   loadingHistory,
@@ -196,6 +198,11 @@ export function MarketPriceChart({
                 {selectedUnit}
               </Badge>
             )}
+            {selectedGrade && (
+              <Badge variant="secondary" className="text-xs">
+                {selectedGrade} 등급
+              </Badge>
+            )}
           </CardTitle>
           {latestDate && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -242,10 +249,10 @@ export function MarketPriceChart({
           {PERIOD_OPTIONS.find((o) => o.value === viewDays)?.description}
           {effectiveMode === "box" ? (
             <span className="ml-2">
-              • 선: 수량 가중평균 · 음영: 최저~최고가 범위
+              • 선: {STAT_LABELS.weightedMean} · 음영: 최저~최고가 범위
             </span>
           ) : (
-            <span className="ml-2">• kg 환산 단가 (수량 가중평균)</span>
+            <span className="ml-2">• kg 환산 단가 ({STAT_LABELS.weightedMean})</span>
           )}
         </p>
       </CardHeader>
@@ -259,7 +266,7 @@ export function MarketPriceChart({
             {summary && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                 <div className="rounded-md border p-2">
-                  <p className="text-[11px] text-muted-foreground">최근 평균가</p>
+                  <p className="text-[11px] text-muted-foreground">최근 평균가({STAT_LABELS.weightedMean})</p>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-sm font-semibold">
                       {formatExactPrice(summary.latest.평균가)}

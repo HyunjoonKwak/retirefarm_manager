@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MarketVarietyAnalysis } from "@/components/market/MarketVarietyAnalysis";
-const props = { productName: "토마토", origin: "논산", unit: null, days: "30", onDaysChange: vi.fn() };
+const props = {
+  productName: "토마토", origin: "논산", unit: null, grade: null, varieties: [] as string[],
+  days: "30", onDaysChange: vi.fn(),
+};
 const response = (variety: string) => ({ ok: true, json: async () => ({
   analyzedCount: 5, excludedCount: 0, truncated: false,
   summaries: [{ variety, grade: "특", unit: "5kg", median: 10000, p25: 9000, p75: 11000, mean: 10000,
@@ -29,4 +32,24 @@ it("does not display the previous origin while loading or after a late response"
   await act(async () => finishOld(response("이전 산지 품종")));
   expect(screen.queryByText("이전 산지 품종")).not.toBeInTheDocument();
   expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+});
+it("선택한 등급·품종을 요청에 넣고 현재 조건 안의 비교임을 알린다", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(response("완숙"));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<MarketVarietyAnalysis {...props} grade="특" varieties={["완숙", "대추"]} />);
+  expect(await screen.findByText("완숙")).toBeInTheDocument();
+  const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+  expect(url.searchParams.get("grade")).toBe("특");
+  expect(url.searchParams.get("varieties")).toBe("완숙,대추");
+  expect(screen.getByText(/현재 선택한 조건 안에서의 비교입니다/)).toBeInTheDocument();
+  expect(screen.getByText(/가중 중앙값/)).toBeInTheDocument();
+});
+it("등급을 고르지 않으면 grade 파라미터를 보내지 않는다", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(response("완숙"));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<MarketVarietyAnalysis {...props} />);
+  expect(await screen.findByText("완숙")).toBeInTheDocument();
+  const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
+  expect(url.searchParams.has("grade")).toBe(false);
+  expect(url.searchParams.has("varieties")).toBe(false);
 });
