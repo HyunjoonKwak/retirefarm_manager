@@ -30,7 +30,7 @@ function item(i: number, page: number) {
   return `<list><PUMMOK>토마토</PUMMOK><PUMJONG>완숙</PUMJONG><UUN>10kg</UUN><PPRICE>${20000 + page * 100 + i}</PPRICE><SSANGI>충남 논산</SSANGI><CORP_NM>서울청과</CORP_NM><ADJ_DT>20260905</ADJ_DT><QTY>${i + 1}</QTY></list>`;
 }
 
-function xmlPage(totalCount: number, page: number, itemsOnPage: number = 10): string {
+function xmlPage(totalCount: number, page: number, itemsOnPage: number = 100): string {
   const rows = Array.from({ length: itemsOnPage }, (_, i) => item(i, page)).join("");
   return `<response><list_total_count>${totalCount}</list_total_count>${rows}</response>`;
 }
@@ -137,28 +137,42 @@ describe("collectAndSaveAuctionData — 응답 검증 (P1)", () => {
 });
 
 describe("collectAndSaveAuctionData — 부분 수집 (P1)", () => {
+  it("100건 페이지 기준으로 480건을 정확히 5번 요청하고 정상 완료한다", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("pagesize")).toBe("100");
+      const page = pageOf(url);
+      expect(page).toBeLessThanOrEqual(5);
+      return fakeResponse(xmlPage(480, page, page === 5 ? 80 : 100));
+    });
+    const result = await collectAndSaveAuctionData(DATE, ["11000101"], "토마토", deps(fetchImpl));
+    expect(result.status).toBe("SUCCESS");
+    expect(result.totalCount).toBe(480);
+    expect(result.newCount).toBe(480);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+  });
+
   it("일부 페이지가 실패하면 PARTIAL이고 성공한 페이지는 저장하며 재실행 안내를 남긴다", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       const page = pageOf(url);
       if (page === 2) throw new Error("socket hang up");
-      return fakeResponse(xmlPage(25, page, page === 3 ? 5 : 10));
+      return fakeResponse(xmlPage(205, page, page === 3 ? 5 : 100));
     });
     const result = await collectAndSaveAuctionData(DATE, ["11000101"], "토마토", deps(fetchImpl));
 
     expect(result.status).toBe("PARTIAL");
     expect(result.complete).toBe(false);
-    expect(result.totalCount).toBe(25);
+    expect(result.totalCount).toBe(205);
     expect(result.corporations[0].products[0].failedPages).toEqual([2]);
     expect(result.issues.join(" ")).toContain("페이지 1개 조회 실패 (2)");
     expect(prismaMock.auctionResult.createMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.auctionResult.createMany.mock.calls[0][0].data).toHaveLength(15);
+    expect(prismaMock.auctionResult.createMany.mock.calls[0][0].data).toHaveLength(105);
     const log = prismaMock.dataCollectionLog.create.mock.calls[0][0].data;
     expect(log.status).toBe("PARTIAL");
     expect(log.errorMessage).toContain("다시 수집");
   });
 
   it("100페이지 상한을 넘으면 PARTIAL로 알린다", async () => {
-    const fetchImpl = vi.fn(async (url: string) => fakeResponse(xmlPage(1500, pageOf(url))));
+    const fetchImpl = vi.fn(async (url: string) => fakeResponse(xmlPage(15000, pageOf(url))));
     const result = await collectAndSaveAuctionData(DATE, ["11000101"], "토마토", deps(fetchImpl));
     expect(result.status).toBe("PARTIAL");
     expect(fetchImpl).toHaveBeenCalledTimes(MAX_PAGES);
@@ -169,10 +183,10 @@ describe("collectAndSaveAuctionData — 부분 수집 (P1)", () => {
     expect(prismaMock.dataCollectionLog.create.mock.calls[0][0].data.errorMessage).toContain("상한 확대");
   });
 
-  it("마지막 페이지가 아닌데 10건 미만이면 항목 누락 의심으로 PARTIAL", async () => {
+  it("마지막 페이지가 아닌데 100건 미만이면 항목 누락 의심으로 PARTIAL", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       const page = pageOf(url);
-      return fakeResponse(xmlPage(30, page, page === 2 ? 4 : 10));
+      return fakeResponse(xmlPage(300, page, page === 2 ? 4 : 100));
     });
     const result = await collectAndSaveAuctionData(DATE, ["11000101"], "토마토", deps(fetchImpl));
     expect(result.status).toBe("PARTIAL");
@@ -188,10 +202,10 @@ describe("collectAndSaveAuctionData — 부분 수집 (P1)", () => {
     expect(single.issues.join(" ")).toContain("API 총 5건 중 3건만 파싱됨 (누락 2건)");
     expect(single.corporations[0].products[0].failedPages).toEqual([]);
 
-    // 두 페이지: 총 15건인데 10 + 3건 (마지막 페이지가 짧아 shortPages로는 잡히지 않음)
+    // 두 페이지: 총 105건인데 100 + 3건 (마지막 페이지가 짧아 shortPages로는 잡히지 않음)
     const fetchImpl = vi.fn(async (url: string) => {
       const page = pageOf(url);
-      return fakeResponse(xmlPage(15, page, page === 2 ? 3 : 10));
+      return fakeResponse(xmlPage(105, page, page === 2 ? 3 : 100));
     });
     const twoPages = await collectAndSaveAuctionData(DATE, ["11000101"], "딸기", deps(fetchImpl));
     expect(twoPages.status).toBe("PARTIAL");

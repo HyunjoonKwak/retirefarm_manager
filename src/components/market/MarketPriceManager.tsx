@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,8 +33,8 @@ import { MarketPriceFilter } from "./MarketPriceFilter";
 import { MarketPriceWeeklyTable } from "./MarketPriceWeeklyTable";
 import { MarketPriceDailyDetail } from "./MarketPriceDailyDetail";
 import { MarketPriceWatchlist } from "./MarketPriceWatchlist";
+import { MarketFreshnessNotice } from "./MarketFreshnessNotice";
 import { MarketVarietyAnalysis } from "./MarketVarietyAnalysis";
-
 export function MarketPriceManager() {
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [varieties, setVarieties] = useState<string[]>([]);
@@ -44,7 +43,6 @@ export function MarketPriceManager() {
   const [noAuctionDates, setNoAuctionDates] = useState<NoAuctionDates>([]);
   const [latestDate, setLatestDate] = useState<string | null>(null);
   const [dailyResults, setDailyResults] = useState<DailyDetailResult[]>([]);
-
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingDaily, setLoadingDaily] = useState(false);
@@ -697,6 +695,7 @@ export function MarketPriceManager() {
         </CardContent>
       </Card>
 
+      <MarketFreshnessNotice latestDate={latestDate} />
       {selectedProduct && (
         <>
           {selectedUnit && <MarketPriceChart

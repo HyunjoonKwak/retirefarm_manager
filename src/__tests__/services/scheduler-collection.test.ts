@@ -19,7 +19,7 @@ vi.mock("node-cron", () => ({
   default: { validate: () => true, schedule: () => ({ stop: vi.fn() }) },
 }));
 
-import { runScheduleNow, isCollectionRunning } from "@/lib/scheduler";
+import { runScheduleNow, isCollectionRunning, clearAllSchedules, loadAllSchedules, getSchedulerStatus } from "@/lib/scheduler";
 
 const SETTINGS = {
   id: "s1",
@@ -46,9 +46,31 @@ function collectionResult(status: "SUCCESS" | "PARTIAL" | "FAILED" | "EMPTY") {
 }
 
 beforeEach(() => {
+  clearAllSchedules();
   vi.clearAllMocks();
   prismaMock.marketCollectionSettings.findUnique.mockResolvedValue(SETTINGS);
   cleanupMock.mockResolvedValue({ deletedCount: 0, retentionDays: 90 });
+});
+
+describe("scheduler readiness", () => {
+  it("distinguishes never initialized, successful registration, and load failure", async () => {
+    expect(getSchedulerStatus().ready).toBe(false);
+    prismaMock.marketCollectionSettings.findMany.mockResolvedValue([{ ...SETTINGS, collectTime: "09:30", collectDays: "0,1,2,3,4,5,6" }]);
+    expect(await loadAllSchedules()).toBe(1);
+    expect(getSchedulerStatus()).toEqual({ initialized: true, activeCount: 1, expectedCount: 1, ready: true });
+    prismaMock.marketCollectionSettings.findMany.mockRejectedValueOnce(new Error("DB unavailable"));
+    expect(await loadAllSchedules()).toBe(0);
+    expect(getSchedulerStatus().ready).toBe(false);
+  });
+  it("shares registered jobs across independently loaded module instances", async () => {
+    prismaMock.marketCollectionSettings.findMany.mockResolvedValue([{ ...SETTINGS, collectTime: "09:30", collectDays: "1" }]);
+    await loadAllSchedules();
+    vi.resetModules();
+    const second = await import("@/lib/scheduler");
+    expect(second.getSchedulerStatus().activeCount).toBe(1);
+    second.clearAllSchedules();
+    expect(getSchedulerStatus().ready).toBe(false);
+  });
 });
 
 describe("scheduler executeCollection", () => {

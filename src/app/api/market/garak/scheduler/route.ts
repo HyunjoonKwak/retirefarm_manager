@@ -13,6 +13,7 @@ import {
   loadAllSchedules,
   getActiveSchedules,
   runScheduleNow,
+  getSchedulerStatus,
 } from "@/lib/scheduler";
 
 // GET: 스케줄러 상태 조회 및 재초기화
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
       const count = await loadAllSchedules();
       return NextResponse.json({
         message: "Scheduler initialized successfully",
-        initialized: true,
+        ...getSchedulerStatus(),
         loadedSchedules: count,
         scheduleIds: getActiveSchedules(),
       });
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
     const activeSchedules = getActiveSchedules();
     return NextResponse.json({
-      initialized: true,
+      ...getSchedulerStatus(),
       activeSchedules: activeSchedules.length,
       scheduleIds: activeSchedules,
     });

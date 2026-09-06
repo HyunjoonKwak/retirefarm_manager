@@ -11,11 +11,22 @@ import {
   cleanupOldAuctionData,
 } from "@/lib/services/garak-market";
 
-// 활성화된 Cron Job들을 저장하는 맵
-const activeCronJobs = new Map<string, ScheduledTask>();
+// instrumentation과 라우트가 별도 번들로 로드되어도 같은 프로세스 상태를 공유한다.
+const shared = globalThis as typeof globalThis & {
+  marketSchedulerState?: { jobs: Map<string, ScheduledTask>; running: Set<string>; expected: Set<string>; initialized: boolean };
+};
+const state = shared.marketSchedulerState ??= {
+  jobs: new Map<string, ScheduledTask>(), running: new Set<string>(), expected: new Set<string>(), initialized: false,
+};
+const activeCronJobs = state.jobs;
+const runningSettings = state.running;
 
-// 설정별 실행 중 표시 — 이전 수집이 끝나기 전에 같은 설정이 다시 트리거되면 건너뛴다
-const runningSettings = new Set<string>();
+export function getSchedulerStatus() {
+  const activeCount = activeCronJobs.size;
+  const expectedCount = state.expected.size;
+  return { initialized: state.initialized, activeCount, expectedCount,
+    ready: state.initialized && activeCount === expectedCount };
+}
 
 export function isCollectionRunning(settingsId: string): boolean {
   return runningSettings.has(settingsId);
@@ -150,6 +161,7 @@ export function registerSchedule(
   collectTime: string,
   collectDays: string
 ): boolean {
+  state.expected.add(settingsId);
   try {
     if (activeCronJobs.has(settingsId)) {
       const existingJob = activeCronJobs.get(settingsId);
@@ -166,8 +178,9 @@ export function registerSchedule(
 
     const task = cron.schedule(
       cronExpr,
-      () => {
-        executeCollection(settingsId);
+      async () => {
+        try { await executeCollection(settingsId); }
+        catch (error) { logger.error("[Scheduler] Scheduled execution failed:", error); }
       },
       {
         timezone: "Asia/Seoul",
@@ -191,6 +204,7 @@ export function registerSchedule(
  */
 export function unregisterSchedule(settingsId: string): boolean {
   try {
+    state.expected.delete(settingsId);
     const job = activeCronJobs.get(settingsId);
     if (job) {
       job.stop();
@@ -209,6 +223,8 @@ export function unregisterSchedule(settingsId: string): boolean {
  * 모든 cron job 정리
  */
 export function clearAllSchedules(): number {
+  state.initialized = false;
+  state.expected.clear();
   const count = activeCronJobs.size;
   if (count === 0) return 0;
 
@@ -242,9 +258,12 @@ export async function loadAllSchedules(): Promise<number> {
       if (success) loadedCount++;
     }
 
-    logger.info(`[Scheduler] Loaded ${loadedCount}/${settings.length} schedule(s)`);
+    state.initialized = true;
+    // 부팅 진단은 운영 환경에서도 한 줄 남긴다. 사용자/설정 ID는 포함하지 않는다.
+    console.info(`[Scheduler] Loaded ${loadedCount}/${settings.length} schedule(s), ready=${getSchedulerStatus().ready}`);
     return loadedCount;
   } catch (error) {
+    state.initialized = false;
     logger.error("[Scheduler] Failed to load schedules:", error);
     return 0;
   }

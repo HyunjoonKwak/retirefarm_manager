@@ -18,7 +18,7 @@ COPY . .
 RUN mkdir -p /app/prisma/data
 
 RUN npx prisma generate
-RUN npm run build
+RUN npm run build && test -f .next/standalone/.next/server/instrumentation.js
 
 # 런너 이미지 경량화: 빌드 후 devDependencies 제거
 # (prisma CLI는 dependencies에 있어 migrate deploy에 계속 사용 가능)
@@ -49,6 +49,7 @@ COPY --from=builder /app/package.json ./package.json
 
 # 시작 스크립트 복사
 COPY scripts/sqlite-backup.mjs ./scripts/sqlite-backup.mjs
+COPY scripts/market-backfill.cjs ./scripts/market-backfill.cjs
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && chown nextjs:nodejs /app/docker-entrypoint.sh
 

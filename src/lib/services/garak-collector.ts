@@ -42,9 +42,9 @@ export function getGarakApiUrl(): string {
   return raw;
 }
 
-// 가락시장 API는 pagesize 파라미터를 무시하고 항상 10건씩 반환함
-export const ACTUAL_PAGE_SIZE = 10;
-// 페이지 폭주 방지 상한 (100페이지 = 1000건)
+// 실인증 응답 검증: pagesize=100은 100건, 1000도 최대 100건 반환. 요청·계산 기준을 일치시킨다.
+export const ACTUAL_PAGE_SIZE = 100;
+// 페이지 폭주 방지 상한 (100페이지 = 10000건)
 export const MAX_PAGES = 100;
 // 페이지 병렬 요청 동시성
 const PAGE_FETCH_CONCURRENCY = 5;
@@ -244,7 +244,7 @@ export async function fetchAuctionPage(
     id: credentials.id,
     passwd: credentials.password,
     dataid: "data12",
-    pagesize: "1000", // API가 무시하지만 호환성을 위해 유지
+    pagesize: String(ACTUAL_PAGE_SIZE),
     pageidx: pageIndex.toString(),
     "portal.templet": "false",
     s_date: formatDateYmd(date),
@@ -501,7 +501,7 @@ async function collectProduct(
       issues.push(`페이지 ${rest.failedPages.length}개 조회 실패 (${rest.failedPages.join(", ")})`);
     }
     if (rest.shortPages.length > 0) {
-      issues.push(`페이지 ${rest.shortPages.join(", ")}에서 항목 누락 의심 (10건 미만 파싱)`);
+      issues.push(`페이지 ${rest.shortPages.join(", ")}에서 항목 누락 의심 (100건 미만 파싱)`);
     }
   }
   const capped = totalPages > maxPages;
@@ -509,7 +509,7 @@ async function collectProduct(
     issues.push(`${totalPages}페이지 중 ${maxPages}페이지만 수집 (상한 ${MAX_PAGES}페이지, 동일 조건 재수집으로 채워지지 않음)`);
   }
   if (totalPages >= 1 && firstPage.items.length < ACTUAL_PAGE_SIZE && totalPages > 1) {
-    issues.push("페이지 1에서 항목 누락 의심 (10건 미만 파싱)");
+    issues.push("페이지 1에서 항목 누락 의심 (100건 미만 파싱)");
   }
   // 일반 누락 판정: 상한·페이지 실패와 무관하게 API 총 건수보다 파싱 항목이 적으면 PARTIAL
   // (중복 제거 전 파싱 항목 기준 — 단일 페이지 5건 중 3건, 마지막 페이지 3건 부족 같은 경우를 잡는다)
