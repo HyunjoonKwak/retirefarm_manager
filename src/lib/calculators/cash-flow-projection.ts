@@ -1,7 +1,12 @@
 /**
  * 현금흐름 예측 계산기
  * 자금 유입/유출을 종합적으로 분석
+ *
+ * 월 버킷은 utils/month-range의 [1일, 다음 달 1일) 반개구간을 쓴다 (리뷰 A3).
+ * 예측 시작 이전 날짜의 자금원/설립비는 이 함수가 버리지 않도록 호출자가
+ * (setup-cost-schedule 등으로) 미리 배치한다.
  */
+import { addMonths, getMonthRangeOf, isInMonth } from "@/lib/utils/month-range";
 
 export interface CashFlowItem {
   id: string;
@@ -83,6 +88,9 @@ export interface ProjectionInput {
 
   // 예측 기간 (개월)
   projectionMonths?: number;
+
+  // 예측 시작 시각 (그 달 1일로 정규화). 생략하면 현재 달.
+  startDate?: Date;
 }
 
 /**
@@ -98,20 +106,19 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
     monthlyLivingExpense = 0,
     initialCash = 0,
     projectionMonths = 24,
+    startDate,
   } = input;
 
-  const now = new Date();
-  const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startRange = getMonthRangeOf(startDate ?? new Date());
 
   const projections: MonthlyProjection[] = [];
   let cumulativeCashFlow = initialCash;
 
   // 월별 예측 생성
   for (let i = 0; i < projectionMonths; i++) {
-    const currentMonth = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1);
-    // End of month at 23:59:59.999 so same-day timestamps are included
-    const monthEnd = new Date(startMonth.getFullYear(), startMonth.getMonth() + i + 1, 0, 23, 59, 59, 999);
-    const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}`;
+    const monthRange = addMonths(startRange, i);
+    const currentMonth = monthRange.start;
+    const monthKey = monthRange.key;
 
     const inflowsByType: Record<string, { amount: number; items: { description: string; amount: number }[] }> = {};
     const outflowsByType: Record<string, { amount: number; items: { description: string; amount: number }[] }> = {};
@@ -119,7 +126,7 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
     // 자금 유입 처리
     for (const source of fundingSources) {
       const sourceDate = new Date(source.expectedDate);
-      if (sourceDate >= currentMonth && sourceDate <= monthEnd) {
+      if (isInMonth(sourceDate, monthRange)) {
         if (!inflowsByType[source.type]) {
           inflowsByType[source.type] = { amount: 0, items: [] };
         }
@@ -134,7 +141,7 @@ export function generateCashFlowProjection(input: ProjectionInput): CashFlowProj
     // 설립 비용 처리
     for (const cost of setupCosts) {
       const costDate = new Date(cost.expectedDate);
-      if (costDate >= currentMonth && costDate <= monthEnd) {
+      if (isInMonth(costDate, monthRange)) {
         if (!outflowsByType["설립비용"]) {
           outflowsByType["설립비용"] = { amount: 0, items: [] };
         }

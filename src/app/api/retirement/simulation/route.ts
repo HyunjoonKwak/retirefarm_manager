@@ -80,6 +80,7 @@ export async function GET() {
       },
       setupCosts: setupCosts.map((item) => ({
         estimatedCost: Number(item.estimatedCost),
+        quantity: item.quantity,
         subsidyAmount: item.subsidyAmount ? Number(item.subsidyAmount) : undefined,
       })),
       fundingSources: fundingSources.map((source) => ({

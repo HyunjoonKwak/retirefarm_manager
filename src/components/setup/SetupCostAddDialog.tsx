@@ -48,6 +48,8 @@ interface AddDialogState {
   personCount: string;
   pricePerPerson: string;
   durationMonths: string;
+  /** 지출 예정일 (YYYY-MM-DD, 선택) */
+  plannedDate: string;
 }
 
 function formatKoreanCurrency(value: string): string {
@@ -346,6 +348,18 @@ export function SetupCostAddDialog({
             {state.useLaborCalculation && calculatedLaborCost && (
               <p className="text-xs text-muted-foreground">인건비 계산에서 자동 입력됨</p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>지출 예정일 (선택)</Label>
+            <Input
+              type="date"
+              value={state.plannedDate}
+              onChange={(e) => onFieldChange("plannedDate", e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              비워 두면 현금흐름 예측에서 영농 시작 달(입력 시) 또는 예측 첫 달에 계상합니다.
+            </p>
           </div>
 
           <div className="space-y-2">

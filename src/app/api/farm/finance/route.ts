@@ -3,13 +3,14 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const createTransactionSchema = z.object({
   date: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요."),
   type: z.enum(["INCOME", "EXPENSE"]),
   category: z.string().min(1, "분류를 선택해주세요."),
   subcategory: z.string().optional(),
-  amount: z.number().min(1, "금액은 1원 이상이어야 합니다."),
+  amount: krwAmountSchema({ min: 1, minMessage: "금액은 1원 이상이어야 합니다." }),
   description: z.string().min(1, "내용을 입력해주세요."),
   relatedCropId: z.string().optional(),
   paymentMethod: z.string().optional(),

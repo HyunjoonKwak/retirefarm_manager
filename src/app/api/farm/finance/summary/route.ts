@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { decimalToString, percentOf, toDecimal, ZERO, type Decimal } from "@/lib/utils/money";
 
 // GET: 재무 요약
 export async function GET(request: NextRequest) {
@@ -28,44 +29,44 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // 수입/지출 합계
-    let totalIncome = BigInt(0);
-    let totalExpense = BigInt(0);
+    // 수입/지출 합계 — Decimal 집계 (소수 금액 데이터가 있어도 예외 없음, 리뷰 A5)
+    let totalIncome = ZERO;
+    let totalExpense = ZERO;
 
     // 월별 합계
-    const monthlyData: Record<number, { income: bigint; expense: bigint }> = {};
+    const monthlyData: Record<number, { income: Decimal; expense: Decimal }> = {};
     for (let i = 1; i <= 12; i++) {
-      monthlyData[i] = { income: BigInt(0), expense: BigInt(0) };
+      monthlyData[i] = { income: ZERO, expense: ZERO };
     }
 
     // 카테고리별 합계
-    const byCategory: Record<string, { income: bigint; expense: bigint }> = {};
+    const byCategory: Record<string, { income: Decimal; expense: Decimal }> = {};
 
     for (const tx of transactions) {
-      const amount = BigInt(tx.amount.toString());
+      const amount = toDecimal(tx.amount);
       const month = new Date(tx.date).getMonth() + 1;
 
       if (tx.type === "INCOME") {
-        totalIncome += amount;
-        monthlyData[month].income += amount;
+        totalIncome = totalIncome.plus(amount);
+        monthlyData[month].income = monthlyData[month].income.plus(amount);
       } else {
-        totalExpense += amount;
-        monthlyData[month].expense += amount;
+        totalExpense = totalExpense.plus(amount);
+        monthlyData[month].expense = monthlyData[month].expense.plus(amount);
       }
 
       // 카테고리별
       if (!byCategory[tx.category]) {
-        byCategory[tx.category] = { income: BigInt(0), expense: BigInt(0) };
+        byCategory[tx.category] = { income: ZERO, expense: ZERO };
       }
       if (tx.type === "INCOME") {
-        byCategory[tx.category].income += amount;
+        byCategory[tx.category].income = byCategory[tx.category].income.plus(amount);
       } else {
-        byCategory[tx.category].expense += amount;
+        byCategory[tx.category].expense = byCategory[tx.category].expense.plus(amount);
       }
     }
 
     // 순이익
-    const netProfit = totalIncome - totalExpense;
+    const netProfit = totalIncome.minus(totalExpense);
 
     // 전월 대비 계산
     const currentMonth = new Date().getMonth() + 1;
@@ -73,32 +74,34 @@ export async function GET(request: NextRequest) {
     const currentMonthData = monthlyData[currentMonth];
     const lastMonthData = monthlyData[lastMonth];
 
-    const incomeChange = lastMonthData.income > 0
-      ? Number(((currentMonthData.income - lastMonthData.income) * BigInt(100)) / lastMonthData.income)
-      : 0;
-    const expenseChange = lastMonthData.expense > 0
-      ? Number(((currentMonthData.expense - lastMonthData.expense) * BigInt(100)) / lastMonthData.expense)
-      : 0;
+    const incomeChange = percentOf(
+      currentMonthData.income.minus(lastMonthData.income),
+      lastMonthData.income
+    );
+    const expenseChange = percentOf(
+      currentMonthData.expense.minus(lastMonthData.expense),
+      lastMonthData.expense
+    );
 
     return NextResponse.json({
       summary: {
-        totalIncome: totalIncome.toString(),
-        totalExpense: totalExpense.toString(),
-        netProfit: netProfit.toString(),
+        totalIncome: decimalToString(totalIncome),
+        totalExpense: decimalToString(totalExpense),
+        netProfit: decimalToString(netProfit),
         transactionCount: transactions.length,
         incomeChange,
         expenseChange,
       },
       monthly: Object.entries(monthlyData).map(([month, data]) => ({
         month: parseInt(month),
-        income: data.income.toString(),
-        expense: data.expense.toString(),
-        profit: (data.income - data.expense).toString(),
+        income: decimalToString(data.income),
+        expense: decimalToString(data.expense),
+        profit: decimalToString(data.income.minus(data.expense)),
       })),
       byCategory: Object.entries(byCategory).map(([category, data]) => ({
         category,
-        income: data.income.toString(),
-        expense: data.expense.toString(),
+        income: decimalToString(data.income),
+        expense: decimalToString(data.expense),
       })),
     });
   } catch (error) {

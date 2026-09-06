@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { compareDecimal, decimalToString, percentOf, toDecimal, ZERO, type Decimal } from "@/lib/utils/money";
+import { resolveCropEndDate } from "@/lib/utils/crop-completion";
+
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+// 재배 종료일은 completedAt, 없으면(레거시) updatedAt으로 추정 (리뷰 A4)
+function cultivationDaysOf(crop: { status: string; completedAt: Date | null; completedAtEstimated?: boolean; updatedAt: Date; plantingDate: Date }) {
+  const { endDate, estimated } = resolveCropEndDate(crop);
+  return {
+    cultivationDays: Math.ceil((endDate.getTime() - crop.plantingDate.getTime()) / MS_PER_DAY),
+    completedAt: crop.completedAt ? crop.completedAt.toISOString() : null,
+    completedAtEstimated: estimated,
+  };
+}
 
 // GET: 작물별 수익성 분석
 export async function GET(request: NextRequest) {
@@ -47,27 +61,23 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: "asc" },
       });
 
-      // 수입/지출 계산
-      let income = BigInt(0);
-      let expense = BigInt(0);
-      const expenseBreakdown: Record<string, bigint> = {};
+      // 수입/지출 계산 (Decimal 집계, 리뷰 A5)
+      let income = ZERO;
+      let expense = ZERO;
+      const expenseBreakdown: Record<string, Decimal> = {};
 
       for (const tx of transactions) {
-        const amount = BigInt(tx.amount.toString());
+        const amount = toDecimal(tx.amount);
         if (tx.type === "INCOME") {
-          income += amount;
+          income = income.plus(amount);
         } else {
-          expense += amount;
-          expenseBreakdown[tx.category] = (expenseBreakdown[tx.category] || BigInt(0)) + amount;
+          expense = expense.plus(amount);
+          expenseBreakdown[tx.category] = (expenseBreakdown[tx.category] ?? ZERO).plus(amount);
         }
       }
 
       // 재배 기간 계산
-      const plantingDate = new Date(crop.plantingDate);
-      const endDate = crop.status === "COMPLETED" || crop.status === "FAILED"
-        ? new Date(crop.updatedAt)
-        : new Date();
-      const cultivationDays = Math.ceil((endDate.getTime() - plantingDate.getTime()) / (1000 * 60 * 60 * 24));
+      const { cultivationDays, completedAt, completedAtEstimated } = cultivationDaysOf(crop);
 
       // 활동 요약
       const activitySummary: Record<string, number> = {};
@@ -101,16 +111,18 @@ export async function GET(request: NextRequest) {
           growthStage: crop.growthStage,
           plantingDate: crop.plantingDate.toISOString(),
           expectedHarvestDate: crop.expectedHarvestDate.toISOString(),
+          completedAt,
+          completedAtEstimated,
         },
         finance: {
-          income: income.toString(),
-          expense: expense.toString(),
-          profit: (income - expense).toString(),
-          profitMargin: income > 0 ? Number(((income - expense) * BigInt(100)) / income) : 0,
-          roi: expense > 0 ? Number(((income - expense) * BigInt(100)) / expense) : 0,
+          income: decimalToString(income),
+          expense: decimalToString(expense),
+          profit: decimalToString(income.minus(expense)),
+          profitMargin: percentOf(income.minus(expense), income),
+          roi: percentOf(income.minus(expense), expense),
           expenseBreakdown: Object.entries(expenseBreakdown).map(([category, amount]) => ({
             category,
-            amount: amount.toString(),
+            amount: decimalToString(amount),
           })),
         },
         cultivation: {
@@ -149,24 +161,20 @@ export async function GET(request: NextRequest) {
           },
         });
 
-        let income = BigInt(0);
-        let expense = BigInt(0);
+        let income = ZERO;
+        let expense = ZERO;
 
         for (const tx of transactions) {
-          const amount = BigInt(tx.amount.toString());
+          const amount = toDecimal(tx.amount);
           if (tx.type === "INCOME") {
-            income += amount;
+            income = income.plus(amount);
           } else {
-            expense += amount;
+            expense = expense.plus(amount);
           }
         }
 
-        const profit = income - expense;
-        const plantingDate = new Date(crop.plantingDate);
-        const endDate = crop.status === "COMPLETED" || crop.status === "FAILED"
-          ? new Date(crop.updatedAt)
-          : new Date();
-        const cultivationDays = Math.ceil((endDate.getTime() - plantingDate.getTime()) / (1000 * 60 * 60 * 24));
+        const profit = income.minus(expense);
+        const { cultivationDays, completedAt, completedAtEstimated } = cultivationDaysOf(crop);
 
         return {
           id: crop.id,
@@ -174,13 +182,16 @@ export async function GET(request: NextRequest) {
           variety: crop.variety,
           status: crop.status,
           plantingDate: crop.plantingDate.toISOString(),
+          completedAt,
+          completedAtEstimated,
           cultivationDays,
-          income: income.toString(),
-          expense: expense.toString(),
-          profit: profit.toString(),
-          profitMargin: income > 0 ? Number((profit * BigInt(100)) / income) : 0,
-          roi: expense > 0 ? Number((profit * BigInt(100)) / expense) : 0,
-          dailyProfit: cultivationDays > 0 ? (Number(profit) / cultivationDays).toFixed(0) : "0",
+          income: decimalToString(income),
+          expense: decimalToString(expense),
+          profit: decimalToString(profit),
+          profitMargin: percentOf(profit, income),
+          roi: percentOf(profit, expense),
+          dailyProfit:
+            cultivationDays > 0 ? decimalToString(profit.div(cultivationDays).toDecimalPlaces(0)) : "0",
         };
       })
     );
@@ -188,44 +199,45 @@ export async function GET(request: NextRequest) {
     // 작물별 집계
     const cropTypeStats: Record<string, {
       count: number;
-      totalIncome: bigint;
-      totalExpense: bigint;
+      totalIncome: Decimal;
+      totalExpense: Decimal;
       successCount: number;
     }> = {};
 
     for (const analysis of cropAnalysis) {
       const key = analysis.name;
-      if (!cropTypeStats[key]) {
-        cropTypeStats[key] = {
-          count: 0,
-          totalIncome: BigInt(0),
-          totalExpense: BigInt(0),
-          successCount: 0,
-        };
-      }
-      cropTypeStats[key].count++;
-      cropTypeStats[key].totalIncome += BigInt(analysis.income);
-      cropTypeStats[key].totalExpense += BigInt(analysis.expense);
-      if (analysis.status === "COMPLETED") {
-        cropTypeStats[key].successCount++;
-      }
+      const current = cropTypeStats[key] ?? {
+        count: 0,
+        totalIncome: ZERO,
+        totalExpense: ZERO,
+        successCount: 0,
+      };
+      cropTypeStats[key] = {
+        count: current.count + 1,
+        totalIncome: current.totalIncome.plus(analysis.income),
+        totalExpense: current.totalExpense.plus(analysis.expense),
+        successCount: current.successCount + (analysis.status === "COMPLETED" ? 1 : 0),
+      };
     }
 
     const cropTypeSummary = Object.entries(cropTypeStats)
-      .map(([name, stats]) => ({
-        name,
-        count: stats.count,
-        totalIncome: stats.totalIncome.toString(),
-        totalExpense: stats.totalExpense.toString(),
-        totalProfit: (stats.totalIncome - stats.totalExpense).toString(),
-        avgProfit: stats.count > 0
-          ? ((stats.totalIncome - stats.totalExpense) / BigInt(stats.count)).toString()
-          : "0",
-        successRate: stats.count > 0
-          ? Math.round((stats.successCount / stats.count) * 100)
-          : 0,
-      }))
-      .sort((a, b) => Number(BigInt(b.totalProfit) - BigInt(a.totalProfit)));
+      .map(([name, stats]) => {
+        const totalProfit = stats.totalIncome.minus(stats.totalExpense);
+        return {
+          name,
+          count: stats.count,
+          totalIncome: decimalToString(stats.totalIncome),
+          totalExpense: decimalToString(stats.totalExpense),
+          totalProfit: decimalToString(totalProfit),
+          avgProfit: stats.count > 0
+            ? decimalToString(totalProfit.div(stats.count).toDecimalPlaces(0))
+            : "0",
+          successRate: stats.count > 0
+            ? Math.round((stats.successCount / stats.count) * 100)
+            : 0,
+        };
+      })
+      .sort((a, b) => compareDecimal(b.totalProfit, a.totalProfit));
 
     return NextResponse.json({
       crops: cropAnalysis,

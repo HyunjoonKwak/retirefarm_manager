@@ -1,13 +1,15 @@
 import { z } from "zod";
+import { calculateFundingRequirement } from "@/lib/calculators/funding-requirement";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 export const smartFarmPlanSchema = z.object({
   targetDate: z.string().refine((date) => {
     const parsed = new Date(date);
     return parsed > new Date();
   }, "퇴직 목표일은 오늘 이후여야 합니다."),
-  estimatedRetirementPay: z.number().min(0).optional(), // DC 퇴직금 예상액
-  estimatedSeverancePay: z.number().min(0).optional(), // 퇴직수당 예상액
-  monthlyLivingExpense: z.number().min(0).optional(), // 월 생활비 (버퍼 계산용)
+  estimatedRetirementPay: krwAmountSchema().optional(), // DC 퇴직금 예상액
+  estimatedSeverancePay: krwAmountSchema().optional(), // 퇴직수당 예상액
+  monthlyLivingExpense: krwAmountSchema().optional(), // 월 생활비 (버퍼 계산용)
   bufferMonths: z.number().min(1).max(24).default(6), // 초기 버퍼 개월 수
 });
 
@@ -62,6 +64,8 @@ export function calculateSmartFarmPlanSummary(input: {
   };
   setupCosts: Array<{
     estimatedCost: number;
+    /** 없으면 1 — funding/summary와 같은 정의(estimatedCost × quantity) */
+    quantity?: number | null;
     subsidyAmount?: number;
   }>;
   fundingSources: Array<{
@@ -69,7 +73,7 @@ export function calculateSmartFarmPlanSummary(input: {
     status: string;
   }>;
 }): SmartFarmPlanSummary {
-  const { goal, setupCosts, fundingSources } = input;
+  const { goal } = input;
 
   const now = new Date();
   const targetDate = new Date(goal.targetDate);
@@ -85,29 +89,24 @@ export function calculateSmartFarmPlanSummary(input: {
   const estimatedSeverancePay = goal.estimatedSeverancePay || 0;
   const totalRetirementFunds = estimatedRetirementPay + estimatedSeverancePay;
 
-  // 설립 비용 계산
-  const totalSetupCost = setupCosts.reduce((sum, item) => sum + item.estimatedCost, 0);
-  const totalSubsidyAmount = setupCosts.reduce((sum, item) => sum + (item.subsidyAmount || 0), 0);
-  const netSetupCost = totalSetupCost - totalSubsidyAmount;
-
-  // 자금 조달 계산
-  const totalFundingPlanned = fundingSources.reduce((sum, source) => sum + source.amount, 0);
-  const totalFundingSecured = fundingSources
-    .filter((source) => source.status === "COMPLETED")
-    .reduce((sum, source) => sum + source.amount, 0);
-
-  // 초기 버퍼 계산
-  const bufferMonths = goal.bufferMonths || 6;
-  const monthlyLivingExpense = goal.monthlyLivingExpense || 0;
-  const initialLivingBuffer = monthlyLivingExpense * bufferMonths;
-
-  // 총 필요 자금
-  const totalRequiredFunds = netSetupCost + initialLivingBuffer;
-  const fundingGap = Math.max(0, totalRequiredFunds - totalFundingPlanned);
-  const fundingProgress =
-    totalRequiredFunds > 0
-      ? Math.min(100, Math.round((totalFundingPlanned / totalRequiredFunds) * 100))
-      : 0;
+  // 설립 비용·자금 조달·버퍼 — funding/summary, cash-flow와 같은 단일 계산기 (리뷰 A1)
+  const requirement = calculateFundingRequirement({
+    setupCosts: input.setupCosts,
+    fundingSources: input.fundingSources,
+    monthlyLivingExpense: goal.monthlyLivingExpense,
+    bufferMonths: goal.bufferMonths,
+  });
+  const totalSetupCost = requirement.totalSetupCost.toNumber();
+  const totalSubsidyAmount = requirement.totalSubsidy.toNumber();
+  const netSetupCost = requirement.netSetupCost.toNumber();
+  const totalFundingPlanned = requirement.totalFundingPlanned.toNumber();
+  const totalFundingSecured = requirement.totalFundingSecured.toNumber();
+  const bufferMonths = requirement.bufferMonths;
+  const monthlyLivingExpense = requirement.monthlyLivingExpense.toNumber();
+  const initialLivingBuffer = requirement.initialLivingBuffer.toNumber();
+  const totalRequiredFunds = requirement.totalRequiredFunds.toNumber();
+  const fundingGap = requirement.fundingShortfall.toNumber();
+  const fundingProgress = requirement.fundingProgress;
 
   // 준비도 점수 계산 (여러 요소 종합)
   let readinessScore = 0;
@@ -125,7 +124,7 @@ export function calculateSmartFarmPlanSummary(input: {
   if (initialLivingBuffer > 0) readinessScore += 15;
 
   // 5. 자금 조달 계획 입력 여부 (15점)
-  if (fundingSources.length > 0) readinessScore += 15;
+  if (input.fundingSources.length > 0) readinessScore += 15;
 
   return {
     targetDate,

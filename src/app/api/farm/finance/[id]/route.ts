@@ -3,13 +3,14 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const updateTransactionSchema = z.object({
   date: z.string().refine((val) => !isNaN(Date.parse(val))).optional(),
   type: z.enum(["INCOME", "EXPENSE"]).optional(),
   category: z.string().min(1).optional(),
   subcategory: z.string().nullable().optional(),
-  amount: z.number().min(1).optional(),
+  amount: krwAmountSchema({ min: 1 }).optional(),
   description: z.string().min(1).optional(),
   relatedCropId: z.string().nullable().optional(),
   paymentMethod: z.string().nullable().optional(),

@@ -3,17 +3,21 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const updateItemSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  estimatedCost: z.number().min(0).optional(),
-  actualCost: z.number().min(0).optional(),
-  quantity: z.number().min(1).optional(),
+  estimatedCost: krwAmountSchema().optional(),
+  actualCost: krwAmountSchema().optional(),
+  quantity: z.number().int().min(1).optional(),
   unit: z.string().optional(),
   isGovernmentSubsidy: z.boolean().optional(),
-  subsidyAmount: z.number().optional(),
+  subsidyAmount: krwAmountSchema().optional(),
   subsidyRate: z.number().min(0).max(100).optional(),
+  // 지출 예정일 / 지출일. null을 보내면 지운다.
+  plannedDate: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요.").nullable().optional(),
+  paidAt: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요.").nullable().optional(),
   priority: z.enum(["ESSENTIAL", "IMPORTANT", "OPTIONAL"]).optional(),
   status: z.enum(["PLANNED", "QUOTED", "ORDERED", "DELIVERED", "INSTALLED"]).optional(),
   notes: z.string().optional(),
@@ -99,7 +103,21 @@ export async function PATCH(
 
     const item = await prisma.setupCostItem.update({
       where: { id },
-      data: validatedData,
+      data: {
+        ...validatedData,
+        plannedDate:
+          validatedData.plannedDate === undefined
+            ? undefined
+            : validatedData.plannedDate === null
+              ? null
+              : new Date(validatedData.plannedDate),
+        paidAt:
+          validatedData.paidAt === undefined
+            ? undefined
+            : validatedData.paidAt === null
+              ? null
+              : new Date(validatedData.paidAt),
+      },
       include: {
         subcategory: {
           include: {

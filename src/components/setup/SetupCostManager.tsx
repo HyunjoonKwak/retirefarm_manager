@@ -29,7 +29,7 @@ import {
   ChevronRight,
   Pencil,
 } from "lucide-react";
-import { formatLargeNumber } from "@/lib/utils/format";
+import { formatDate, formatLargeNumber } from "@/lib/utils/format";
 import { toast } from "sonner";
 import { SetupCostAddDialog } from "./SetupCostAddDialog";
 
@@ -50,6 +50,14 @@ interface SetupCostItem {
   subsidyAmount?: string;
   priority: "ESSENTIAL" | "IMPORTANT" | "OPTIONAL";
   status: "PLANNED" | "QUOTED" | "ORDERED" | "DELIVERED" | "INSTALLED";
+  /** 지출 예정일 (ISO) — null이면 예측에서 폴백 달로 계상 */
+  plannedDate?: string | null;
+  /** 지출일 (ISO) — 있으면 미래 유출에서 제외 */
+  paidAt?: string | null;
+}
+
+function toDateInputValue(value?: string | null): string {
+  return value ? value.split("T")[0] : "";
 }
 
 interface Subcategory {
@@ -137,6 +145,7 @@ export function SetupCostManager() {
     personCount: "",
     pricePerPerson: "",
     durationMonths: "",
+    plannedDate: "",
   });
 
   // Edit dialog
@@ -145,6 +154,8 @@ export function SetupCostManager() {
   const [editItemName, setEditItemName] = useState("");
   const [editItemCost, setEditItemCost] = useState("");
   const [editItemPriority, setEditItemPriority] = useState<Priority>("ESSENTIAL");
+  const [editPlannedDate, setEditPlannedDate] = useState("");
+  const [editPaidAt, setEditPaidAt] = useState("");
 
   async function fetchData(preserveExpanded = false) {
     try {
@@ -212,6 +223,7 @@ export function SetupCostManager() {
           personCount: addState.personCount ? Number(addState.personCount) : undefined,
           pricePerPerson: addState.pricePerPerson ? Number(addState.pricePerPerson) : undefined,
           durationMonths: addState.durationMonths ? Number(addState.durationMonths) : undefined,
+          plannedDate: addState.plannedDate || undefined,
         }),
       });
       const result = await response.json();
@@ -232,6 +244,7 @@ export function SetupCostManager() {
           personCount: "",
           pricePerPerson: "",
           durationMonths: "",
+          plannedDate: "",
         });
         fetchData(true);
       }
@@ -247,6 +260,8 @@ export function SetupCostManager() {
     setEditItemName(item.name);
     setEditItemCost(item.estimatedCost);
     setEditItemPriority(item.priority);
+    setEditPlannedDate(toDateInputValue(item.plannedDate));
+    setEditPaidAt(toDateInputValue(item.paidAt));
     setIsEditDialogOpen(true);
   }
 
@@ -265,6 +280,8 @@ export function SetupCostManager() {
           name: editItemName,
           estimatedCost: Number(editItemCost),
           priority: editItemPriority,
+          plannedDate: editPlannedDate || null,
+          paidAt: editPaidAt || null,
         }),
       });
       const result = await response.json();
@@ -439,6 +456,17 @@ export function SetupCostManager() {
                               <span className="text-sm font-medium">
                                 {formatLargeNumber(item.estimatedCost)}
                               </span>
+                              {item.paidAt ? (
+                                <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800">
+                                  지출 {formatDate(item.paidAt)}
+                                </span>
+                              ) : item.plannedDate ? (
+                                <span className="text-xs text-muted-foreground">
+                                  예정 {formatDate(item.plannedDate)}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">예정일 미정</span>
+                              )}
                               <Select
                                 value={item.status}
                                 onValueChange={(v) => handleUpdateStatus(item.id, v)}
@@ -543,6 +571,26 @@ export function SetupCostManager() {
                   <SelectItem value="OPTIONAL">선택</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>지출 예정일</Label>
+                <Input
+                  type="date"
+                  value={editPlannedDate}
+                  onChange={(e) => setEditPlannedDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">비우면 예측에서 폴백 달로 계상</p>
+              </div>
+              <div className="space-y-2">
+                <Label>지출일</Label>
+                <Input
+                  type="date"
+                  value={editPaidAt}
+                  onChange={(e) => setEditPaidAt(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">입력하면 미래 유출에서 제외</p>
+              </div>
             </div>
           </div>
           <DialogFooter>

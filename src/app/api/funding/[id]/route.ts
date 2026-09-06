@@ -3,11 +3,12 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const updateFundingSchema = z.object({
   type: z.enum(["REAL_ESTATE_SALE", "SAVINGS", "LOAN", "GOVERNMENT_SUBSIDY", "RETIREMENT_PAY", "SEVERANCE_PAY", "OTHER"]).optional(),
   name: z.string().min(1).optional(),
-  amount: z.number().min(0).optional(),
+  amount: krwAmountSchema().optional(),
   expectedDate: z.string().refine((val) => !isNaN(Date.parse(val))).optional(),
   // asset_manager Portfolio id — 원장은 asset_manager 소유 (Asset Hub §1.5)
   externalAssetId: z.string().nullable().optional(),

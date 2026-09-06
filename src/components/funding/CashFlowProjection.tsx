@@ -37,6 +37,21 @@ interface MonthlyProjection {
   cumulativeCashFlow: number;
 }
 
+// 서버가 설립비/자금원을 어떻게 배치했는지 (리뷰 A2)
+interface ProjectionAssumptions {
+  projectionStartMonth: string;
+  setupCosts: {
+    fallbackMonth: string;
+    fallbackReason: "farmStartDate" | "projectionStart";
+    undatedCount: number;
+    overdueCount: number;
+    paidCount: number;
+    paidAmount: number;
+    scheduledAmount: number;
+  };
+  pastFunding: { count: number; amount: string };
+}
+
 interface ProjectionResult {
   projections: MonthlyProjection[];
   summary: {
@@ -52,6 +67,7 @@ interface ProjectionResult {
 export function CashFlowProjection() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProjectionResult | null>(null);
+  const [assumptions, setAssumptions] = useState<ProjectionAssumptions | null>(null);
 
   // 입력값
   const [monthlyOperatingCosts, setMonthlyOperatingCosts] = useState("");
@@ -64,6 +80,7 @@ export function CashFlowProjection() {
   async function handleGenerate() {
     setLoading(true);
     setResult(null);
+    setAssumptions(null);
 
     try {
       const response = await fetch("/api/funding/cash-flow", {
@@ -87,6 +104,7 @@ export function CashFlowProjection() {
       }
 
       setResult(data.result);
+      setAssumptions(data.assumptions ?? null);
     } catch {
       toast.error("예측 생성 중 오류가 발생했습니다.");
     } finally {
@@ -254,6 +272,50 @@ export function CashFlowProjection() {
               </CardContent>
             </Card>
           </div>
+
+          {/* 배치 가정 안내 */}
+          {assumptions && (
+            <Card className="border-blue-200 bg-blue-50/50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">예측에 적용한 가정</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground space-y-1">
+                <p>
+                  설립비 유출 {formatLargeNumber(assumptions.setupCosts.scheduledAmount)}은 각 항목의
+                  지출 예정일 기준입니다.
+                  {assumptions.setupCosts.undatedCount > 0 && (
+                    <>
+                      {" "}예정일이 없는 {assumptions.setupCosts.undatedCount}건은{" "}
+                      {assumptions.setupCosts.fallbackMonth}
+                      {assumptions.setupCosts.fallbackReason === "farmStartDate"
+                        ? " (영농 시작 달)"
+                        : " (예측 첫 달)"}
+                      에 계상했습니다.
+                    </>
+                  )}
+                  {assumptions.setupCosts.overdueCount > 0 && (
+                    <>
+                      {" "}예정일이 지났지만 미지출인 {assumptions.setupCosts.overdueCount}건은 예측 첫 달(
+                      {assumptions.projectionStartMonth})에 계상했습니다.
+                    </>
+                  )}
+                  {assumptions.setupCosts.paidCount > 0 && (
+                    <>
+                      {" "}지출 완료 {assumptions.setupCosts.paidCount}건(
+                      {formatLargeNumber(assumptions.setupCosts.paidAmount)})은 제외했습니다.
+                    </>
+                  )}
+                </p>
+                {assumptions.pastFunding.count > 0 && (
+                  <p>
+                    예정일이 예측 시작 이전인 자금원 {assumptions.pastFunding.count}건(
+                    {formatLargeNumber(assumptions.pastFunding.amount)})은 포함하지 않았습니다.
+                    이미 받은 돈이라면 &quot;현재 보유 현금&quot;에 반영해 주세요.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* 월별 상세 테이블 */}
           <Card>

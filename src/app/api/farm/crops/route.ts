@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { isTerminalCropStatus } from "@/lib/utils/crop-completion";
 
 const createCropSchema = z.object({
   name: z.string().min(1, "작물명을 입력해주세요."),
@@ -55,9 +56,10 @@ export async function GET(request: NextRequest) {
       orderBy: { plantingDate: "desc" },
     });
 
-    // 활동 내 Decimal 변환
+    // 활동 내 Decimal 변환 + 완료일 추정 여부 (레거시 종료 행은 completedAt이 없다)
     const serializedCrops = crops.map((crop) => ({
       ...crop,
+      completedAtEstimated: isTerminalCropStatus(crop.status) && (crop.completedAt === null || crop.completedAtEstimated),
       activities: crop.activities.map((activity) => ({
         ...activity,
         quantity: activity.quantity ? Number(activity.quantity) : null,

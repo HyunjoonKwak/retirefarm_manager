@@ -45,6 +45,10 @@ interface Crop {
   status: "GROWING" | "HARVESTING" | "COMPLETED" | "FAILED";
   growthStage: string;
   notes: string | null;
+  /** 재배 종료일 — COMPLETED/FAILED 전이 시 서버 기록, 교정 가능 */
+  completedAt: string | null;
+  /** 레거시 종료 행: completedAt이 없어 보고서가 마지막 수정 시각으로 추정 */
+  completedAtEstimated?: boolean;
   _count: {
     activities: number;
     transactions: number;
@@ -179,6 +183,27 @@ export function CropManager() {
       }
     } catch {
       toast.error("상태 변경 중 오류가 발생했습니다.");
+    }
+  }
+
+  async function handleUpdateCompletedAt(id: string, completedAt: string) {
+    if (!completedAt) return;
+    try {
+      const response = await fetch(`/api/farm/crops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completedAt }),
+      });
+
+      if (!response.ok) {
+        const result = await response.json();
+        toast.error(result.error || "완료일 변경에 실패했습니다.");
+      } else {
+        toast.success("완료일이 저장되었습니다.");
+        fetchCrops();
+      }
+    } catch {
+      toast.error("완료일 변경 중 오류가 발생했습니다.");
     }
   }
 
@@ -398,6 +423,25 @@ export function CropManager() {
                         </Badge>
                       </span>
                     </div>
+                    {(crop.status === "COMPLETED" || crop.status === "FAILED") && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          완료일
+                          {crop.completedAtEstimated && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0">
+                              추정
+                            </Badge>
+                          )}
+                        </span>
+                        <Input
+                          type="date"
+                          className="h-7 w-[140px] text-xs"
+                          value={crop.completedAt ? crop.completedAt.split("T")[0] : ""}
+                          onChange={(e) => handleUpdateCompletedAt(crop.id, e.target.value)}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* 활동 수 */}

@@ -3,13 +3,14 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const createItemSchema = z.object({
   subcategoryId: z.string().min(1, "서브카테고리를 선택해주세요."),
   name: z.string().min(1, "항목명을 입력해주세요."),
   description: z.string().optional(),
-  estimatedCost: z.number().min(0, "예상 비용은 0 이상이어야 합니다."),
-  quantity: z.number().min(1).default(1),
+  estimatedCost: krwAmountSchema({ minMessage: "예상 비용은 0 이상이어야 합니다." }),
+  quantity: z.number().int().min(1).default(1),
   unit: z.string().default("개"),
   areaInPyeong: z.number().optional(),      // 면적 (평)
   pricePerPyeong: z.number().optional(),    // 평단가 (원)
@@ -17,8 +18,10 @@ const createItemSchema = z.object({
   pricePerPerson: z.number().optional(),    // 인당 단가 (인건비용)
   durationMonths: z.number().optional(),    // 기간 (개월, 인건비용)
   isGovernmentSubsidy: z.boolean().default(false),
-  subsidyAmount: z.number().optional(),
+  subsidyAmount: krwAmountSchema().optional(),
   subsidyRate: z.number().min(0).max(100).optional(),
+  // 지출 예정일 (선택). 없으면 현금흐름 예측이 영농 시작 달/예측 첫 달로 폴백한다.
+  plannedDate: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요.").optional(),
   priority: z.enum(["ESSENTIAL", "IMPORTANT", "OPTIONAL"]).default("ESSENTIAL"),
   notes: z.string().optional(),
 });
@@ -109,6 +112,7 @@ export async function POST(request: NextRequest) {
         isGovernmentSubsidy: validatedData.isGovernmentSubsidy,
         subsidyAmount: validatedData.subsidyAmount,
         subsidyRate: validatedData.subsidyRate,
+        plannedDate: validatedData.plannedDate ? new Date(validatedData.plannedDate) : null,
         priority: validatedData.priority,
         notes: validatedData.notes,
       },

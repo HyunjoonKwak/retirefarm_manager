@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
 import { externalPortfolioClient } from "@/lib/api/external-portfolio";
+import { decimalToString, toDecimal, ZERO } from "@/lib/utils/money";
 
 // GET: 대시보드 통합 데이터
 export async function GET() {
@@ -166,22 +167,22 @@ export async function GET() {
     }
 
     // 재무 현황 계산
-    let monthlyIncome = BigInt(0);
-    let monthlyExpense = BigInt(0);
+    let monthlyIncome = ZERO;
+    let monthlyExpense = ZERO;
 
     for (const tx of monthlyFinance) {
-      const amount = BigInt(tx.amount.toString());
+      const amount = toDecimal(tx.amount);
       if (tx.type === "INCOME") {
-        monthlyIncome += amount;
+        monthlyIncome = monthlyIncome.plus(amount);
       } else {
-        monthlyExpense += amount;
+        monthlyExpense = monthlyExpense.plus(amount);
       }
     }
 
     const financeData = {
-      monthlyIncome: monthlyIncome.toString(),
-      monthlyExpense: monthlyExpense.toString(),
-      monthlyProfit: (monthlyIncome - monthlyExpense).toString(),
+      monthlyIncome: decimalToString(monthlyIncome),
+      monthlyExpense: decimalToString(monthlyExpense),
+      monthlyProfit: decimalToString(monthlyIncome.minus(monthlyExpense)),
       transactionCount: monthlyFinance.length,
     };
 

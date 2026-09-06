@@ -2,8 +2,27 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { calculateFundingRequirement } from "@/lib/calculators/funding-requirement";
+import { decimalToString, sumDecimals, ZERO } from "@/lib/utils/money";
+import { addMonths, getMonthRangeOf, isInMonth } from "@/lib/utils/month-range";
+
+const FUNDING_TYPES = [
+  "REAL_ESTATE_SALE",
+  "SAVINGS",
+  "LOAN",
+  "GOVERNMENT_SUBSIDY",
+  "RETIREMENT_PAY",
+  "SEVERANCE_PAY",
+  "OTHER",
+] as const;
+
+const FUNDING_STATUSES = ["PLANNED", "IN_PROGRESS", "COMPLETED"] as const;
+
+const MONTHLY_FLOW_MONTHS = 12;
 
 // GET: 자금 조달 요약
+// 필요 자금은 /plan과 같은 단일 계산기(설립비 순액 + 생활비 버퍼)를 쓴다 (리뷰 A1).
+// 금액은 Decimal로 집계해 소수 데이터가 있어도 500이 나지 않는다 (리뷰 A5).
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -12,113 +31,84 @@ export async function GET() {
       return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
     }
 
-    const fundingSources = await prisma.fundingSource.findMany({
-      where: { userId: session.user.id },
+    const userId = session.user.id;
+
+    const [fundingSources, setupItems, goal] = await Promise.all([
+      prisma.fundingSource.findMany({ where: { userId } }),
+      prisma.setupCostItem.findMany({ where: { userId } }),
+      prisma.retirementGoal.findUnique({ where: { userId } }),
+    ]);
+
+    // 유형별 / 상태별 합계 (알 수 없는 값은 OTHER / PLANNED로 묶어 TypeError를 막는다)
+    const byType = FUNDING_TYPES.map((type) => {
+      const ofType = fundingSources.filter(
+        (source) =>
+          source.type === type ||
+          (type === "OTHER" && !(FUNDING_TYPES as readonly string[]).includes(source.type))
+      );
+      return {
+        type,
+        total: decimalToString(sumDecimals(ofType.map((s) => s.amount))),
+        count: ofType.length,
+        completed: decimalToString(
+          sumDecimals(ofType.filter((s) => s.status === "COMPLETED").map((s) => s.amount))
+        ),
+      };
     });
 
-    // 유형별 합계
-    const byType: Record<string, { total: bigint; count: number; completed: bigint }> = {
-      REAL_ESTATE_SALE: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      SAVINGS: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      LOAN: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      GOVERNMENT_SUBSIDY: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      RETIREMENT_PAY: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      SEVERANCE_PAY: { total: BigInt(0), count: 0, completed: BigInt(0) },
-      OTHER: { total: BigInt(0), count: 0, completed: BigInt(0) },
-    };
-
-    // 상태별 합계
-    const byStatus: Record<string, { total: bigint; count: number }> = {
-      PLANNED: { total: BigInt(0), count: 0 },
-      IN_PROGRESS: { total: BigInt(0), count: 0 },
-      COMPLETED: { total: BigInt(0), count: 0 },
-    };
-
-    let totalAmount = BigInt(0);
-    let completedAmount = BigInt(0);
-
-    for (const source of fundingSources) {
-      const amount = BigInt(source.amount.toString());
-      totalAmount += amount;
-
-      // 유형별
-      byType[source.type].total += amount;
-      byType[source.type].count += 1;
-
-      // 상태별
-      byStatus[source.status].total += amount;
-      byStatus[source.status].count += 1;
-
-      if (source.status === "COMPLETED") {
-        completedAmount += amount;
-        byType[source.type].completed += amount;
-      }
-    }
-
-    // 설립 비용 총액 조회
-    const setupItems = await prisma.setupCostItem.findMany({
-      where: { userId: session.user.id },
+    const byStatus = FUNDING_STATUSES.map((status) => {
+      const ofStatus = fundingSources.filter(
+        (source) =>
+          source.status === status ||
+          (status === "PLANNED" && !(FUNDING_STATUSES as readonly string[]).includes(source.status))
+      );
+      return {
+        status,
+        total: decimalToString(sumDecimals(ofStatus.map((s) => s.amount))),
+        count: ofStatus.length,
+      };
     });
 
-    let totalSetupCost = BigInt(0);
-    let totalSubsidy = BigInt(0);
+    const requirement = calculateFundingRequirement({
+      setupCosts: setupItems,
+      fundingSources,
+      monthlyLivingExpense: goal?.monthlyLivingExpense,
+      bufferMonths: goal?.bufferMonths,
+    });
 
-    for (const item of setupItems) {
-      totalSetupCost += BigInt(item.estimatedCost.toString()) * BigInt(item.quantity);
-      if (item.subsidyAmount) {
-        totalSubsidy += BigInt(item.subsidyAmount.toString());
-      }
-    }
-
-    // 자금 갭 계산
-    const requiredAmount = totalSetupCost - totalSubsidy;
-    const fundingGap = requiredAmount - totalAmount;
-    const fundingRatio = requiredAmount > 0
-      ? Math.round(Number((totalAmount * BigInt(10000)) / requiredAmount)) / 100
-      : 0;
-
-    // 월별 현금흐름 (향후 12개월)
-    const monthlyFlow: { month: string; amount: string }[] = [];
-    const now = new Date();
-
-    for (let i = 0; i < 12; i++) {
-      const targetMonth = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + i + 1, 0);
-
-      let monthAmount = BigInt(0);
-      for (const source of fundingSources) {
-        const expectedDate = new Date(source.expectedDate);
-        if (expectedDate >= targetMonth && expectedDate <= monthEnd) {
-          monthAmount += BigInt(source.amount.toString());
-        }
-      }
-
-      monthlyFlow.push({
-        month: `${targetMonth.getFullYear()}-${String(targetMonth.getMonth() + 1).padStart(2, "0")}`,
-        amount: monthAmount.toString(),
-      });
-    }
+    // 월별 자금 유입 (향후 12개월) — [1일, 다음 달 1일) 반개구간 (리뷰 A3)
+    const startRange = getMonthRangeOf(new Date());
+    const monthlyFlow = Array.from({ length: MONTHLY_FLOW_MONTHS }, (_, i) => {
+      const range = addMonths(startRange, i);
+      const inMonth = fundingSources.filter((source) => isInMonth(source.expectedDate, range));
+      return {
+        month: range.key,
+        amount: decimalToString(sumDecimals(inMonth.map((s) => s.amount))),
+      };
+    });
 
     return NextResponse.json({
       summary: {
-        totalAmount: totalAmount.toString(),
-        completedAmount: completedAmount.toString(),
+        totalAmount: decimalToString(requirement.totalFundingPlanned),
+        completedAmount: decimalToString(requirement.totalFundingSecured),
         totalSources: fundingSources.length,
-        requiredAmount: requiredAmount.toString(),
-        fundingGap: fundingGap.toString(),
-        fundingRatio,
+        requiredAmount: decimalToString(requirement.totalRequiredFunds),
+        fundingGap: decimalToString(requirement.fundingGap),
+        fundingRatio: requirement.fundingRatio,
       },
-      byType: Object.entries(byType).map(([type, values]) => ({
-        type,
-        total: values.total.toString(),
-        count: values.count,
-        completed: values.completed.toString(),
-      })),
-      byStatus: Object.entries(byStatus).map(([status, values]) => ({
-        status,
-        total: values.total.toString(),
-        count: values.count,
-      })),
+      // 필요 자금 구성 — 화면 라벨용 (설립비 순액 + 생활비 버퍼)
+      requiredBreakdown: {
+        totalSetupCost: decimalToString(requirement.totalSetupCost),
+        totalSubsidy: decimalToString(requirement.totalSubsidy),
+        netSetupCost: decimalToString(requirement.netSetupCost),
+        initialLivingBuffer: decimalToString(requirement.initialLivingBuffer),
+        bufferMonths: requirement.bufferMonths,
+        monthlyLivingExpense: decimalToString(requirement.monthlyLivingExpense),
+        hasLivingBuffer: requirement.initialLivingBuffer.gt(ZERO),
+        hasGoal: goal !== null,
+      },
+      byType,
+      byStatus,
       monthlyFlow,
     });
   } catch (error) {

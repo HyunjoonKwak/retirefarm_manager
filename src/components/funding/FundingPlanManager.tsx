@@ -67,6 +67,18 @@ interface MonthlyFlow {
   amount: string;
 }
 
+// 필요 자금 구성 (설립비 순액 + 생활비 버퍼) — /plan과 같은 정의
+interface RequiredBreakdown {
+  totalSetupCost: string;
+  totalSubsidy: string;
+  netSetupCost: string;
+  initialLivingBuffer: string;
+  bufferMonths: number;
+  monthlyLivingExpense: string;
+  hasLivingBuffer: boolean;
+  hasGoal: boolean;
+}
+
 interface ExternalAsset {
   id: string;
   propertyType: string;
@@ -100,6 +112,7 @@ export function FundingPlanManager() {
   const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
   const [summary, setSummary] = useState<FundingSummary | null>(null);
   const [monthlyFlow, setMonthlyFlow] = useState<MonthlyFlow[]>([]);
+  const [requiredBreakdown, setRequiredBreakdown] = useState<RequiredBreakdown | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [externalAssets, setExternalAssets] = useState<ExternalAsset[]>([]);
@@ -137,6 +150,7 @@ export function FundingPlanManager() {
       setFundingSources(sourcesData.fundingSources || []);
       setSummary(summaryData.summary || null);
       setMonthlyFlow(summaryData.monthlyFlow || []);
+      setRequiredBreakdown(summaryData.requiredBreakdown || null);
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
@@ -364,6 +378,14 @@ export function FundingPlanManager() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatLargeNumber(summary.requiredAmount)}</div>
+              {requiredBreakdown && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  설립비 순액 {formatLargeNumber(requiredBreakdown.netSetupCost)}
+                  {requiredBreakdown.hasLivingBuffer
+                    ? ` + 생활비 버퍼 ${requiredBreakdown.bufferMonths}개월 ${formatLargeNumber(requiredBreakdown.initialLivingBuffer)}`
+                    : " (생활비 버퍼 미설정 — 플래너에서 월 생활비 입력 시 포함)"}
+                </p>
+              )}
             </CardContent>
           </Card>
 

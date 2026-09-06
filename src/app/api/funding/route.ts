@@ -3,11 +3,12 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { krwAmountSchema } from "@/lib/validations/money";
 
 const createFundingSchema = z.object({
   type: z.enum(["REAL_ESTATE_SALE", "SAVINGS", "LOAN", "GOVERNMENT_SUBSIDY", "RETIREMENT_PAY", "SEVERANCE_PAY", "OTHER"]),
   name: z.string().min(1, "자금원 이름을 입력해주세요."),
-  amount: z.number().min(0, "금액은 0 이상이어야 합니다."),
+  amount: krwAmountSchema({ minMessage: "금액은 0 이상이어야 합니다." }),
   expectedDate: z.string().refine((val) => !isNaN(Date.parse(val)), "유효한 날짜를 입력해주세요."),
   // asset_manager Portfolio id — 원장은 asset_manager 소유 (Asset Hub §1.5)
   externalAssetId: z.string().optional(),

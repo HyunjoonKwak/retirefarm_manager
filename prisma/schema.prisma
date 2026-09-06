@@ -119,6 +119,11 @@ model SetupCostItem {
   subsidyRate      Decimal?
   priority         String     @default("ESSENTIAL") // Priority enum -> String
   status           String     @default("PLANNED")   // ItemStatus enum -> String
+  // 지출 예정일. null이면 현금흐름 예측에서 영농 시작 달(있으면) 또는 예측 첫 달로 폴백한다.
+  // 기존 행은 null — 등록일(createdAt)로 과거를 추정하지 않는다.
+  plannedDate      DateTime?
+  // 지출일. 값이 있으면 이미 지출한 항목으로 보고 미래 유출에서 제외한다.
+  paidAt           DateTime?
   notes            String?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -208,6 +213,10 @@ model Crop {
   plotId              String?
   status              String      @default("GROWING")  // CropStatus enum -> String
   growthStage         String      @default("SEEDING")  // GrowthStage enum -> String
+  // 재배 종료일. COMPLETED/FAILED로 전이될 때 서버가 기록하고 사용자가 교정할 수 있다.
+  // 기존 종료 행은 null — 보고서는 updatedAt으로 폴백하며 추정치로 표시한다 (backfill 없음).
+  completedAt         DateTime?
+  completedAtEstimated Boolean @default(false) // 레거시 수정일 기반 추정 여부
   notes               String?
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/lib/auth/options";
+import { setupCostLineTotal } from "@/lib/calculators/funding-requirement";
+import { decimalToString, toDecimal, ZERO, type Decimal } from "@/lib/utils/money";
 
 // GET: 설립 비용 요약
 export async function GET() {
@@ -23,16 +25,16 @@ export async function GET() {
       },
     });
 
-    // 합계 계산
-    let totalEstimatedCost = BigInt(0);
-    let totalActualCost = BigInt(0);
-    let totalSubsidy = BigInt(0);
+    // 합계 계산 — Decimal 집계, 항목 합계는 funding-requirement와 같은 정의(estimatedCost × quantity)
+    let totalEstimatedCost = ZERO;
+    let totalActualCost = ZERO;
+    let totalSubsidy = ZERO;
 
-    const byCategory: Record<string, { estimated: bigint; actual: bigint; subsidy: bigint }> = {};
-    const byPriority: Record<string, { estimated: bigint; count: number }> = {
-      ESSENTIAL: { estimated: BigInt(0), count: 0 },
-      IMPORTANT: { estimated: BigInt(0), count: 0 },
-      OPTIONAL: { estimated: BigInt(0), count: 0 },
+    const byCategory: Record<string, { estimated: Decimal; actual: Decimal; subsidy: Decimal }> = {};
+    const byPriority: Record<string, { estimated: Decimal; count: number }> = {
+      ESSENTIAL: { estimated: ZERO, count: 0 },
+      IMPORTANT: { estimated: ZERO, count: 0 },
+      OPTIONAL: { estimated: ZERO, count: 0 },
     };
     const byStatus: Record<string, number> = {
       PLANNED: 0,
@@ -43,37 +45,36 @@ export async function GET() {
     };
 
     for (const item of items) {
-      const itemTotal = BigInt(item.estimatedCost.toString()) * BigInt(item.quantity);
+      const itemTotal = setupCostLineTotal(item);
       const itemActual = item.actualCost
-        ? BigInt(item.actualCost.toString()) * BigInt(item.quantity)
-        : BigInt(0);
-      const itemSubsidy = item.subsidyAmount
-        ? BigInt(item.subsidyAmount.toString())
-        : BigInt(0);
+        ? toDecimal(item.actualCost).mul(item.quantity)
+        : ZERO;
+      const itemSubsidy = toDecimal(item.subsidyAmount);
 
-      totalEstimatedCost += itemTotal;
-      totalActualCost += itemActual;
-      totalSubsidy += itemSubsidy;
+      totalEstimatedCost = totalEstimatedCost.plus(itemTotal);
+      totalActualCost = totalActualCost.plus(itemActual);
+      totalSubsidy = totalSubsidy.plus(itemSubsidy);
 
       // 카테고리별
       const categoryName = item.subcategory.category.name;
       if (!byCategory[categoryName]) {
-        byCategory[categoryName] = { estimated: BigInt(0), actual: BigInt(0), subsidy: BigInt(0) };
+        byCategory[categoryName] = { estimated: ZERO, actual: ZERO, subsidy: ZERO };
       }
-      byCategory[categoryName].estimated += itemTotal;
-      byCategory[categoryName].actual += itemActual;
-      byCategory[categoryName].subsidy += itemSubsidy;
+      byCategory[categoryName].estimated = byCategory[categoryName].estimated.plus(itemTotal);
+      byCategory[categoryName].actual = byCategory[categoryName].actual.plus(itemActual);
+      byCategory[categoryName].subsidy = byCategory[categoryName].subsidy.plus(itemSubsidy);
 
-      // 우선순위별
-      byPriority[item.priority].estimated += itemTotal;
-      byPriority[item.priority].count += 1;
+      // 우선순위별 (알 수 없는 값은 ESSENTIAL로)
+      const priorityBucket = byPriority[item.priority] ?? byPriority.ESSENTIAL;
+      priorityBucket.estimated = priorityBucket.estimated.plus(itemTotal);
+      priorityBucket.count += 1;
 
-      // 상태별
-      byStatus[item.status] += 1;
+      // 상태별 (알 수 없는 값은 PLANNED로)
+      byStatus[item.status in byStatus ? item.status : "PLANNED"] += 1;
     }
 
     // 순수 자기자본 필요액
-    const selfFundingRequired = totalEstimatedCost - totalSubsidy;
+    const selfFundingRequired = totalEstimatedCost.minus(totalSubsidy);
 
     // 진행률 계산 (INSTALLED 상태 항목 비율)
     const totalItems = items.length;
@@ -83,21 +84,21 @@ export async function GET() {
     return NextResponse.json({
       summary: {
         totalItems,
-        totalEstimatedCost: totalEstimatedCost.toString(),
-        totalActualCost: totalActualCost.toString(),
-        totalSubsidy: totalSubsidy.toString(),
-        selfFundingRequired: selfFundingRequired.toString(),
+        totalEstimatedCost: decimalToString(totalEstimatedCost),
+        totalActualCost: decimalToString(totalActualCost),
+        totalSubsidy: decimalToString(totalSubsidy),
+        selfFundingRequired: decimalToString(selfFundingRequired),
         progressRate,
       },
       byCategory: Object.entries(byCategory).map(([name, values]) => ({
         name,
-        estimated: values.estimated.toString(),
-        actual: values.actual.toString(),
-        subsidy: values.subsidy.toString(),
+        estimated: decimalToString(values.estimated),
+        actual: decimalToString(values.actual),
+        subsidy: decimalToString(values.subsidy),
       })),
       byPriority: Object.entries(byPriority).map(([priority, values]) => ({
         priority,
-        estimated: values.estimated.toString(),
+        estimated: decimalToString(values.estimated),
         count: values.count,
       })),
       byStatus,
