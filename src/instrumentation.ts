@@ -17,8 +17,14 @@ export async function register() {
 
   // 서버 환경에서만 실행
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { startBackupScheduler } = await import("@/lib/backup/scheduler");
-    startBackupScheduler();
+    const { startMarketRecoveryScheduler } = await import("@/lib/market-recovery-scheduler");
+    startMarketRecoveryScheduler();
+    try {
+      const { startBackupScheduler } = await import("@/lib/backup/scheduler");
+      startBackupScheduler();
+    } catch (error) {
+      console.error("[Instrumentation] Failed to initialize backup scheduler:", error);
+    }
     try {
       const { loadAllSchedules } = await import("@/lib/scheduler");
       const { logger } = await import("@/lib/logger");

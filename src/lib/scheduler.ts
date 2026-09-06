@@ -16,6 +16,7 @@ interface MarketSchedulerState {
   jobs: Map<string, ScheduledTask>;
   running: Set<string>;
   expected: Set<string>;
+  expressions: Map<string, string>;
   /** loadAllSchedules가 한 번이라도 끝까지 실행됐는지 */
   initialized: boolean;
   /** 마지막 로드 시각 (ISO) */
@@ -28,11 +29,13 @@ const shared = globalThis as typeof globalThis & { marketSchedulerState?: Market
 const state = shared.marketSchedulerState ??= {
   jobs: new Map<string, ScheduledTask>(), running: new Set<string>(), expected: new Set<string>(), initialized: false,
   lastLoadAt: null, lastLoadOk: null, lastError: null,
+  expressions: new Map<string, string>(),
 };
 // 핫 리로드로 이전 형태의 상태가 남아 있을 때 새 진단 필드를 채운다
 state.lastLoadAt ??= null;
 state.lastLoadOk ??= null;
 state.lastError ??= null;
+state.expressions ??= new Map<string, string>();
 const activeCronJobs = state.jobs;
 const runningSettings = state.running;
 
@@ -194,13 +197,16 @@ export function registerSchedule(
 ): boolean {
   state.expected.add(settingsId);
   try {
+    const cronExpr = toCronExpression(collectTime, collectDays);
+    const currentJob = activeCronJobs.get(settingsId);
+    const currentStatus = currentJob?.getStatus?.();
+    if (currentJob && state.expressions.get(settingsId) === cronExpr
+      && (typeof currentStatus !== "string" || !["stopped", "destroyed"].includes(currentStatus))) return true;
     if (activeCronJobs.has(settingsId)) {
       const existingJob = activeCronJobs.get(settingsId);
       existingJob?.stop();
       activeCronJobs.delete(settingsId);
     }
-
-    const cronExpr = toCronExpression(collectTime, collectDays);
 
     if (!cron.validate(cronExpr)) {
       logger.error(`[Scheduler] Invalid cron expression: ${cronExpr}`);
@@ -219,6 +225,7 @@ export function registerSchedule(
     );
 
     activeCronJobs.set(settingsId, task);
+    state.expressions.set(settingsId, cronExpr);
     logger.info(
       `[Scheduler] Registered ${settingsId} (${cronExpr}, KST). Active: ${activeCronJobs.size}`
     );
@@ -236,6 +243,7 @@ export function registerSchedule(
 export function unregisterSchedule(settingsId: string): boolean {
   try {
     state.expected.delete(settingsId);
+    state.expressions.delete(settingsId);
     const job = activeCronJobs.get(settingsId);
     if (job) {
       job.stop();
@@ -256,6 +264,7 @@ export function unregisterSchedule(settingsId: string): boolean {
 export function clearAllSchedules(): number {
   state.initialized = false;
   state.expected.clear();
+  state.expressions.clear();
   const count = activeCronJobs.size;
   if (count === 0) return 0;
 
@@ -272,12 +281,13 @@ export function clearAllSchedules(): number {
  */
 export async function loadAllSchedules(): Promise<number> {
   try {
-    // 기존 스케줄 모두 정리 (Hot Reload 중복 방지)
-    clearAllSchedules();
-
     const settings = await prisma.marketCollectionSettings.findMany({
       where: { autoCollectEnabled: true },
     });
+    // 정상 작업은 유지한다. 일부 설정 오류로 매 점검마다 전체 예약을 끊지 않는다.
+    const enabledIds = new Set(settings.map(setting => setting.id));
+    for (const id of activeCronJobs.keys()) if (!enabledIds.has(id)) unregisterSchedule(id);
+    state.expected.clear();
 
     let loadedCount = 0;
     for (const setting of settings) {

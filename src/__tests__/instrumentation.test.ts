@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-const { schedulerMock, backupMock, loggerMock } = vi.hoisted(() => ({
+const { schedulerMock, backupMock, loggerMock, recoveryMock } = vi.hoisted(() => ({
   schedulerMock: { loadAllSchedules: vi.fn() },
   backupMock: { startBackupScheduler: vi.fn() },
+  recoveryMock: { startMarketRecoveryScheduler: vi.fn() },
   loggerMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock("@/lib/scheduler", () => schedulerMock);
 vi.mock("@/lib/backup/scheduler", () => backupMock);
+vi.mock("@/lib/market-recovery-scheduler", () => recoveryMock);
 vi.mock("@/lib/logger", () => ({ logger: loggerMock }));
 
 import { register } from "@/instrumentation";
@@ -52,6 +54,7 @@ describe("register()", () => {
     process.env.NEXT_RUNTIME = "nodejs";
     await register();
     expect(backupMock.startBackupScheduler).not.toHaveBeenCalled();
+    expect(recoveryMock.startMarketRecoveryScheduler).not.toHaveBeenCalled();
     expect(schedulerMock.loadAllSchedules).not.toHaveBeenCalled();
   });
 
@@ -71,7 +74,7 @@ describe("register()", () => {
     expect(loggerMock.info).toHaveBeenCalledWith("[Instrumentation] Scheduler initialized: 2 schedule(s)");
   });
 
-  it("스케줄 로드가 실패해도 서버 기동을 막지 않고 오류만 남긴다 (재시도는 없음)", async () => {
+  it("최초 로드가 실패해도 주기적인 복구 점검기는 시작되어 있다", async () => {
     delete process.env.NEXT_PHASE;
     process.env.NEXT_RUNTIME = "nodejs";
     schedulerMock.loadAllSchedules.mockRejectedValueOnce(new Error("SQLITE_BUSY"));
@@ -80,7 +83,7 @@ describe("register()", () => {
       "[Instrumentation] Failed to initialize schedulers:",
       expect.any(Error)
     );
-    // 한 번 실패하면 다시 시도하지 않는다 — 부팅 시 DB가 늦게 준비되면 스케줄 없이 계속 뜬다 (개선 제안)
+    expect(recoveryMock.startMarketRecoveryScheduler).toHaveBeenCalledTimes(1);
     expect(schedulerMock.loadAllSchedules).toHaveBeenCalledTimes(1);
   });
 });

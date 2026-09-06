@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { MARKET_PRODUCTS } from "@/lib/constants/market-products";
 import { MarketCollectAutoSettings } from "./MarketCollectAutoSettings";
 import { MarketCollectLogs } from "./MarketCollectLogs";
+import { MarketRecoveryStatus } from "./MarketRecoveryStatus";
 
 interface MarketSettings {
   autoCollectEnabled: boolean;
@@ -556,6 +557,8 @@ export function MarketCollect({ onCollectComplete }: MarketCollectProps) {
           )}
         </CardContent>
       </Card>
+
+      <MarketRecoveryStatus />
 
       <MarketCollectLogs logs={logs} />
 

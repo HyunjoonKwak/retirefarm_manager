@@ -75,6 +75,9 @@ describe("scheduler readiness", () => {
       initialized: true, activeCount: 1, expectedCount: 2, ready: false, lastLoadOk: false,
       lastError: "1개 설정의 cron 등록 실패",
     });
+    await loadAllSchedules();
+    expect(cronMock.schedule).toHaveBeenCalledTimes(1);
+    expect(cronMock.schedule.mock.results[0].value.stop).not.toHaveBeenCalled();
     cronMock.validate.mockImplementation(() => true);
   });
   it("shares registered jobs across independently loaded module instances", async () => {
