@@ -40,7 +40,7 @@ export function getNextRunTime(
 
     const now = new Date();
 
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i <= 7; i++) {
       const targetDate = new Date(now);
       targetDate.setDate(now.getDate() + i);
       targetDate.setHours(hours, minutes, 0, 0);

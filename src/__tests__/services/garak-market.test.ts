@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   parseXmlResponse,
   parseKgFromUnit,
@@ -114,6 +114,7 @@ describe("날짜 유틸 (타임존 안전성)", () => {
 });
 
 describe("getNextRunTime", () => {
+  afterEach(() => vi.useRealTimers());
   it("수집 요일이 없으면 null을 반환한다", () => {
     expect(getNextRunTime("09:30", "")).toBeNull();
   });
@@ -128,8 +129,11 @@ describe("getNextRunTime", () => {
   });
 
   it("단일 요일 설정도 7일 내에서 찾는다", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 6, 8, 0));
     const next = getNextRunTime("06:00", "0"); // 일요일
     expect(next).not.toBeNull();
     expect(next!.getDay()).toBe(0);
+    expect(next!.getDate()).toBe(13);
   });
 });

@@ -53,6 +53,7 @@ interface BackupSchedule {
 const DAY_NAMES = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
 
 export function BackupManager() {
+  const [pendingRestore, setPendingRestore] = useState(false);
   const [backups, setBackups] = useState<Backup[]>([]);
   const [schedule, setSchedule] = useState<BackupSchedule>({
     enabled: true,
@@ -74,6 +75,10 @@ export function BackupManager() {
       if (response.ok) {
         const data = await response.json();
         setBackups(data.backups || []);
+        setPendingRestore(Boolean(data.pendingRestore));
+      } else {
+        const data = await response.json();
+        setMessage({ type: "error", text: data.error || "백업 목록을 불러오지 못했습니다." });
       }
     } catch (error) {
       console.error("Failed to fetch backups:", error);
@@ -87,6 +92,10 @@ export function BackupManager() {
       if (response.ok) {
         const data = await response.json();
         setSchedule(data.schedule);
+        if (!data.schedulerRunning) setMessage({ type: "error", text: "자동 백업 실행기가 동작하지 않습니다. 앱을 재시작해 주세요." });
+      } else {
+        const data = await response.json();
+        setMessage({ type: "error", text: data.error || "백업 스케줄을 불러오지 못했습니다." });
       }
     } catch (error) {
       console.error("Failed to fetch schedule:", error);
@@ -111,7 +120,7 @@ export function BackupManager() {
       } else {
         setMessage({ type: "error", text: data.error || "백업 생성에 실패했습니다." });
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: "error", text: "백업 생성 중 오류가 발생했습니다." });
     } finally {
       setCreating(false);
@@ -133,13 +142,13 @@ export function BackupManager() {
       if (response.ok) {
         setMessage({
           type: "success",
-          text: `복원 완료. 복원 전 백업: ${data.preRestoreBackup}`,
+          text: data.message,
         });
         fetchBackups();
       } else {
         setMessage({ type: "error", text: data.error || "복원에 실패했습니다." });
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: "error", text: "복원 중 오류가 발생했습니다." });
     } finally {
       setRestoring(null);
@@ -161,7 +170,7 @@ export function BackupManager() {
         const data = await response.json();
         setMessage({ type: "error", text: data.error || "삭제에 실패했습니다." });
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: "error", text: "삭제 중 오류가 발생했습니다." });
     }
   };
@@ -184,11 +193,11 @@ export function BackupManager() {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage({ type: "success", text: "스케줄이 저장되었습니다." });
+        setMessage({ type: data.schedulerRunning ? "success" : "error", text: data.message });
       } else {
         setMessage({ type: "error", text: data.error || "스케줄 저장에 실패했습니다." });
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: "error", text: "스케줄 저장 중 오류가 발생했습니다." });
     } finally {
       setSavingSchedule(false);
@@ -216,6 +225,20 @@ export function BackupManager() {
         </div>
       )}
 
+      {pendingRestore && (
+        <div className="rounded-lg border p-4 space-y-2">
+          <p>복원이 예약되어 있습니다. 앱 재시작 시 적용됩니다. 재시작 전까지 추가한 데이터는 복원본에 포함되지 않으며 별도 안전 백업으로 보존됩니다.</p>
+          <Button variant="outline" onClick={async () => {
+            try {
+              const response = await fetch("/api/backup/restore", { method: "DELETE" });
+              const data = await response.json();
+              setMessage({ type: response.ok ? "success" : "error", text: data.message || data.error });
+              await fetchBackups();
+            } catch { setMessage({ type: "error", text: "복원 예약 취소에 실패했습니다." }); }
+          }}>복원 예약 취소</Button>
+        </div>
+      )}
+
       {/* 스케줄 설정 */}
       <Card>
         <CardHeader>
@@ -223,7 +246,7 @@ export function BackupManager() {
             <Calendar className="h-5 w-5" />
             자동 백업 스케줄
           </CardTitle>
-          <CardDescription>주기적인 자동 백업 설정을 관리합니다.</CardDescription>
+          <CardDescription>한국 시간 기준으로 실행합니다. 앱이 실행 중일 때 매분 최신 설정을 확인합니다.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between">
@@ -387,18 +410,18 @@ export function BackupManager() {
                             <AlertDialogHeader>
                               <AlertDialogTitle>백업 복원</AlertDialogTitle>
                               <AlertDialogDescription>
-                                이 백업으로 데이터베이스를 복원하시겠습니까?
+                                이 백업으로 복원을 예약하시겠습니까?
                                 <br />
-                                <strong>현재 데이터는 모두 교체됩니다.</strong>
+                                <strong>앱 재시작 시 현재 데이터가 모두 교체됩니다.</strong>
                                 <br />
-                                복원 전 현재 상태는 자동으로 백업됩니다.
+                                재시작 직전 안전 백업에 성공한 경우에만 복원합니다.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>취소</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => restoreBackup(backup.filename)}
-                                disabled={restoring === backup.filename}
+                                disabled={pendingRestore || restoring === backup.filename}
                               >
                                 {restoring === backup.filename && (
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

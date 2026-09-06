@@ -28,58 +28,33 @@ export const authOptions: NextAuthOptions = {
         | undefined;
       const name = user.name || kakaoProfile?.properties?.nickname || null;
 
-      // Check if this Kakao account is already linked
-      const existingByKakao = await prisma.user.findUnique({
-        where: { kakaoId },
-      });
+      // 관리자 연결은 서버 운영자가 지정한 카카오 ID만 허용한다.
+      const configuredAdmin = process.env.KAKAO_ADMIN_ID?.trim();
+      const isConfiguredAdmin = Boolean(configuredAdmin && kakaoId === configuredAdmin);
+      const legacyAdminId = process.env.KAKAO_ADMIN_USER_ID?.trim();
+      const existingByKakao = await prisma.user.findUnique({ where: { kakaoId } });
+      if (existingByKakao) {
+        if (isConfiguredAdmin && legacyAdminId && legacyAdminId !== existingByKakao.id) return false;
+        if (isConfiguredAdmin && !legacyAdminId && existingByKakao.role !== "ADMIN") {
+          await prisma.user.update({ where: { id: existingByKakao.id }, data: { role: "ADMIN" } });
+        }
+        return true;
+      }
 
-      if (existingByKakao) return true;
-
-      // Check if there's an existing user with the same email
-      const existingByEmail = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (existingByEmail) {
+      if (isConfiguredAdmin && legacyAdminId) {
+        const admin = await prisma.user.findUnique({ where: { id: legacyAdminId } });
+        if (!admin || admin.role !== "ADMIN" || admin.kakaoId) return false;
         await prisma.user.update({
-          where: { id: existingByEmail.id },
-          data: {
-            kakaoId,
-            name: existingByEmail.name || name,
-            image: user.image,
-          },
+          where: { id: admin.id },
+          data: { kakaoId, image: user.image },
         });
         return true;
       }
 
-      // First Kakao login: link to existing ADMIN user if no one has kakaoId yet
-      const anyLinkedUser = await prisma.user.findFirst({
-        where: { kakaoId: { not: null } },
-      });
-
-      if (!anyLinkedUser) {
-        const adminUser = await prisma.user.findFirst({
-          where: { role: "ADMIN" },
-          orderBy: { createdAt: "asc" },
-        });
-
-        if (adminUser) {
-          await prisma.user.update({
-            where: { id: adminUser.id },
-            data: {
-              kakaoId,
-              email,
-              name: adminUser.name || name,
-              image: user.image,
-            },
-          });
-          return true;
-        }
-      }
-
-      // New user creation
-      const userCount = await prisma.user.count();
-      const role = userCount === 0 ? "ADMIN" : "USER";
+      // 이메일 일치만으로 기존 계정 소유권을 넘기지 않는다.
+      const existingByEmail = await prisma.user.findUnique({ where: { email } });
+      if (existingByEmail) return false;
+      const role = isConfiguredAdmin ? "ADMIN" : "USER";
 
       await prisma.user.create({
         data: {
@@ -94,16 +69,18 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
     async jwt({ token, account }) {
-      if (account) {
-        const kakaoId = String(account.providerAccountId);
-        const dbUser = await prisma.user.findUnique({
-          where: { kakaoId },
-        });
-        if (dbUser) {
-          token.id = dbUser.id;
-          token.role = dbUser.role;
-          token.image = dbUser.image;
-        }
+      const where = account
+        ? { kakaoId: String(account.providerAccountId) }
+        : token.id ? { id: token.id as string } : null;
+      const dbUser = where ? await prisma.user.findUnique({ where }) : null;
+      if (dbUser) {
+        token.id = dbUser.id;
+        token.role = dbUser.role;
+        token.image = dbUser.image;
+      } else {
+        delete token.id;
+        delete token.role;
+        delete token.image;
       }
       return token;
     },

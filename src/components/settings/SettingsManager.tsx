@@ -184,7 +184,7 @@ export function SettingsManager() {
   return (
     <div className="space-y-6">
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className={`grid w-full ${session?.user?.role === "ADMIN" ? "grid-cols-3" : "grid-cols-2"}`}>
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             프로필
@@ -193,10 +193,10 @@ export function SettingsManager() {
             <Database className="h-4 w-4" />
             데이터
           </TabsTrigger>
-          <TabsTrigger value="backup" className="flex items-center gap-2">
+          {session?.user?.role === "ADMIN" && <TabsTrigger value="backup" className="flex items-center gap-2">
             <HardDrive className="h-4 w-4" />
             백업
-          </TabsTrigger>
+          </TabsTrigger>}
         </TabsList>
 
         {/* 프로필 탭 */}
@@ -282,9 +282,9 @@ export function SettingsManager() {
         </TabsContent>
 
         {/* 백업 탭 */}
-        <TabsContent value="backup">
+        {session?.user?.role === "ADMIN" && <TabsContent value="backup">
           <BackupManager />
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
 
       {/* 프로필 수정 다이얼로그 */}
