@@ -118,5 +118,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Korean text breaks on word boundaries; long unbroken tokens still wrap. */
+    word-break: keep-all;
+    overflow-wrap: anywhere;
   }
 }

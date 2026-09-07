@@ -234,9 +234,9 @@ export function MarketPriceDailyDetail({
 
             {/* Stats summary */}
             {filteredDailyStats && (
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-3 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 sm:gap-3 text-center">
                 <div className="p-2 bg-white rounded border">
-                  <p className="text-[10px] sm:text-xs text-muted-foreground">평균가({STAT_LABELS.weightedMean})</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">평균가</p>
                   <p className="font-bold text-xs sm:text-sm">
                     {formatExactPrice(filteredDailyStats.avgPrice)}
                   </p>
@@ -269,8 +269,11 @@ export function MarketPriceDailyDetail({
                     {filteredDailyStats.totalTradeAmount.toLocaleString()}원
                   </p>
                 </div>
+                <p className="col-span-2 sm:col-span-6 text-[10px] sm:text-xs text-muted-foreground text-left">
+                  평균가는 {STAT_LABELS.weightedMean}입니다.
+                </p>
                 {filteredDailyStats.excludedCount > 0 && (
-                  <p className="col-span-3 sm:col-span-6 text-[10px] sm:text-xs text-muted-foreground text-left">
+                  <p className="col-span-2 sm:col-span-6 text-[10px] sm:text-xs text-muted-foreground text-left">
                     가격·수량이 유효하지 않은 {filteredDailyStats.excludedCount}행은 집계에서 제외했습니다. 원본은 아래 표에 남아 있습니다.
                   </p>
                 )}
@@ -336,8 +339,11 @@ export function MarketPriceDailyDetail({
                 <TableBody>
                   {filteredDailyResults.map((result) => (
                     <TableRow key={result.id}>
-                      <TableCell className="text-xs sm:text-sm whitespace-nowrap">
-                        {result.variety || "-"}
+                      <TableCell className="text-xs sm:text-sm">
+                        <span className="whitespace-nowrap">{result.variety || "-"}</span>
+                        <span className="block text-[11px] text-muted-foreground lg:hidden">
+                          {[result.grade, result.unit, result.origin].filter(Boolean).join(" · ") || "-"}
+                        </span>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell text-xs sm:text-sm">
                         {result.origin || "-"}

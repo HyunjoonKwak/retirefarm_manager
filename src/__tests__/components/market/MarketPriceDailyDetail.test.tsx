@@ -48,7 +48,8 @@ describe("MarketPriceDailyDetail — 등급·통계 표시", () => {
   it("선택한 등급을 제목에 알리고 평균가가 수량 가중평균임을 밝힌다", () => {
     renderDetail();
     expect(screen.getByText(/특 등급/)).toBeInTheDocument();
-    expect(screen.getByText("평균가(수량 가중평균)")).toBeInTheDocument();
+    expect(screen.getByText("평균가")).toBeInTheDocument();
+    expect(screen.getByText("평균가는 수량 가중평균입니다.")).toBeInTheDocument();
     // 유효하지 않은 행은 평균에서 빼되 숨기지 않고 건수로 알린다.
     expect(screen.getByText(/유효하지 않은 1행은 집계에서 제외/)).toBeInTheDocument();
     expect(screen.getByText("1건")).toBeInTheDocument();
@@ -66,5 +67,11 @@ describe("MarketPriceDailyDetail — 등급·통계 표시", () => {
     renderDetail({ filteredDailyResults: [], selectedGrade: null, dailyResults: [] });
     expect(screen.getByText("해당 날짜의 거래 내역이 없습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "필터 초기화" })).toBeNull();
+  });
+
+  it("좁은 폭에서 열이 숨겨져도 등급·산지·단위를 품종 아래에 함께 보여준다", () => {
+    renderDetail();
+    // lg 미만에서 등급·산지 열이 숨겨지므로 품종 셀에 같은 값을 함께 싣는다.
+    expect(screen.getAllByText("특 · 2kg · 충남 논산시")).toHaveLength(2);
   });
 });

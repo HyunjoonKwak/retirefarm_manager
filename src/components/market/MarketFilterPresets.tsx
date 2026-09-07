@@ -38,8 +38,9 @@ export function MarketFilterPresets({
 
   function currentPayload(): PresetPayload | null {
     if (!productName) return null;
-    const parts = [productName, ...(varieties.length ? [varieties.join(",")] : []), origin, unit, grade].filter(Boolean);
-    return { name: name.trim() || parts.join(" "), productName, varieties, origin, unit, grade };
+    const summary = origin ?? grade ?? unit ?? (varieties.length ? `품종 ${varieties.length}개` : null);
+    const autoName = [productName, summary].filter(Boolean).join(" · ");
+    return { name: name.trim() || autoName, productName, varieties, origin, unit, grade };
   }
 
   /** 실패는 성공으로 표시하지 않고, 계정이 바뀐 뒤 도착한 결과는 새 계정 화면에 알리지 않는다. */
@@ -111,22 +112,24 @@ export function MarketFilterPresets({
           )}
           <ul className="flex flex-wrap gap-2 list-none p-0 m-0">
             {presets.accountPresets.map((preset) => (
-              <li key={preset.id} className="inline-flex items-center overflow-hidden rounded-md border">
+              <li key={preset.id} className="flex max-w-full items-stretch overflow-hidden rounded-md border">
                 <button
                   type="button"
-                  className="px-2 py-1 text-xs hover:bg-accent"
+                  className="flex min-h-11 min-w-0 flex-col justify-center gap-0.5 px-3 py-1.5 text-left hover:bg-accent sm:min-h-8"
+                  aria-label={preset.name}
                   title={describe(preset)}
                   onClick={() => onApply(preset)}
                 >
-                  {preset.name}
+                  <span className="max-w-[220px] truncate text-xs font-medium">{preset.name}</span>
+                  <span className="max-w-[220px] truncate text-[11px] text-muted-foreground">{describe(preset)}</span>
                 </button>
                 <button
                   type="button"
-                  className="px-1.5 py-1 border-l text-muted-foreground hover:text-destructive"
+                  className="flex min-h-11 w-11 flex-shrink-0 items-center justify-center border-l text-muted-foreground hover:text-destructive sm:min-h-8 sm:w-8"
                   aria-label={`${preset.name} 계정에서 삭제`}
                   onClick={() => handleDeleteAccount(preset)}
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </li>
             ))}
@@ -142,18 +145,20 @@ export function MarketFilterPresets({
             </p>
             <ul className="flex flex-wrap gap-2 list-none p-0 m-0">
               {presets.devicePresets.map((preset) => (
-                <li key={preset.id} className="inline-flex items-center overflow-hidden rounded-md border bg-muted/40">
+                <li key={preset.id} className="flex max-w-full items-stretch overflow-hidden rounded-md border bg-muted/40">
                   <button
                     type="button"
-                    className="px-2 py-1 text-xs hover:bg-accent"
+                    className="flex min-h-11 min-w-0 flex-col justify-center gap-0.5 px-3 py-1.5 text-left hover:bg-accent sm:min-h-8"
+                    aria-label={preset.name}
                     title={describe(preset)}
                     onClick={() => onApply(preset)}
                   >
-                    {preset.name}
+                    <span className="max-w-[180px] truncate text-xs font-medium">{preset.name}</span>
+                    <span className="max-w-[180px] truncate text-[11px] text-muted-foreground">{describe(preset)}</span>
                   </button>
                   <button
                     type="button"
-                    className="px-2 py-1 border-l text-xs hover:bg-accent disabled:opacity-50"
+                    className="min-h-11 flex-shrink-0 border-l px-3 text-xs hover:bg-accent disabled:opacity-50 sm:min-h-8 sm:px-2"
                     disabled={presets.saving}
                     onClick={() => handleSaveToAccount({ ...preset })}
                   >
@@ -161,11 +166,11 @@ export function MarketFilterPresets({
                   </button>
                   <button
                     type="button"
-                    className="px-1.5 py-1 border-l text-muted-foreground hover:text-destructive"
+                    className="flex min-h-11 w-11 flex-shrink-0 items-center justify-center border-l text-muted-foreground hover:text-destructive sm:min-h-8 sm:w-8"
                     aria-label={`${preset.name} 이 기기에서 삭제`}
                     onClick={() => handleDeleteDevice(preset)}
                   >
-                    <X className="h-3 w-3" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 </li>
               ))}

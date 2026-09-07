@@ -100,8 +100,8 @@ export function MarketPriceFilter({
     <Card>
       <CardContent className="py-4 space-y-4">
         {/* 산지·단위 — 품종보다 위에 둔다. 품종 목록은 이 조건에 따라 달라진다. */}
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
             <Label className="text-sm whitespace-nowrap" htmlFor="market-origin-select">
               산지
             </Label>
@@ -109,7 +109,7 @@ export function MarketPriceFilter({
               value={selectedOrigin || "_all"}
               onValueChange={(v) => onOriginChange(v === "_all" ? null : v)}
             >
-              <SelectTrigger className="w-32" id="market-origin-select">
+              <SelectTrigger className="w-full sm:w-32" id="market-origin-select">
                 <SelectValue placeholder="전체" />
               </SelectTrigger>
               <SelectContent>
@@ -124,7 +124,7 @@ export function MarketPriceFilter({
           </div>
 
           {unitOptions.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
               <Label className="text-sm whitespace-nowrap" htmlFor="market-unit-select">
                 단위
               </Label>
@@ -132,7 +132,7 @@ export function MarketPriceFilter({
                 value={selectedUnit || "_all"}
                 onValueChange={(v) => onUnitChange(v === "_all" ? null : v)}
               >
-                <SelectTrigger className="w-28" id="market-unit-select">
+                <SelectTrigger className="w-full sm:w-28" id="market-unit-select">
                   <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
@@ -148,7 +148,7 @@ export function MarketPriceFilter({
           )}
 
           {gradeOptions.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
               <Label className="text-sm whitespace-nowrap" htmlFor="market-grade-select">
                 등급
               </Label>
@@ -156,7 +156,7 @@ export function MarketPriceFilter({
                 value={selectedGrade || "_all"}
                 onValueChange={(v) => onGradeChange(v === "_all" ? null : v)}
               >
-                <SelectTrigger className="w-28" id="market-grade-select">
+                <SelectTrigger className="w-full sm:w-28" id="market-grade-select">
                   <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
@@ -175,6 +175,7 @@ export function MarketPriceFilter({
             <Button
               variant="ghost"
               size="sm"
+              className="self-end"
               onClick={() => {
                 onVarietiesChange([]);
                 onOriginChange(null);
