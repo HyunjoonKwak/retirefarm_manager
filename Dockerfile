@@ -51,6 +51,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY scripts/sqlite-backup.mjs ./scripts/sqlite-backup.mjs
 COPY scripts/market-backfill.cjs ./scripts/market-backfill.cjs
 COPY scripts/market-label-audit.cjs ./scripts/market-label-audit.cjs
+COPY scripts/market-backfill-driver.sh ./scripts/market-backfill-driver.sh
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && chown nextjs:nodejs /app/docker-entrypoint.sh
 
