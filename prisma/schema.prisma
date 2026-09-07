@@ -308,6 +308,9 @@ model AuctionResult {
   @@index([productName, auctionDate])
   @@index([auctionDate])
   @@index([origin])
+  // 품목별 품종·산지 목록 집계를 인덱스만으로 끝내기 위한 커버링 인덱스
+  @@index([productName, variety])
+  @@index([productName, origin])
 }
 
 // 관심 품목 (가락시장용)

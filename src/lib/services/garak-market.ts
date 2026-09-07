@@ -264,10 +264,12 @@ export function pickRepresentativeGroup(rows: GroupRow[]): {
  * 품목별 품종 목록 조회
  */
 export async function getProductVarieties(productName: string) {
-  const varieties = await prisma.auctionResult.findMany({
+  // Prisma의 distinct는 앱에서 중복을 제거하므로 품목의 모든 행을 받아온다.
+  // groupBy는 DB가 집계해 후보 개수만 돌려준다 (품목당 수십만 행 → 수십 행).
+  const varieties = await prisma.auctionResult.groupBy({
+    by: ["variety"],
     where: { productName },
-    distinct: ["variety"],
-    select: { variety: true },
+    orderBy: { variety: "asc" },
   });
 
   return varieties
@@ -279,10 +281,10 @@ export async function getProductVarieties(productName: string) {
  * 품목별 산지 목록 조회
  */
 export async function getProductOrigins(productName: string) {
-  const origins = await prisma.auctionResult.findMany({
+  const origins = await prisma.auctionResult.groupBy({
+    by: ["origin"],
     where: { productName },
-    distinct: ["origin"],
-    select: { origin: true },
+    orderBy: { origin: "asc" },
   });
 
   return origins
