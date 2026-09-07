@@ -191,7 +191,7 @@ export function MarketPriceFilter({
         {/* 품종 — 산지 조건에 연동 */}
         <div className="space-y-2 pt-3 border-t" data-testid="variety-section">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <Label className="text-sm">품종 (다중선택)</Label>
               {facetsStatus === "loading" && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
