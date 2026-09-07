@@ -185,8 +185,21 @@ export function MarketPriceWeeklyTable({
                       <TableCell className="text-blue-600 dark:text-blue-400 hover:underline font-medium text-xs sm:text-sm whitespace-nowrap">
                         {formatDate(price.date)} ({dayName})
                       </TableCell>
-                      <TableCell className="text-right font-medium text-xs sm:text-sm whitespace-nowrap">
-                        {formatExactPrice(price.avgPrice)}
+                      <TableCell className="text-right font-medium text-xs sm:text-sm">
+                        <span className="whitespace-nowrap">{formatExactPrice(price.avgPrice)}</span>
+                        {/* 최고·최저는 md, 변동은 sm부터 열로 보인다. 그 아래 폭에서는 여기 함께 싣는다. */}
+                        <span className="block text-[11px] font-normal text-muted-foreground md:hidden">
+                          <span className="whitespace-nowrap">
+                            {formatExactPrice(price.minPrice)}~{formatExactPrice(price.maxPrice)}
+                          </span>
+                          {change !== null && (
+                            <span className="whitespace-nowrap sm:hidden">
+                              {" · "}
+                              {change > 0 ? "+" : ""}
+                              {change.toFixed(1)}%
+                            </span>
+                          )}
+                        </span>
                       </TableCell>
                       <TableCell className="text-right hidden lg:table-cell text-amber-600 text-xs sm:text-sm whitespace-nowrap">
                         {price.pricePerKg ? formatExactPrice(price.pricePerKg) : "-"}
