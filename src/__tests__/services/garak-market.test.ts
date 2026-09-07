@@ -76,6 +76,17 @@ describe("parseXmlResponse", () => {
     expect(result.items).toHaveLength(0);
   });
 
+  it("일일 조회 한도 초과는 일반 오류와 구분한다 (재시도 금지 판단용)", () => {
+    // 실제 원천 응답 형태. 한도를 넘기면 모든 날짜에 같은 본문이 돌아온다.
+    const body = '<?xml version="1.0" encoding="UTF-8"?><response>'
+      + "<resultCode>ERROR_LIMIT_EXCEEDED</resultCode>"
+      + "<message>일일 조회 건수가 10000회가 초과되었습니다.</message></response>";
+    expect(parseGarakResponse(body)).toMatchObject({ kind: "invalid", reason: "quota_exceeded" });
+    // 한도 문구가 없는 오류 XML은 기존 분류를 유지한다.
+    expect(parseGarakResponse("<response><message>일시 오류</message></response>"))
+      .toMatchObject({ kind: "invalid", reason: "error_xml" });
+  });
+
   it("HTML·오류 XML·빈 본문·항목 파싱 실패를 각각 구분한다", () => {
     expect(parseGarakResponse("<!DOCTYPE html><html><body>로그인</body></html>")).toMatchObject({ kind: "invalid", reason: "html" });
     expect(parseGarakResponse("<html lang=\"ko\"><head><title>서울시농수산식품공사</title></head></html>")).toMatchObject({ kind: "invalid", reason: "html" });

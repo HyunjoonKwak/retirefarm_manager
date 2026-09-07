@@ -223,7 +223,11 @@ async function attemptFetch(url: string, fetchImpl: typeof fetch): Promise<Attem
 
   const parsed = parseGarakResponse(bodyText);
   if (parsed.kind === "invalid") {
-    return { ok: false, stage: "invalid", detail: `${parsed.reason}: ${parsed.detail}`, httpStatus: response.status, retryable: true };
+    // 한도 초과는 같은 날 다시 시도해도 회복되지 않고 남은 한도만 소모한다.
+    return {
+      ok: false, stage: "invalid", detail: `${parsed.reason}: ${parsed.detail}`,
+      httpStatus: response.status, retryable: parsed.reason !== "quota_exceeded",
+    };
   }
   return { ok: true, totalCount: parsed.totalCount, items: parsed.items };
 }

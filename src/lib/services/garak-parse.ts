@@ -28,6 +28,7 @@ export type GarakInvalidReason =
   | "empty" // 본문 없음
   | "html" // HTML 페이지 (로그인/오류 페이지 등)
   | "error_xml" // 오류 메시지 XML
+  | "quota_exceeded" // 원천 API 일일 조회 한도 초과 (재시도해도 같은 날에는 회복되지 않음)
   | "missing_count" // list_total_count 없음
   | "no_items" // 건수는 있는데 항목을 하나도 파싱하지 못함
   | "count_mismatch"; // 건수 0인데 항목이 있음
@@ -47,6 +48,8 @@ export class GarakResponseError extends Error {
 
 const HTML_PATTERN = /^\s*(<!doctype\s+html|<html[\s>])/i;
 const ERROR_XML_PATTERN = /<(error|errmsg|errormessage|resultmsg|message)\b[^>]*>/i;
+// 원천이 하루 한도를 넘기면 모든 날짜에 같은 응답을 준다. 재시도는 한도만 더 소모한다.
+const QUOTA_PATTERN = /ERROR_LIMIT_EXCEEDED|일일\s*조회\s*건수/i;
 
 // 외부 응답 본문은 로그·DB에 그대로 남기지 않는다 (요청 URL·자격증명이 반사될 수 있음).
 // detail에는 분류와 길이 같은 일반 정보만 넣는다.
@@ -113,6 +116,9 @@ export function parseGarakResponse(body: string): ParsedGarakResponse {
 
   const totalCountMatch = text.match(/<list_total_count>\s*(\d+)\s*<\/list_total_count>/i);
   if (!totalCountMatch) {
+    if (QUOTA_PATTERN.test(text)) {
+      return { kind: "invalid", reason: "quota_exceeded", detail: "원천 API의 일일 조회 한도를 초과했습니다" };
+    }
     const errorMatch = text.match(ERROR_XML_PATTERN);
     if (errorMatch) {
       return { kind: "invalid", reason: "error_xml", detail: `오류 XML 응답 (<${errorMatch[1].toLowerCase()}> 태그)` };
