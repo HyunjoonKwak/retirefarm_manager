@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { discoveryRequestSchema, type DiscoveryRequest } from "@/lib/briefing/discovery-contracts";
 import { dateTime, nativeSelectClass } from "./competitor-utils";
 import { readSearchCapture, type SearchCapture } from "./search-capture";
+import type { CollectionJob } from "@/lib/briefing/collection-contracts";
 
-export function SearchCaptureReview({ capture, busy, onSave, onCancel }: { capture: SearchCapture; busy: boolean;
+export function SearchCaptureReview({ capture, collectionJob, busy, onSave, onCancel }: { capture: SearchCapture; collectionJob?: CollectionJob; busy: boolean;
   onSave: (request: DiscoveryRequest) => Promise<boolean>; onCancel: () => void }) {
   const [rows, setRows] = useState(() => capture.items.map(item => ({ ...item, productUrl: item.productUrl || "", selected: false, adStatus: item.adStatus as "AD" | "ORGANIC" | "UNKNOWN", relevance: "UNKNOWN" })));
   const [confirmed, setConfirmed] = useState(false);
@@ -16,7 +17,7 @@ export function SearchCaptureReview({ capture, busy, onSave, onCancel }: { captu
   const save = async () => {
     if (!confirmed) return;
     try { readSearchCapture(capture); } catch (e) { setError(e instanceof Error ? e.message : "자료를 다시 수집해 주세요."); return; }
-    const request = discoveryRequestSchema.safeParse({ action: "import", evidence: selected.map(row => ({ productUrl: row.productUrl,
+    const request = discoveryRequestSchema.safeParse({ action: "import", ...(collectionJob ? { collectionJobId: collectionJob.id, collectionJobVersion: collectionJob.version } : {}), evidence: selected.map(row => ({ productUrl: row.productUrl,
       storeName: row.storeName, title: row.title, query: capture.query, observedAt: capture.capturedAt, position: row.position,
       adStatus: row.adStatus, relevance: row.relevance, purchaseLabel: row.purchaseLabel, reviewCount: row.reviewCount, reviewBasis: row.reviewBasis,
       sourceUrl: capture.sourceUrl, searchSort: capture.searchSort, searchEnvironment: capture.searchEnvironment, collectionMethod: "EXTENSION" })) });
@@ -25,6 +26,7 @@ export function SearchCaptureReview({ capture, busy, onSave, onCancel }: { captu
   };
   return <section className="rounded-md border p-3 space-y-3" aria-label="검색 수집 미리보기">
     <h4 className="font-medium">검색 수집 미리보기 — {rows.length}개 상품</h4>
+    {collectionJob && <p className="text-xs">연결 작업: {collectionJob.query}. 선택한 근거를 저장하면 작업을 완료로 기록합니다.</p>}
     <p className="text-xs">{capture.query} · {capture.searchSort === "UNKNOWN" ? "정렬 미확인" : capture.searchSort} · {dateTime(capture.capturedAt)}</p>
     <a className="text-xs underline" href={capture.sourceUrl} target="_blank" rel="noopener noreferrer">원본 검색 화면 열기</a>
     <p className="text-xs text-muted-foreground">위치는 현재 페이지의 상품 목록 순서입니다. 조합한 주소는 실제 상품 페이지에서 확인하세요. 비광고 여부를 확인한 항목만 ‘비광고 확인’으로 변경하고 품목을 분류합니다. 검색 리뷰의 집계 기준은 미확인으로 보관합니다.</p>

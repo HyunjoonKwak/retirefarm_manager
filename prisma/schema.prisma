@@ -43,6 +43,7 @@ model User {
   competitorObservations CompetitorPriceObservation[]
   discoveryRuns CompetitorDiscoveryRun[]
   discoveryCandidates CompetitorDiscoveryCandidate[]
+  collectionJobs CompetitorCollectionJob[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -606,6 +607,7 @@ model CompetitorDiscoveryRun {
   createdAt DateTime @default(now())
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   evidence CompetitorDiscoveryEvidence[]
+  collectionJob CompetitorCollectionJob?
   @@unique([userId, contentHash])
   @@index([userId, createdAt])
 }
@@ -650,4 +652,29 @@ model CompetitorDiscoveryDecision {
   createdAt DateTime @default(now())
   candidate CompetitorDiscoveryCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   @@index([candidateId, createdAt])
+}
+
+// 사용자가 직접 진행하는 경쟁사 검색 수집 작업. 스케줄러·자동 재시도·타임아웃 없음:
+// start/resume/block/cancel은 사용자 신호이고, SUCCEEDED는 검토한 자료를 저장한 discovery import가 같은 트랜잭션에서 기록한다.
+model CompetitorCollectionJob {
+  id String @id @default(cuid())
+  userId String
+  weekStart DateTime // KST 월요일 00:00 (UTC instant); 같은 주·같은 검색어는 한 작업
+  query String // 정규화된 검색어 (discovery evidence.query와 동일 규칙)
+  searchUrl String
+  status String @default("PENDING") // PENDING | RUNNING | BLOCKED | SUCCEEDED | CANCELLED
+  reason String? // BLOCKED 사유
+  version Int @default(1)
+  evidenceCount Int @default(0)
+  runId String? @unique
+  startedAt DateTime?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run CompetitorDiscoveryRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  @@unique([userId, weekStart, query])
+  @@index([userId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([userId, status, completedAt])
 }

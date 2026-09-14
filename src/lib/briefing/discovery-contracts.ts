@@ -110,8 +110,21 @@ export const discoveryEvidenceSchema = discoveryEvidenceFields.transform((value,
 });
 export type DiscoveryEvidenceInput = z.output<typeof discoveryEvidenceFields>;
 
+export const DISCOVERY_COLLECTION_JOB_MESSAGE = "수집 작업 id와 version은 함께 보내야 합니다.";
+/**
+ * Optional link to a user-driven collection job (collection-contracts.ts). Legacy clients omit both fields and behave as
+ * before; when supplied the import also completes that job in the same transaction, so both must arrive together.
+ */
+export const discoveryImportRequestSchema = z.object({
+  action: z.literal("import"), evidence: z.array(discoveryEvidenceSchema).min(1).max(DISCOVERY_IMPORT_MAX),
+  collectionJobId: z.string().trim().min(1).max(100).optional(),
+  collectionJobVersion: z.number().int().min(1).max(1_000_000_000).optional(),
+}).strict().superRefine((value, ctx) => {
+  if ((value.collectionJobId === undefined) !== (value.collectionJobVersion === undefined))
+    ctx.addIssue({ code: "custom", path: ["collectionJobId"], message: DISCOVERY_COLLECTION_JOB_MESSAGE });
+});
 export const discoveryRequestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("import"), evidence: z.array(discoveryEvidenceSchema).min(1).max(DISCOVERY_IMPORT_MAX) }).strict(),
+  discoveryImportRequestSchema,
   z.object({ action: z.literal("decision"), candidateId: z.string().min(1).max(100), status: z.enum(discoveryDecisionStatuses),
     reason: z.string().trim().min(1).max(500) }).strict(),
 ]);

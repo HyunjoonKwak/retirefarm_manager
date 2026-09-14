@@ -79,3 +79,31 @@ it("shows a load failure instead of claiming an empty successful discovery", asy
   expect(await screen.findByRole("alert")).toHaveTextContent("저장 서비스 점검 중");
   expect(screen.queryByText(/표시할 후보가 없습니다/)).not.toBeInTheDocument();
 });
+
+it("rejects a capture from another query or before the selected job started", async () => {
+  const startedAt = new Date(Date.now() - 5000).toISOString();
+  const job = { id: "job-a", query: "tomato", searchUrl: "https://search.shopping.naver.com/ns/search?query=tomato",
+    status: "RUNNING", reason: null, version: 2, createdAt: startedAt, startedAt, completedAt: null, evidenceCount: 0, runId: null };
+  const fetch = vi.fn().mockImplementation(async (url: string) => ({ ok: true, json: async () => url.endsWith("/collection")
+    ? { jobs: [job], lastSuccessAt: null } : overview() }));
+  vi.stubGlobal("fetch", fetch);
+  await open();
+  const queue = screen.getByText("검색 수집 작업 관리").closest("details")!;
+  queue.open = true; fireEvent(queue, new Event("toggle"));
+  fireEvent.click(await screen.findByRole("button", { name: "이 작업에 파일 연결" }));
+  const input = screen.getByLabelText("검색 후보 JSON 파일 가져오기");
+  const base = { schemaVersion: "retirefarm-visible-search-v1", sourceUrl: "https://search.shopping.naver.com/ns/search?query=other",
+    query: "other", capturedAt: new Date().toISOString(), searchSort: "UNKNOWN", searchEnvironment: "BROWSER_UNSPECIFIED",
+    items: [{ productUrl: candidate.productUrl, urlStatus: "COMPOSED", title: "토마토", storeName: "농장", position: 1,
+      adStatus: "UNKNOWN", purchaseLabel: "", reviewCount: null, reviewBasis: "UNKNOWN" }] };
+  const send = (raw: unknown) => fireEvent.change(input, { target: { files: [{ size: 1000, text: async () => JSON.stringify(raw) }] } });
+  send(base);
+  expect(await screen.findByRole("alert")).toHaveTextContent(/작업과 검색어가 같고/);
+  expect(screen.queryByRole("region", { name: "검색 수집 미리보기" })).not.toBeInTheDocument();
+  send({ ...base, query: "tomato", sourceUrl: job.searchUrl, capturedAt: new Date(Date.now() - 10000).toISOString() });
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/작업 시작·재개 후/));
+  send({ ...base, query: "tomato", sourceUrl: job.searchUrl });
+  expect(await screen.findByRole("region", { name: "검색 수집 미리보기" })).toBeInTheDocument();
+  expect(screen.getByText(/^연결 작업: tomato\./)).toBeInTheDocument();
+  expect(bodies(fetch)).toEqual([]);
+});

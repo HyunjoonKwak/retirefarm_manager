@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { discoveryRequestSchema, type DiscoveryOverview, type DiscoveryRequest, type RankedDiscoveryCandidate } from "@/lib/briefing/discovery-contracts";
+import { discoveryRequestSchema, normalizeDiscoveryQuery, type DiscoveryOverview, type DiscoveryRequest, type RankedDiscoveryCandidate } from "@/lib/briefing/discovery-contracts";
+import type { CollectionJob } from "@/lib/briefing/collection-contracts";
+import { CollectionQueue } from "./CollectionQueue";
 import { dateTime, fromDatetimeLocal, nativeSelectClass, toDatetimeLocal } from "./competitor-utils";
 import { emptyPanelDraft, type PanelDraft } from "./CompetitorPanelForm";
 import { readSearchCapture, type SearchCapture } from "./search-capture";
@@ -36,7 +38,7 @@ function CandidateCard({ candidate: c, busy, fixed, onUse, onDecision }: { candi
       <ul className="space-y-2 pt-2">{c.evidence.slice(0, 20).map(e => <li key={e.id}>
         {dateTime(e.observedAt)} · {e.query} · 위치 {e.position ?? "미확인"} · {adLabels[e.adStatus]} · {relevanceLabels[e.relevance]}
         <br />구매 표기: {e.purchaseLabel || "미확인"} · 리뷰: {e.reviewCount ?? "미확인"} ({e.reviewBasis === "CUMULATIVE" ? "누적" : e.reviewBasis === "ROLLING" ? "이동 기간" : "기준 미확인"})
-        {e.sourceUrl && <><br /><a href={e.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">검색 출처</a> · 정렬 {e.searchSort || "미확인"} · 검색 환경 {e.searchEnvironment === "BROWSER_UNSPECIFIED" ? "필터·개인화·배송지 미확인" : e.searchEnvironment || "미확인"}</>}
+        {e.sourceUrl && <><br /><a href={e.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">검색 출처</a> · 정렬 {e.searchSort && e.searchSort !== "UNKNOWN" ? e.searchSort : "미확인"} · 검색 환경 {e.searchEnvironment === "BROWSER_UNSPECIFIED" ? "필터·개인화·배송지 미확인" : e.searchEnvironment || "미확인"}</>}
       </li>)}</ul>
       {c.evidence.length > 20 && <p>화면에는 최근 20건을 표시합니다.</p>}
     </details>
@@ -55,6 +57,9 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [capture, setCapture] = useState<SearchCapture | null>(null);
+  const [selectedJob, setSelectedJob] = useState<CollectionJob | null>(null);
+  const [queueRefresh, setQueueRefresh] = useState(0);
+  const selectJob = useCallback((job: CollectionJob | null) => { setSelectedJob(job); setCapture(null); }, []);
   const [filter, setFilter] = useState("RECOMMENDED");
   const [draft, setDraft] = useState({ storeName: "", productUrl: "", title: "", query: "대추방울토마토 2kg",
     observedAt: toDatetimeLocal(new Date()), position: "", adStatus: "UNKNOWN", relevance: "UNKNOWN", purchaseLabel: "", reviewCount: "", reviewBasis: "UNKNOWN" });
@@ -68,6 +73,7 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
     setBusy(true); setError(""); setNotice("");
     try {
       const result = await readResponse(await fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }));
+      if (request.action === "import" && request.collectionJobId) { setSelectedJob(null); setQueueRefresh(n => n + 1); }
       setNotice(request.action === "decision" ? "판매처의 추천 상태를 변경했습니다. 고정 비교 목록은 유지됩니다." : result.duplicate ? "이미 저장한 자료입니다." : `검색 근거 ${result.evidenceCount}건을 저장하고 추천을 갱신했습니다.`);
       await load(); return true;
     } catch (e) { setError(e instanceof Error ? e.message : "저장하지 못했습니다."); return false; }
@@ -86,7 +92,13 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
     try {
       if (file.size > 256 * 1024) throw new Error("후보 파일은 256KB 이하만 가져올 수 있습니다.");
       const raw = JSON.parse(await file.text());
-      if (raw?.schemaVersion === "retirefarm-visible-search-v1") { setCapture(readSearchCapture(raw)); return; }
+      if (raw?.schemaVersion === "retirefarm-visible-search-v1") {
+        const next = readSearchCapture(raw);
+        if (selectedJob && (normalizeDiscoveryQuery(next.query) !== normalizeDiscoveryQuery(selectedJob.query) || !selectedJob.startedAt || new Date(next.capturedAt) < new Date(selectedJob.startedAt)))
+          throw new Error("선택한 작업과 검색어가 같고 작업 시작·재개 후에 수집한 파일을 가져오세요.");
+        setCapture(next); return;
+      }
+      if (selectedJob) throw new Error("작업에 연결하려면 검색 화면 수집 파일을 가져오세요. 일반 입력은 작업 연결을 해제한 뒤 사용합니다.");
       const parsed = discoveryRequestSchema.safeParse(raw);
       if (!parsed.success || parsed.data.action !== "import") throw new Error("검색 후보 파일 형식이 다릅니다. 상품 가격 수집 파일은 고정 패널에서 가져오세요.");
       await mutate(parsed.data);
@@ -98,6 +110,11 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
     <p className="text-sm">확인한 검색 근거를 저장하면 최근 7일 자료로 최대 10개 판매처를 추천합니다. 검색어별 반복 노출과 관측 위치를 사용하며, 판매량·검색량 순위는 아닙니다. 검색 화면 수집 파일을 검토해 가져올 수 있으며 자동 검색·주간 예약은 아직 준비 중입니다.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {notice && <p role="status" className="text-sm">{notice}</p>}
+    <CollectionQueue selectedJobId={selectedJob?.id ?? null} onSelect={selectJob} refreshKey={queueRefresh} disabled={busy || !!capture} />
+    {selectedJob && <div className="rounded border p-2 text-sm">파일 연결 작업: {selectedJob.query} · 시작 {selectedJob.startedAt ? dateTime(selectedJob.startedAt) : "미확인"}
+      <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => selectJob(null)}>작업 연결 해제</Button>
+      <p className="text-xs">선택한 근거를 저장하면 이 작업이 완료됩니다. 아래 수동 입력은 작업 완료와 연결되지 않습니다.</p>
+    </div>}
     <details>
       <summary className="cursor-pointer text-sm font-medium">검색 근거 추가</summary>
       <form onSubmit={event => void submit(event)} className="space-y-3 pt-3">
@@ -119,7 +136,7 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
       <div className="mt-4 space-y-2"><Label htmlFor="discovery-file">검색 후보 JSON 파일 가져오기</Label><Input id="discovery-file" type="file" accept=".json,application/json" disabled={busy} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; void importFile(file); }} />
         <p className="text-xs text-muted-foreground">네이버플러스 검색 화면에서 수집 도구를 실행해 저장한 JSON을 선택하세요. 상품 가격 수집 파일은 고정 패널에서 가져옵니다.</p></div>
     </details>
-    {capture && <SearchCaptureReview key={`${capture.sourceUrl}-${capture.capturedAt}`} capture={capture} busy={busy} onSave={mutate} onCancel={() => setCapture(null)} />}
+    {capture && <SearchCaptureReview key={`${capture.sourceUrl}-${capture.capturedAt}-${selectedJob?.id ?? ""}-${selectedJob?.version ?? ""}`} capture={capture} collectionJob={selectedJob ?? undefined} busy={busy} onSave={mutate} onCancel={() => setCapture(null)} />}
     <div className="flex flex-wrap items-center gap-3">
       <Label htmlFor="discovery-filter">후보 보기</Label><select id="discovery-filter" className={`${nativeSelectClass} max-w-xs`} value={filter} onChange={e => setFilter(e.target.value)}><option value="RECOMMENDED">추천 후보 ({data?.recommendedCount ?? 0}곳)</option><option value="ALL">전체 후보 ({candidates.length}개 상품)</option><option value="EXCLUDED">사용자 제외</option></select>
       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}>추천 다시 확인</Button>

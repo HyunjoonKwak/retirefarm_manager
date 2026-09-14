@@ -1,14 +1,50 @@
 import { createHash } from "node:crypto";
 import prisma from "@/lib/prisma";
 import { BriefingError } from "./queue";
+import type { CompetitorCollectionJob, Prisma } from "@prisma/client";
 import { discoveryRequestSchema, normalizeDiscoveryQuery, parseDiscoveryProductUrl, type DiscoveryCandidate, type DiscoveryEvidenceInput, type DiscoveryOverview, type DiscoveryRequest } from "./discovery-contracts";
 import { DISCOVERY_POLICY_VERSION, rankDiscoveryCandidates } from "./discovery-ranking";
+import { COLLECTION_EVIDENCE_WINDOW_MS } from "./collection-contracts";
 
 const DAY = 86_400_000;
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const SEARCH_METADATA_KEYS = ["sourceUrl", "searchSort", "searchEnvironment", "collectionMethod"] as const;
 /** Search-context keys are appended only when supplied, so legacy manual payloads keep their historical hash and stay idempotent. */
 const searchMetadata = (e: DiscoveryEvidenceInput) => Object.fromEntries(SEARCH_METADATA_KEYS.flatMap(key => e[key] === undefined ? [] : [[key, e[key]]]));
+
+type JobRef = { id: string; version: number };
+type NormalizedEvidence = { query: string; observedAt: string; collectionMethod?: string };
+const JOB_STATE_MESSAGE = "수집 중인 작업에만 자료를 저장할 수 있습니다. 작업 상태를 새로고침해 주세요.";
+/**
+ * Loads the caller's collection job for an import and checks its state. A SUCCEEDED job is returned as-is so the
+ * duplicate path can recognise a retry; every other non-RUNNING state, or a stale version on a RUNNING job, is rejected.
+ */
+async function collectionJobForImport(tx: Prisma.TransactionClient, userId: string, ref: JobRef) {
+  const job = await tx.competitorCollectionJob.findFirst({ where: { id: ref.id, userId } });
+  if (!job) throw new BriefingError(404, "수집 작업을 찾지 못했습니다.");
+  if (job.status !== "RUNNING" && job.status !== "SUCCEEDED") throw new BriefingError(409, JOB_STATE_MESSAGE);
+  if (job.status === "RUNNING" && job.version !== ref.version) throw new BriefingError(409, "작업 상태가 바뀌었습니다. 새로고침 후 다시 확인해 주세요.");
+  return job;
+}
+/**
+ * Every evidence row must come from the job's own search, via the extension, between the user's start signal and the
+ * import instant (≤24h). For a SUCCEEDED job the import instant is its completedAt, so an identical retry days later is
+ * judged exactly as the original request was; the generic 30-day observation rule (checked before the transaction)
+ * still bounds how late such a retry can be recognised.
+ */
+function assertEvidenceMatchesJob(items: NormalizedEvidence[], job: CompetitorCollectionJob, now: Date) {
+  if (items.some(e => e.query !== job.query)) throw new BriefingError(400, "수집 작업의 검색어와 다른 검색어 자료가 섞여 있습니다.");
+  if (items.some(e => e.collectionMethod !== "EXTENSION")) throw new BriefingError(400, "수집 작업에는 확장 프로그램으로 수집한 자료만 저장할 수 있습니다.");
+  const startedAt = job.startedAt?.getTime();
+  if (startedAt === undefined) throw new BriefingError(409, JOB_STATE_MESSAGE);
+  const importedAt = (job.status === "SUCCEEDED" ? job.completedAt ?? now : now).getTime();
+  const inWindow = (t: number) => t >= startedAt && t <= importedAt && importedAt - t <= COLLECTION_EVIDENCE_WINDOW_MS;
+  if (items.some(e => !inWindow(new Date(e.observedAt).getTime())))
+    throw new BriefingError(400, "수집 작업을 시작한 뒤 24시간 안에 관측한 자료만 저장할 수 있습니다.");
+}
+/** A retry after success carries the version the original request used (one below the current one) or the current one. */
+const isCompletedRetry = (job: CompetitorCollectionJob, ref: JobRef, runId: string) =>
+  job.status === "SUCCEEDED" && job.runId === runId && (ref.version === job.version || ref.version === job.version - 1);
 
 export async function discoveryOverview(userId: string, now = new Date()): Promise<DiscoveryOverview> {
   const [rows, latestRun, fixed] = await Promise.all([
@@ -60,9 +96,21 @@ export async function mutateDiscovery(userId: string, request: DiscoveryRequest,
     ...searchMetadata(e) }) }));
   const unique = [...new Map(normalized.map(e => [e.payload, e])).values()].sort((a, b) => a.payload.localeCompare(b.payload));
   const contentHash = hash(unique.map(e => e.payload).join("\n"));
+  const jobRef: JobRef | null = input.collectionJobId !== undefined && input.collectionJobVersion !== undefined
+    ? { id: input.collectionJobId, version: input.collectionJobVersion } : null;
   return prisma.$transaction(async tx => {
+    // Job checks run before the duplicate lookup so an old identical run can never bypass query/time validation.
+    const job = jobRef ? await collectionJobForImport(tx, userId, jobRef) : null;
+    if (job) assertEvidenceMatchesJob(unique.map(item => item.e), job, now);
     const existingRun = await tx.competitorDiscoveryRun.findUnique({ where: { userId_contentHash: { userId, contentHash } } });
-    if (existingRun) return { ok: true, id: existingRun.id, duplicate: true, evidenceCount: existingRun.evidenceCount };
+    if (existingRun) {
+      const duplicate = { ok: true, id: existingRun.id, duplicate: true, evidenceCount: existingRun.evidenceCount };
+      if (!job || !jobRef) return duplicate;
+      if (isCompletedRetry(job, jobRef, existingRun.id)) return { ...duplicate, collectionJob: { id: job.id, status: job.status, version: job.version } };
+      // The same evidence already belongs to another run (legacy import or another job); linking would misattribute it.
+      throw new BriefingError(409, "같은 자료가 이미 다른 저장 기록에 있습니다. 작업 상태를 새로고침해 주세요.");
+    }
+    if (job && job.status !== "RUNNING") throw new BriefingError(409, "이미 완료된 수집 작업에는 다른 자료를 저장할 수 없습니다.");
     if (await tx.competitorDiscoveryRun.count({ where: { userId, createdAt: { gte: new Date(now.getTime() - DAY) } } }) >= 60)
       throw new BriefingError(429, "하루 자료 저장 한도에 도달했습니다. 다음 날 다시 진행해 주세요.");
     const extensionCount = unique.filter(item => item.e.collectionMethod === "EXTENSION").length;
@@ -92,6 +140,13 @@ export async function mutateDiscovery(userId: string, request: DiscoveryRequest,
       added++;
     }
     await tx.competitorDiscoveryRun.update({ where: { id: run.id }, data: { evidenceCount: added } });
-    return { ok: true, id: run.id, evidenceCount: added };
+    if (!job || !jobRef) return { ok: true, id: run.id, evidenceCount: added };
+    // A subset of an earlier run adds nothing: throwing here rolls back the empty run instead of completing the job with it.
+    if (added === 0) throw new BriefingError(409, "선택한 자료가 모두 이미 저장되어 있어 이 작업으로 새로 저장할 자료가 없습니다. 자료를 확인해 주세요.");
+    // Completion means the reviewed evidence is saved, not that every search card was processed.
+    const completed = await tx.competitorCollectionJob.updateMany({ where: { id: job.id, userId, status: "RUNNING", version: jobRef.version },
+      data: { status: "SUCCEEDED", runId: run.id, evidenceCount: added, completedAt: now, updatedAt: now, version: { increment: 1 } } });
+    if (completed.count !== 1) throw new BriefingError(409, "작업 상태가 바뀌었습니다. 새로고침 후 다시 확인해 주세요.");
+    return { ok: true, id: run.id, evidenceCount: added, collectionJob: { id: job.id, status: "SUCCEEDED", version: job.version + 1 } };
   }, { timeout: 15_000 });
 }

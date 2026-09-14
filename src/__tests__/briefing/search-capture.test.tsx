@@ -46,6 +46,17 @@ describe("search capture review", () => {
       observedAt: base.capturedAt, collectionMethod: "EXTENSION", sourceUrl, searchSort: "판매 많은순", searchEnvironment: "BROWSER_UNSPECIFIED", reviewBasis: "UNKNOWN" }] });
     expect(onCancel).toHaveBeenCalledOnce();
   });
+  it("links reviewed evidence to the selected collection job version", async () => {
+    const base = capture(), onSave = vi.fn().mockResolvedValue(true);
+    const job = { id: "job-a", query: base.query, searchUrl: base.sourceUrl, status: "RUNNING" as const, reason: null,
+      createdAt: base.capturedAt, startedAt: base.capturedAt, completedAt: null, evidenceCount: 0, runId: null, version: 4 };
+    render(<SearchCaptureReview capture={base} collectionJob={job} busy={false} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /목록 1/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /선택 항목의 상품 주소/ }));
+    fireEvent.click(screen.getByRole("button", { name: "선택 1개 후보 저장" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
+    expect(onSave.mock.calls[0][0]).toMatchObject({ action: "import", collectionJobId: "job-a", collectionJobVersion: 4 });
+  });
   it("never allows an observed advertisement to be relabeled organic", () => {
     const base = capture(); base.items[0].adStatus = "AD";
     render(<SearchCaptureReview capture={base} busy={false} onSave={vi.fn()} onCancel={vi.fn()} />);
