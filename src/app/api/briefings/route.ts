@@ -8,7 +8,7 @@ import { BriefingError, enqueueBriefing } from "@/lib/briefing/queue";
 
 const unauthorized = () => NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 const requestSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("enqueue"), productName: z.string().trim().min(1).max(50),
+  z.object({ action: z.enum(["enqueue", "preview"]), productName: z.string().trim().min(1).max(50),
     origin: z.string().trim().max(50).optional(), variety: z.string().trim().max(50).optional() }).strict(),
   z.object({ action: z.literal("retry"), jobId: z.string().min(1).max(100) }).strict(),
 ]);
@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json(count ? { ok: true } : { error: "재시도할 수 없는 작업이거나 대기 작업이 많습니다." }, { status: count ? 200 : 409 });
     }
     const snapshot = await buildSnapshot(user.id, input.data);
+    if (input.data.action === "preview") return NextResponse.json({ snapshot }, { headers: { "Cache-Control": "no-store" } });
     const job = await enqueueBriefing(user.id, snapshot);
     return NextResponse.json({ jobId: job.id, status: job.status }, { status: 201 });
   } catch (error) {

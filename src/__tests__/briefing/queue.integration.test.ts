@@ -17,6 +17,7 @@ import { resultSchema, type BriefingResult } from "@/lib/briefing/contracts";
 import { POST as workerPost } from "@/app/api/briefing-worker/route";
 import { GET, POST } from "@/app/api/briefings/route";
 import { POST as tokenPost } from "@/app/api/briefings/worker-token/route";
+import { snapshotSchema as workerSnapshotSchema } from "../../../scripts/briefing-worker.mjs";
 
 let dir: string;
 const now = new Date("2026-09-14T01:00:00Z");
@@ -46,6 +47,18 @@ it("uses the previous completed KST week including Sunday night at the UTC bound
   expect(previousWeek(now)).toEqual({ start: new Date("2026-09-06T15:00:00Z"), end: new Date("2026-09-13T15:00:00Z") });
   expect(previousWeek(new Date("2026-09-13T14:59:59Z")).end.toISOString()).toBe("2026-09-06T15:00:00.000Z");
 });
+it("previews collection coverage without creating a run or draft and requires login", async () => {
+  const request = () => new Request("http://localhost/api/briefings", { method: "POST", body: JSON.stringify({ action: "preview", productName: "토마토" }) });
+  const response = await POST(request());
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const body = await response.json();
+  expect(body.snapshot.analysis.coverage.current.unknownSlots).toBe(14);
+  expect(await m.db.briefingRun.count()).toBe(0);
+  expect(await m.db.weeklyBriefing.count()).toBe(0);
+  m.user.mockResolvedValue(null);
+  expect((await POST(request())).status).toBe(401);
+});
 it("keeps empty result requests distinct by filter while deduplicating equivalent empty filters", async () => {
   const first = await buildSnapshot("owner", { productName: "토마토", origin: "평택" }, now);
   const second = await buildSnapshot("owner", { productName: "토마토", origin: "장수" }, now);
@@ -70,6 +83,50 @@ it("migrates all tables and weights full transactions only inside identical grou
   expect(snapshot.metrics.filter(metric => metric.unit.startsWith("원/"))).toHaveLength(2);
   expect(snapshot.limitations.some(text => text.includes("1건"))).toBe(true);
   expect(snapshot.sources.find(source => source.id === "competitors")?.status).toBe("NOT_COLLECTED");
+});
+it("compares exact groups against disjoint prior periods and withholds rates after a failed collection", async () => {
+  const base = { productName: "토마토", variety: "대추", origin: "평택", grade: "특", unit: "3kg", corporation: "서울청과", corporationCode: "11000101" };
+  const records = (first: string, second: string, price: number) => [
+    { ...base, auctionDate: new Date(`${first}T00:00:00+09:00`), price, quantity: 1 },
+    { ...base, auctionDate: new Date(`${first}T00:00:00+09:00`), price, quantity: 2 },
+    { ...base, auctionDate: new Date(`${second}T00:00:00+09:00`), price, quantity: 1 },
+  ];
+  await m.db.auctionResult.createMany({ data: [
+    ...records("2026-09-07", "2026-09-08", 20000), ...records("2026-08-31", "2026-09-01", 10000),
+    ...records("2026-08-17", "2026-08-18", 5000),
+    { ...base, variety: "다른품종", auctionDate: new Date("2026-09-01T00:00:00+09:00"), price: 999999, quantity: 1000 },
+    { ...base, auctionDate: new Date("2026-08-09T00:00:00+09:00"), price: 999999, quantity: 1000 },
+    { ...base, auctionDate: new Date("2026-09-14T00:00:00+09:00"), price: 999999, quantity: 1000 },
+  ] });
+  const start = new Date("2026-08-10T00:00:00+09:00").getTime();
+  await m.db.dataCollectionLog.createMany({ data: Array.from({ length: 35 }, (_, i) => ({
+    targetDate: new Date(start + i * 86400_000), corporation: base.corporationCode, targetProducts: "토마토,포도",
+    status: "SUCCESS", totalCount: 3, newCount: 3, startedAt: new Date(now.getTime() - 1000), completedAt: new Date(now.getTime() - 500),
+  })) });
+  const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
+  expect(snapshot.analysis?.comparisons).toHaveLength(1);
+  expect(workerSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+  const row = snapshot.analysis!.comparisons[0];
+  expect(row).toMatchObject({ currentDays: 2, currentTrades: 3, previous: { price: 10000, changePct: 100, status: "COMPARABLE" },
+    fourWeeks: { price: 7500, observedDays: 4, tradeCount: 6, status: "COMPARABLE" } });
+  expect(row.fourWeeks.changePct).toBeCloseTo(166.6666667);
+  // The second configured corporation lacks logs, but cannot veto this corporation's comparison.
+  expect(snapshot.analysis!.coverage.current.unknownSlots).toBe(7);
+  await m.db.dataCollectionLog.create({ data: { targetDate: new Date("2026-09-01T00:00:00+09:00"), corporation: base.corporationCode,
+    targetProducts: "토마토", status: "FAILED", totalCount: 0, newCount: 0, startedAt: now, completedAt: now } });
+  const uncertain = await buildSnapshot("owner", { productName: "토마토" }, now);
+  expect(uncertain.analysis!.comparisons[0].previous).toMatchObject({ price: 10000, changePct: null, status: "UNVERIFIED_COLLECTION" });
+  expect(uncertain.analysis!.comparisons[0].fourWeeks.changePct).toBeNull();
+  expect(uncertain.analysis!.coverage.previous.failedSlots).toBe(1);
+});
+it("does not invent a baseline or infer trends from a one-day sample", async () => {
+  const base = { productName: "토마토", variety: "대추", origin: "평택", grade: "특", unit: "3kg", corporation: "서울청과", corporationCode: "11000101", price: 10000, quantity: 1 };
+  await m.db.auctionResult.create({ data: { ...base, auctionDate: new Date("2026-09-07T00:00:00+09:00") } });
+  const missing = await buildSnapshot("owner", { productName: "토마토" }, now);
+  expect(missing.analysis!.comparisons[0].previous).toMatchObject({ price: null, changePct: null, status: "NO_BASELINE" });
+  await m.db.auctionResult.create({ data: { ...base, auctionDate: new Date("2026-09-01T00:00:00+09:00") } });
+  const sparse = await buildSnapshot("owner", { productName: "토마토" }, now);
+  expect(sparse.analysis!.comparisons[0].previous).toMatchObject({ price: 10000, changePct: null, status: "LOW_SAMPLE" });
 });
 it("deduplicates unchanged snapshots despite new observation time and allows only one active worker", async () => {
   const { credential, snapshot, run } = await setup();

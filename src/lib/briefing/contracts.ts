@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { analysisSchema } from "../../../scripts/briefing-analysis-schema.mjs";
 
 const id = z.string().min(1).max(100);
 const prose = (max: number) => z.string().trim().min(1).max(max)
@@ -12,6 +13,7 @@ export const snapshotSchema = z.object({
   metrics: z.array(z.object({ id, label: z.string().max(500), value: z.number().finite(),
     unit: z.string().max(100), sourceId: id }).strict()).max(1000),
   limitations: z.array(z.string().max(1000)).max(20),
+  analysis: analysisSchema.optional(),
 }).strict();
 export type BriefingSnapshot = z.infer<typeof snapshotSchema>;
 export const resultSchema = z.object({
