@@ -34,3 +34,19 @@
 ## 검증·배포 기록
 
 최종 테스트·이미지·운영 확인 결과는 배포 후 아래에 기록한다. 배포 전 SQLite 온라인 백업: `backup_2026-09-14T04-51-15-430Z_4481f258-6af1-4fca-a05e-b16b0853df4f.db` (430,579,712 bytes).
+
+- 전체 Vitest: 60개 파일, 531개 테스트 통과(건너뜀 없음). 타입 검사와 변경 범위 ESLint 통과.
+- 운영용 linux/amd64 이미지의 Next.js 빌드·타입 검사 통과.
+- 이미지: `ghcr.io/hyunjoonkwak/retirefarm-manager:briefing-7f05b05`
+- 이미지 manifest digest: `sha256:c1ffd1de1e6c9d09ffa193da5aa5e683776e987fc882c8b0fa6df16335bd3f78`
+- 변경 검토 중 수정한 문제: JSON 공백 유실, 정정 양식 KST 날짜 하루 오차, 0/미입력 원가 혼동, 서로 다른 포장 중량의 가격 차이 계산, 스마트스토어 예약 경로를 판매자명으로 허용하는 오류, 생성 시각만 달라도 중복 AI 요청이 생기던 부가 출처 문자열.
+
+### 운영 확인 완료
+
+- NAS에 새 이미지를 적용하고 두 추가 테이블 마이그레이션(WorkReportImport 및 경쟁점 3개 테이블)을 완료했다. 컨테이너 `healthy`, `/api/health/ready`의 ready·marketSchedulerReady·marketRecoveryReady 모두 true.
+- 실제 사용자 로그인 화면에서 9/14 오전 11시 Work 보고서 전사본을 미리보기 후 보관했다. 보관 ID `cmu0s27so00012fr0ls96os1b`, 내용 해시 `37208c7c9a1a0baf400700cb6639f439b0c8f177657d2935709e8919a5063247`. 보고 기간 8/31~9/14 KST, Markdown 2,648자, JSON 3,385자. 읽기 전용 DB 비교로 Markdown은 준비한 전사본과 완전 일치, JSON 전체 값은 준비한 전사본과 일치함을 확인했다.
+- 운영 주간 미리보기에서 평택 109건·경락 조건 3개와 Work 등급별 공개 평균 8개가 서로 구분되어 표시됐다. 일반 방울 특품 44,114.33원/5kg를 확인했다. 현재 진행 중인 주의 한 날짜 값은 지난주 평균에 섞이지 않았다.
+- 검색 키 미등록으로 검색 버튼 비활성, 수동 패널 양식 활성 확인. 운영 패널·검색 기록은 각각 0건이며 검증되지 않은 가짜 경쟁점은 넣지 않았다.
+- 이번 검증은 AI 생성 요청 없이 미리보기만 실행했다. 기존 BriefingRun은 SUCCEEDED 1건·BLOCKED 1건 그대로다.
+- Chrome 자동 파일 선택은 확장의 파일 URL 접근 설정으로 실패하여, 확인한 본문과 JSON을 일반 텍스트 입력으로 보관했다. 확장 권한을 변경하지 않았다.
+- 직전 이미지 `briefing-7ed2f89`와 `.env.before-work-competitors-20260914`, `docker-compose.prod.yml.before-work-competitors-20260914`를 보존했다. 추가 테이블을 삭제하지 않고 이전 이미지로 복귀 가능하다.
