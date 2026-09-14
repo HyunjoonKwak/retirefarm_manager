@@ -37,6 +37,10 @@ model User {
   briefingWorker BriefingWorkerCredential?
   briefingRuns BriefingRun[]
   weeklyBriefings WeeklyBriefing[]
+  workReportImports WorkReportImport[]
+  competitorSearches CompetitorSearch[]
+  competitorPanel CompetitorPanelEntry[]
+  competitorObservations CompetitorPriceObservation[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -512,4 +516,78 @@ model WeeklyBriefing {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   run BriefingRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   @@index([userId, createdAt])
+}
+
+// Immutable imported Work reports and correction lineage; public reference prices never become auction trades.
+model WorkReportImport {
+  id String @id @default(cuid())
+  userId String
+  title String
+  periodStart DateTime?
+  periodEnd DateTime?
+  sourceUrl String?
+  rawMarkdown String
+  rawJson String?
+  normalized String?
+  contentHash String
+  parentId String?
+  correctionReason String?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent WorkReportImport? @relation("WorkImportVersions", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  corrections WorkReportImport[] @relation("WorkImportVersions")
+  @@unique([userId, contentHash])
+  @@index([userId, createdAt])
+}
+
+model CompetitorSearch {
+  id String @id @default(cuid())
+  userId String
+  query String
+  bucket String
+  status String @default("RUNNING")
+  response String?
+  errorCode String?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, query, bucket])
+  @@index([userId, createdAt])
+}
+
+model CompetitorPanelEntry {
+  id String @id @default(cuid())
+  userId String
+  storeKey String
+  activeStoreKey String?
+  storeName String
+  productUrl String
+  productName String @default("토마토")
+  varietyGroup String
+  qualityGroup String
+  optionLabel String
+  packageKg Float
+  createdAt DateTime @default(now())
+  archivedAt DateTime?
+  archiveReason String?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  observations CompetitorPriceObservation[]
+  @@unique([userId, activeStoreKey])
+  @@index([userId, createdAt])
+}
+
+model CompetitorPriceObservation {
+  id String @id @default(cuid())
+  userId String
+  entryId String
+  observedAt DateTime
+  price Int?
+  shippingFee Int?
+  availability String
+  notes String?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry CompetitorPanelEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  @@index([userId, observedAt])
+  @@index([entryId, observedAt])
 }

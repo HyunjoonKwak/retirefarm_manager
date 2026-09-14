@@ -43,7 +43,7 @@ it("offers only observed choices, explains that records are not proof of shippin
     : facetBody(["평택", "장수"], [{ variety: "대추빨강" }, { variety: "완숙" }]));
   render(<WeeklyBriefing />);
   await screen.findByText("아직 요청한 브리핑이 없습니다.");
-  expect(screen.getByText(/자동 예약·알림은 준비 중/)).toBeInTheDocument();
+  expect(screen.getByText(/예약·알림은 준비 중/)).toBeInTheDocument();
   expect(screen.getByText(/실제 출하가 있었다는 증명은 아니고/)).toBeInTheDocument();
   await screen.findByRole("option", { name: "완숙 · 3건" });
   expect(screen.getByText(/산지 2곳 · 품종 2종 · 법인 1곳/)).toBeInTheDocument();

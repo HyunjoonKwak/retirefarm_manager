@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { BriefingResult, BriefingSnapshot } from "@/lib/briefing/contracts";
+import { BriefingSupplementalSources } from "./BriefingSupplementalSources";
 import { BriefingPriceAnalysis } from "./BriefingPriceAnalysis";
 import { BriefingFilterPicker, type BriefingFilters } from "./BriefingFilterPicker";
 import { useBriefingFacets } from "./useBriefingFacets";
@@ -57,7 +58,7 @@ export function WeeklyBriefing() {
   return <div className="space-y-6">
     <div className="rounded-lg border p-4 space-y-3">
       <h2 className="font-semibold">주간 농가 브리핑 초안</h2>
-      <p className="text-sm text-muted-foreground">지난주 월요일부터 일요일까지의 시세로 초안을 만듭니다. 재배·물류·경쟁점 자료 연결과 자동 예약·알림은 준비 중입니다.</p>
+      <p className="text-sm text-muted-foreground">지난주 월요일부터 일요일까지의 시세로 초안을 만듭니다. Work 보관함의 공개 평균과 확인된 경쟁점 가격을 별도 근거로 반영합니다. 재배·물류 자동 수집과 예약·알림은 준비 중입니다.</p>
       <BriefingFilterPicker disabled={busy} filters={filters} facets={facets.facets} loading={facets.loading} error={facets.error} onChange={changeFilters} />
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={!canSubmit} onClick={() => void post("/api/briefings", { action: "preview", productName, variety, origin })}>시세 분석 미리보기</Button>
@@ -67,7 +68,7 @@ export function WeeklyBriefing() {
       <p className="text-sm text-muted-foreground">동일한 입력은 기존 작업을 표시합니다. 요청 후 Mac 워커가 실행되면 작성이 시작됩니다.</p>
       <p className="text-xs text-muted-foreground">미리보기는 AI를 호출하거나 보고서 작업을 등록하지 않습니다.</p>
     </div>
-    {preview && <div className="rounded-lg border p-4 space-y-3"><h3 className="font-semibold">시세 분석 미리보기</h3><BriefingPriceAnalysis snapshot={preview} /></div>}
+    {preview && <div className="rounded-lg border p-4 space-y-3"><h3 className="font-semibold">시세 분석 미리보기</h3><BriefingPriceAnalysis snapshot={preview} /><BriefingSupplementalSources snapshot={preview} /></div>}
     <details className="rounded-lg border p-4">
       <summary className="cursor-pointer font-medium">Mac 워커 연결 {data?.worker.configured ? "· 등록됨" : "· 미등록"}</summary>
       <div className="mt-3 space-y-3">
@@ -91,7 +92,7 @@ export function WeeklyBriefing() {
       {run.status === "RUNNING" && run.leaseUntil && new Date(run.leaseUntil) < new Date() && <p className="text-sm">워커 응답이 늦어지고 있습니다. 다음 연결에서 복구를 시도합니다.</p>}
       {run.lastError && <p className="text-sm">{errorNames[run.lastError] ?? "워커 상태를 확인해 주세요."}</p>}
       {run.lastError !== "NO_MARKET_DATA" && ["FAILED", "BLOCKED"].includes(run.status) && <Button variant="outline" disabled={busy} onClick={() => void post("/api/briefings", { action: "retry", jobId: run.id })}>연결 확인 후 재시도</Button>}
-      <BriefingPriceAnalysis snapshot={run.snapshot} />
+      <BriefingPriceAnalysis snapshot={run.snapshot} /><BriefingSupplementalSources snapshot={run.snapshot} />
       {run.briefing && <><p className="font-medium">{run.briefing.body.summary}</p>
         {run.briefing.body.sections.map(section => <section key={section.key} className="space-y-1">
           <h4 className="font-medium">{sections[section.key]}</h4><p className="whitespace-pre-wrap text-sm">{section.body}</p>

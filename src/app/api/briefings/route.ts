@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     }
     const snapshot = await buildSnapshot(user.id, input.data);
     if (input.data.action === "preview") return NextResponse.json({ snapshot }, { headers: { "Cache-Control": "no-store" } });
-    if (!snapshot.metrics.length) return NextResponse.json({ error: "선택 조건의 지난주 유효 거래가 없습니다. 산지·품종을 다시 선택하고 미리보기를 확인해 주세요." }, { status: 400 });
+    if (!snapshot.metrics.some(metric => metric.sourceId === "market")) return NextResponse.json({ error: "선택 조건의 지난주 유효 거래가 없습니다. 산지·품종을 다시 선택하고 미리보기를 확인해 주세요." }, { status: 400 });
     const job = await enqueueBriefing(user.id, snapshot);
     return NextResponse.json({ jobId: job.id, status: job.status }, { status: 201 });
   } catch (error) {

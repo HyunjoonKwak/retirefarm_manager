@@ -1,0 +1,33 @@
+import { z } from "zod";
+import type { ShoppingSearchResult } from "./naver-shopping";
+export const varietyLabels = { JUJUBE: "대추방울", ROUND: "원형 방울", UNKNOWN: "미확인" } as const;
+export const qualityLabels = { REGULAR: "일반", ORGANIC: "친환경", GIFT: "선물", UGLY: "못난이", OTHER: "기타" } as const;
+const money = z.number().int().min(0).max(10_000_000);
+export const competitorRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("search"), query: z.string().trim().min(1).max(100) }).strict(),
+  z.object({ action: z.literal("addPanel"), storeName: z.string().trim().min(1).max(100), productUrl: z.string().url().max(2000),
+    productName: z.string().trim().min(1).max(100), varietyGroup: z.enum(["JUJUBE", "ROUND", "UNKNOWN"]),
+    qualityGroup: z.enum(["REGULAR", "ORGANIC", "GIFT", "UGLY", "OTHER"]), optionLabel: z.string().trim().min(1).max(200),
+    packageKg: z.number().min(0.05).max(50), confirmed: z.literal(true) }).strict(),
+  z.object({ action: z.literal("record"), entryId: z.string().min(1).max(100), observedAt: z.string().datetime({ offset: true }),
+    price: money.nullable(), shippingFee: money.nullable(), availability: z.enum(["IN_STOCK", "OUT_OF_STOCK", "UNKNOWN"]),
+    notes: z.string().trim().max(1000).optional() }).strict(),
+  z.object({ action: z.literal("archive"), entryId: z.string().min(1).max(100), reason: z.string().trim().min(1).max(500) }).strict(),
+]);
+export type CompetitorRequest = z.infer<typeof competitorRequestSchema>;
+export interface CompetitorObservation { id: string; observedAt: string; price: number|null; shippingFee: number|null; availability: string; notes: string|null }
+export interface CompetitorEntry {
+  id: string; storeKey: string; storeName: string; productUrl: string; productName: string;
+  varietyGroup: string; qualityGroup: string; optionLabel: string; packageKg: number;
+  archivedAt: string|null; archiveReason: string|null; observations: CompetitorObservation[];
+}
+export interface CompetitorGroup {
+  key: string; label: string; packageKg?: number; count: number; medianDeliveredPrice: number|null; min: number|null; max: number|null;
+  previousWeekChangePct: number|null; pairedCount: number;
+}
+export interface CompetitorOverview {
+  configured: boolean; asOf: string; target: number; activeCount: number;
+  latestSearch: { id: string; createdAt: string; status: string; errorCode: string|null; result: ShoppingSearchResult|null }|null;
+  entries: CompetitorEntry[]; groups: CompetitorGroup[];
+  limitations: string[];
+}
