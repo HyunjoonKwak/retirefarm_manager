@@ -30,3 +30,24 @@ DB는 4개 컬럼을 추가하며 기본값은 빈 품종명/UNKNOWN이다. 과�
 5. 주간 보고서에 비교 가능한 점포 수, 미확인/제외 이유, 관측일, 동일 패널 전주 변화와 원본 링크를 함께 표시한다.
 
 Claude는 DB·계약·통계·백엔드 테스트, Codex는 입력 UI·확인 해제·표시·UI 테스트 및 배포를 담당한다.
+
+## 검증
+
+- 전체 Vitest: 70개 파일, 831개 테스트 통과.
+- UI/후보 입력 24개 테스트 통과. 입력 수정 후 확인 해제, 새 속성 요청 전달, 레거시 미확인 표시 확인.
+- TypeScript와 변경 파일 ESLint 통과.
+- Claude 검증: Prisma client 생성, migrations↔schema diff 없음, 기존 패널/관측이 있는 임시 SQLite DB에 실제 migration 적용 후 데이터 보존 확인.
+- Backend stats 29개 + service 34개 테스트 포함. 색상/품종/가공 분리, 혼합/기타/미확인 제외, 기본값 및 앞뒤 공백 처리, 3개 점포/전주 비교 규칙 검증.
+- 배포 전 백업: `backup_2026-09-14T09-29-25-397Z_816190bf-8e97-413a-a39a-1ef19db3c376.db` (430,784,512 bytes).
+- Claude Task `task_8a5c890e8329`, Dispatch `ctx_1901dedcae75`: succeeded 검토 및 worker-release 완료.
+
+## 운영 배포 및 실제 가격 기록
+
+- 운영 이미지 `ghcr.io/hyunjoonkwak/retirefarm-manager:identity-3b76ee2`, digest `sha256:7d1400aad82c6d6ca07d862d561226901a695bf77744e62ce66a0c6fbfbf37c4`.
+- migration `20260914093000_competitor_option_identity` 적용 확인. 4개 컬럼 및 기본값 확인. 컨테이너 healthy, ready/marketSchedulerReady/marketRecoveryReady 모두 true.
+- 롤백 이미지 `paste-1cb255a`, 환경 백업 `.env.before-identity-3b76ee2`. 추가 컬럼만 있으므로 이전 이미지로 되돌려도 컬럼 삭제는 하지 않는다.
+- 운영 UI에서 품종명 빈칸, 색상·혼합·가공 미확인 기본값 확인.
+- 실제 구성포냥냥파머즈 상품 `https://smartstore.naver.com/ninecatsfarmer/products/12280882374`의 루체(주황) 2kg 옵션 선택, 수량1, 총금액16,900원, 기본 무료배송을 확인했다. 제주·도서지역 추가5,000원도 함께 표기되어 있다.
+- 상세 설명에는 루체(Luce)를 레드라고 소개하지만 선택 옵션은 주황으로 표기되어 색상 충돌이 있다. 판매명과 실제 품종 일치, 크기 기준, 가공 여부도 미확인이다. 해당 속성은 채우지 않고 품질은 기타로 보관했다.
+- 18:38 KST 실제 옵션 패널 1개 등록, 18:39 저장 성공 및 18:38 관측 16,900원/배송비0원/수량1 근거와 상세 불일치 메모를 UI에서 확인했다. 관측 패널 ID `cmu11w538000212ngogp7svwm`.
+- 대표 그룹이 없다는 UI를 확인했다. 확인되지 않은 속성을 가진 원자료가 실제 통계에 포함되지 않는다. 후보20곳은 유지되며 실제 가격 패널은1곳이다.
