@@ -34,6 +34,9 @@ model User {
   productWatchlist         ProductWatchlist[]
   marketCollectionSettings MarketCollectionSettings?
   marketComparisonPresets MarketComparisonPreset[]
+  briefingWorker BriefingWorkerCredential?
+  briefingRuns BriefingRun[]
+  weeklyBriefings WeeklyBriefing[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -463,5 +466,50 @@ model MarketComparisonPreset {
   grade       String?
   createdAt   DateTime @default(now())
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+// 서버는 토큰 해시만 보관한다. 토큰 원문은 발급 응답에서 한 번만 제공한다.
+model BriefingWorkerCredential {
+  id String @id @default(cuid())
+  userId String @unique
+  tokenHash String @unique
+  lastSeenAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model BriefingRun {
+  id String @id @default(cuid())
+  userId String
+  weekStart DateTime
+  inputHash String
+  snapshot String
+  status String @default("PENDING")
+  attempts Int @default(0)
+  leaseToken String?
+  leaseUntil DateTime?
+  credentialId String?
+  lastError String?
+  resultHash String?
+  usage String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  briefing WeeklyBriefing?
+  @@unique([userId, weekStart, inputHash])
+  @@index([userId, status, createdAt])
+}
+
+model WeeklyBriefing {
+  id String @id @default(cuid())
+  userId String
+  runId String @unique
+  status String @default("DRAFT")
+  body String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run BriefingRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   @@index([userId, createdAt])
 }

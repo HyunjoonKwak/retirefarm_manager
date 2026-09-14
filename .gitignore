@@ -58,3 +58,6 @@ public/workbox-*.js.map
 # Local snapshots and staged restore data
 /backups/
 *.restore-pending*
+
+# Downloaded personal briefing worker credential
+retirefarm-worker-token*.txt
