@@ -5,7 +5,7 @@ export function CaptureExtensionHelp() {
     <summary className="cursor-pointer font-medium">브라우저 수집 도구 설치·사용</summary>
     <p>상품 페이지에서 선택한 옵션의 가격 영역을 읽어 파일이나 클립보드로 가져오는 Chrome 확장 프로그램입니다. 서버에 자동 전송하거나 가격을 자동 저장하지 않습니다.</p>
     <a className="text-primary underline underline-offset-4" href="/downloads/retirefarm-competitor-capture.zip" download>수집 도구 ZIP 다운로드</a>
-    <p>버전 1.1.0은 네이버플러스 검색의 후보 목록 수집 시험 기능을 포함합니다. 검색어·정렬을 선택하고 확장에서 저장한 파일을 ‘경쟁 판매처 추천 후보 → 검색 근거 추가’에서 가져오세요. 기존 설치는 소스 폴더를 교체하고 확장 관리 화면에서 새로고침합니다.</p>
+    <p>버전 1.1.1은 네이버플러스 검색의 후보 목록 수집 시험 기능을 포함합니다. 검색어·정렬을 선택하고 확장에서 저장한 파일을 ‘경쟁 판매처 추천 후보 → 검색 근거 추가’에서 가져오세요. 기존 설치는 소스 폴더를 교체하고 확장 관리 화면에서 새로고침합니다.</p>
     <ol className="list-decimal pl-5 space-y-1">
       <li>ZIP을 내려받아 압축을 풉니다.</li>
       <li>Chrome 주소창에 <code>chrome://extensions</code>를 입력하고 개발자 모드를 켠 뒤 ‘압축해제된 확장 프로그램을 로드합니다’에서 압축을 푼 폴더를 선택합니다.</li>

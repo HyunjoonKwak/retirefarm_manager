@@ -290,6 +290,18 @@ describe("envelope metadata", () => {
     header.innerHTML = '<button aria-label="판매 많은순 선택됨">추천순 선택됨</button>';
     expect(okCapture().searchSort).toBe("UNKNOWN");
   });
+  it("reads Naver's visible sibling aria-labelledby selection marker, but rejects hidden or unrelated targets", () => {
+    render(card());
+    const header = document.querySelector("header")!;
+    header.innerHTML = '<div><div id="sort_SALE">판매 많은순<span class="sr">선택됨</span></div><button aria-labelledby="sort_SALE"></button></div>';
+    expect(okCapture().searchSort).toBe("판매 많은순");
+    header.querySelector("#sort_SALE")!.setAttribute("hidden", "");
+    expect(okCapture().searchSort).toBe("UNKNOWN");
+    header.innerHTML = '<div id="sort_SALE">판매 많은순 선택됨</div><div><button aria-labelledby="sort_SALE"></button></div>';
+    expect(okCapture().searchSort).toBe("UNKNOWN");
+    header.innerHTML = '<div><div id="sort_SALE">판매 많은순<span class="sr">선택됨</span></div><button aria-labelledby="sort_SALE" aria-label="추천순 선택됨"></button></div>';
+    expect(okCapture().searchSort).toBe("UNKNOWN");
+  });
   it("reports UNKNOWN sort when no single selected sort button is visible and accepts the popup's normalised URL as expected", () => {
     render(card());
     document.querySelector("header")!.innerHTML = "<button>추천순 선택됨</button><button>리뷰 많은순 선택됨</button>";

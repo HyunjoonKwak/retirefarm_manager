@@ -154,8 +154,18 @@ export function captureVisibleSearch(expectedUrl) {
       position: index + 1, adStatus: ad ? "AD" : "UNKNOWN", purchaseLabel, reviewCount, reviewBasis: "UNKNOWN" });
   }
   if (!items.length) return { ok: false, code: "no-items", message: "상품 제목·판매처를 안전하게 구분하지 못했습니다. 화면 구조를 확인해 주세요." };
+  // Naver exposes the selected label through aria-labelledby, including a screen-reader selection marker.
+  // Read only a short label in the same visible control group; never use tracking attributes as state.
+  const linkedSortLabel = el => {
+    const ids = (el.getAttribute("aria-labelledby") || "").trim().split(/\s+/).filter(Boolean);
+    if (!ids.length || ids.length > 8) return "";
+    const labels = ids.map(id => document.getElementById(id));
+    if (labels.some(label => !label || !el.parentElement?.contains(label) || !visible(label))) return "";
+    const label = labels.map(node => node.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+    return label.length <= 80 ? label : "";
+  };
   const sortTexts = [...new Set(Array.from(document.querySelectorAll("button")).filter(visible)
-    .flatMap(el => [text(el), el.getAttribute("aria-label") || ""])
+    .flatMap(el => [text(el), el.getAttribute("aria-label") || "", linkedSortLabel(el)])
     .map(value => value.match(/^(추천순|판매 많은순|리뷰 많은순|낮은 가격순|높은 가격순|신상품순)\s*선택(?:됨)?$/)?.[1])
     .filter(Boolean))];
   const searchSort = sortTexts.length === 1 ? sortTexts[0] : "UNKNOWN";

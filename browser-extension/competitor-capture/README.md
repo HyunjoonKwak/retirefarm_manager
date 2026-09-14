@@ -63,7 +63,7 @@ Chrome 102 이상이 필요합니다. 별도 빌드나 의존성 설치는 없�
 - `popup.js` / `popup.html` / `popup.css`: 팝업 UI.
 - 테스트: 저장소 루트에서 `npx vitest run src/__tests__/briefing/competitor-extension.test.ts`
 - 배포용 ZIP 생성: `node scripts/package-competitor-extension.mjs` → `public/downloads/retirefarm-competitor-capture.zip` (같은 소스면 항상 같은 바이트가 나옵니다.)
-# 검색 후보 수집 (1.1.0)
+# 검색 후보 수집 (1.1.1)
 
 네이버플러스 스토어 검색(`/ns/search`)에서 검색어와 정렬(추천순·판매 많은순 등)을 고른 뒤 확장을 열어 현재 화면을 수집한다. 현재 렌더링된 상품 목록 중 최대 20개 항목을 JSON으로 저장한다. 앱의 **경쟁 판매처 추천 후보 → 검색 근거 추가 → 검색 후보 JSON 파일 가져오기**에서 파일을 선택하고 미리보기를 확인한다.
 

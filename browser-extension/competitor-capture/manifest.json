@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Retirefarm 경쟁 상품 화면 캡처",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "현재 열린 네이버플러스 검색 후보 또는 스마트스토어·브랜드스토어 상품 가격 영역을 버튼으로 읽어 JSON으로 내보냅니다. 서버 통신·예약 수집 없음.",
   "minimum_chrome_version": "102",
   "permissions": ["activeTab", "scripting", "clipboardWrite"],
