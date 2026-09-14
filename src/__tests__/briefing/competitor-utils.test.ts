@@ -49,7 +49,10 @@ describe("links", () => {
     expect(isSafeHttpUrl("https://user:pw@smartstore.naver.com/farm/products/1")).toBe(false);
     expect(isSafeHttpUrl("")).toBe(false);
   });
-  it("recognises smartstore product paths only", () => {
+  it("recognises only allowed smartstore and brand product paths", () => {
+    expect(isSmartstoreProductUrl("https://brand.naver.com/jbn/products/5618807799?x=1")).toBe(true);
+    expect(isSmartstoreProductUrl("https://brand.naver.com.evil.test/jbn/products/1")).toBe(false);
+    expect(isSmartstoreProductUrl("https://brand.naver.com/main/products/1")).toBe(false);
     expect(isSmartstoreProductUrl("https://smartstore.naver.com/farm/products/1")).toBe(true);
     expect(isSmartstoreProductUrl("https://smartstore.naver.com/farm")).toBe(false);
     expect(isSmartstoreProductUrl("https://smartstore.naver.com/farm/products/abc")).toBe(false);

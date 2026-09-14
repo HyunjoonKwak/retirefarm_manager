@@ -22,7 +22,7 @@ const entry = (patch: Partial<CompetitorEntry>): CompetitorEntry => ({
   ], ...patch,
 });
 const overview = (patch: Partial<CompetitorOverview>): CompetitorOverview => ({
-  configured: true, asOf: "2026-09-14T01:00:00.000Z", target: 30, activeCount: 1, latestSearch: null, entries: [entry({})],
+  configured: false, searchRetiredOn: "2026-07-31", asOf: "2026-09-14T01:00:00.000Z", target: 30, activeCount: 1, latestSearch: null, entries: [entry({})],
   groups: [{ key: "g1", packageKg: 2, label: "대추방울토마토 · 대추방울 · 일반 · 2kg", count: 1, medianDeliveredPrice: null, min: null, max: null, previousWeekChangePct: null, pairedCount: 0 }],
   limitations: ["검색 결과는 후보이며 API 노출 순서는 비광고 순위가 아닙니다."], ...patch,
 });
@@ -35,13 +35,13 @@ const stubFetch = (get: () => unknown, post: Handler = () => ok({ ok: true })) =
 };
 const postBodies = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.filter(call => call[1]?.method === "POST").map(call => JSON.parse(String(call[1].body)));
 
-it("shows the unconfigured state without collecting keys and renders latest, history, and the 3-store rule", async () => {
+it("shows API retirement without collecting keys and renders latest, history, and the 3-store rule", async () => {
   stubFetch(() => ok(overview({ configured: false })));
   render(<CompetitorResearch />);
   await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
-  expect(screen.getByText(/서버 환경변수로만 설정합니다/)).toBeInTheDocument();
-  expect(screen.getByLabelText("검색어")).toBeDisabled();
-  expect(screen.getByRole("button", { name: "검색 1회 실행" })).toBeDisabled();
+  expect(screen.getByText(/키를 추가할 필요 없이/)).toBeInTheDocument();
+  expect(screen.getByLabelText("검색어")).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "검색 1회 실행" })).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/client/i)).not.toBeInTheDocument();
   expect(screen.getByText(/판매가 16,900원 · 무료배송 · 배송 포함 16,900원 \(kg당 8,450원\)/)).toBeInTheDocument();
   expect(screen.getByText("관측 이력 2건")).toBeInTheDocument();
@@ -52,22 +52,21 @@ it("shows the unconfigured state without collecting keys and renders latest, his
   expect(screen.getByText(/API 노출 순서는 비광고 순위가 아닙니다/)).toBeInTheDocument();
 });
 
-it("searches only on click, shows API rank and unverified values, and prefills the form without submitting", async () => {
+it("opens browser search without API calls and preserves historical candidates as unverified", async () => {
   const withSearch = overview({ latestSearch: { id: "s1", createdAt: "2026-09-14T00:30:00.000Z", status: "SUCCEEDED", errorCode: null,
     result: { query: "대추방울토마토", sort: "sim", observedAt: "2026-09-14T00:30:00.000Z", total: 2, excludedCount: 1, items: [
       candidate({}),
       candidate({ productId: "p2", rank: 2, title: "스테비아 토마토 주스", excluded: true, listedPrice: null, proposedPackageKg: null, varietyGroup: "UNKNOWN",
         reviewReasons: ["VERIFY_PRICE_OPTION_SHIPPING", "PRICE_UNAVAILABLE", "WEIGHT_MISSING", "HEURISTIC_STEVIA", "HEURISTIC_JUICE"] }),
     ] } } });
-  let searched = false;
-  const fetch = stubFetch(() => ok(searched ? withSearch : overview({})), () => { searched = true; return ok({ ok: true, cached: false }); });
+  const fetch = stubFetch(() => ok(withSearch));
   render(<CompetitorResearch />);
   await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  expect(screen.getByText(/2026년 7월 31일 종료/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "검색 1회 실행" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("검색어"), { target: { value: "대추방울토마토 & 2kg" } });
+  expect(screen.getByRole("link", { name: "네이버 쇼핑에서 찾기" })).toHaveAttribute("href", `https://search.shopping.naver.com/search/all?query=${encodeURIComponent("대추방울토마토 & 2kg")}`);
   expect(postBodies(fetch)).toEqual([]);
-  fireEvent.change(screen.getByLabelText("검색어"), { target: { value: "  대추방울토마토 " } });
-  fireEvent.click(screen.getByRole("button", { name: "검색 1회 실행" }));
-  await screen.findByText(/API #1/);
-  expect(postBodies(fetch)).toEqual([{ action: "search", query: "대추방울토마토" }]);
   expect(screen.getByText(/미검증 최저가 15,900원 · 추정 중량 2kg · 품종 추정 대추방울/)).toBeInTheDocument();
   expect(screen.getByText("중량은 제목 추정치")).toBeInTheDocument();
   expect(screen.queryByText(/API #2/)).not.toBeInTheDocument();
@@ -84,7 +83,7 @@ it("searches only on click, shows API rank and unverified values, and prefills t
   expect(screen.getByLabelText("상품·옵션명 (상품 페이지 표기 그대로)")).toHaveValue("대추방울토마토 2kg");
   expect(screen.getByLabelText("품종 그룹")).toHaveValue("JUJUBE");
   expect(screen.getByRole("button", { name: "패널에 추가" })).toBeDisabled();
-  expect(postBodies(fetch)).toHaveLength(1);
+  expect(postBodies(fetch)).toHaveLength(0);
 });
 
 it("adds a panel only after explicit confirmation and refreshes from the server", async () => {
@@ -104,7 +103,7 @@ it("adds a panel only after explicit confirmation and refreshes from the server"
   fireEvent.click(screen.getByRole("button", { name: "패널에 추가" }));
   await screen.findByText(/고정 패널에 추가했습니다/);
   expect(postBodies(fetch)).toEqual([{ action: "addPanel", storeName: "농장C", productUrl: "https://smartstore.naver.com/farmc/products/77", productName: "대추방울토마토",
-    varietyGroup: "JUJUBE", qualityGroup: "GIFT", optionLabel: "2kg 로얄과", packageKg: 2, confirmed: true }]);
+    varietyGroup: "JUJUBE", qualityGroup: "GIFT", sizeGrade: "UNKNOWN", sizeCriteria: "", optionLabel: "2kg 로얄과", packageKg: 2, confirmed: true }]);
   expect(fetch.mock.calls.filter(call => call[1]?.method !== "POST")).toHaveLength(2);
   expect(screen.getByLabelText("판매처 이름")).toHaveValue("");
   expect(screen.getByLabelText("비교 품목 (그룹 기준 라벨)")).toHaveValue("토마토");
@@ -166,14 +165,38 @@ it("archives with a reason, keeps history visible, and surfaces server errors", 
   expect(within(card).queryByRole("button", { name: "관측 기록" })).not.toBeInTheDocument();
 });
 
-it("shows the JSON error from a failed mutation", async () => {
-  stubFetch(() => ok(overview({})), () => fail(429, "다음 검색은 5분 후에 가능합니다."));
+it("keeps observation draft when saving fails", async () => {
+  stubFetch(() => ok(overview({})), () => fail(503, "저장에 실패했습니다."));
   render(<CompetitorResearch />);
   await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
-  fireEvent.change(screen.getByLabelText("검색어"), { target: { value: "토마토" } });
-  fireEvent.click(screen.getByRole("button", { name: "검색 1회 실행" }));
-  expect(await screen.findByText("다음 검색은 5분 후에 가능합니다.")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByRole("button", { name: "검색 1회 실행" })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("판매가 (원, 비우면 미확인)"), { target: { value: "18500" } });
+  fireEvent.click(screen.getByRole("button", { name: "관측 기록" }));
+  expect(await screen.findByText("저장에 실패했습니다.")).toBeInTheDocument();
+  expect(screen.getByLabelText("판매가 (원, 비우면 미확인)")).toHaveValue("18500");
+});
+
+it("requires matching option and human review before prefilling, then explicitly saves", async () => {
+  const fetch = stubFetch(() => ok(overview({ entries: [entry({ optionLabel: "중과 2kg" })] })));
+  render(<CompetitorResearch />);
+  await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  fireEvent.click(screen.getByText("상품 화면에서 가격 가져오기"));
+  fireEvent.change(screen.getByLabelText("상품 화면 텍스트"), { target: { value: "선택 옵션: 중과 2kg\n총 금액 18,500원\n무료배송" } });
+  fireEvent.click(screen.getByRole("button", { name: "가격 읽기" }));
+  expect(screen.getByRole("button", { name: "기록 양식에 채우기" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("지금 선택한 옵션명"), { target: { value: "소과 2kg" } });
+  expect(screen.getByRole("button", { name: "기록 양식에 채우기" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("지금 선택한 옵션명"), { target: { value: "중과 2kg" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: /선택 옵션·수량 1과/ }));
+  fireEvent.click(screen.getByRole("button", { name: "기록 양식에 채우기" }));
+  expect(screen.getByLabelText("판매가 (원, 비우면 미확인)")).toHaveValue("18500");
+  expect(screen.getByLabelText("배송비 (원, 0은 무료)")).toHaveValue("0");
+  expect(screen.getByLabelText("재고 상태")).toHaveValue("UNKNOWN");
+  expect(postBodies(fetch)).toEqual([]);
+  fireEvent.change(screen.getByLabelText("재고 상태"), { target: { value: "IN_STOCK" } });
+  fireEvent.click(screen.getByRole("button", { name: "관측 기록" }));
+  await waitFor(() => expect(postBodies(fetch)).toHaveLength(1));
+  expect(postBodies(fetch)[0]).toMatchObject({ price: 18500, shippingFee: 0, availability: "IN_STOCK" });
+  expect(postBodies(fetch)[0].notes).toContain("중과 2kg");
 });
 
 it("computes a local cost scenario without posting", async () => {

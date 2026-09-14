@@ -567,6 +567,8 @@ model CompetitorPanelEntry {
   qualityGroup String
   optionLabel String
   packageKg Float
+  sizeGrade String @default("UNKNOWN")
+  sizeCriteria String @default("")
   createdAt DateTime @default(now())
   archivedAt DateTime?
   archiveReason String?

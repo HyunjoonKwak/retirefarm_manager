@@ -1,5 +1,7 @@
 # Briefing — Naver Shopping 검색 어댑터 계약
 
+> 폐기된 공급자 계약: 공식 쇼핑검색 API는 2026-07-31 종료됐다([공식 공지](https://developers.naver.com/notice/article/32564)). 아래는 기존 구현 기록이며 신규 키 설정·실서비스 연결 지침이 아니다. [대체 수집 계획](reviews/2026-09-14-browser-competitor-collection-plan.md)을 참고한다.
+
 파일: `src/lib/briefing/naver-shopping.ts` · 테스트: `src/__tests__/briefing/naver-shopping.test.ts`
 
 공식 문서(2026-09-14 확인): https://developers.naver.com/docs/serviceapi/search/shopping/shopping.md

@@ -33,7 +33,7 @@ const readError = async (response: Response, fallback: string) => {
   catch { return fallback; }
 };
 
-/** Competitor panel: bounded official search, manually confirmed fixed panel, manual observations, server-side group medians. */
+/** Competitor panel: browser discovery, confirmed fixed panel, assisted observations, server-side group medians. */
 export function CompetitorResearch() {
   const [data, setData] = useState<CompetitorOverview | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -60,7 +60,8 @@ export function CompetitorResearch() {
       setNotice(successNotice);
       if (request.action === "addPanel") setForm(current => ({ key: current.key + 1, draft: emptyPanelDraft, fromCandidate: false }));
       await load();
-    } catch (error) { setActionError(error instanceof Error ? error.message : "요청을 처리하지 못했습니다."); }
+      return true;
+    } catch (error) { setActionError(error instanceof Error ? error.message : "요청을 처리하지 못했습니다."); return false; }
     finally { setBusy(false); }
   };
 
@@ -79,15 +80,14 @@ export function CompetitorResearch() {
         <h2 className="font-semibold">경쟁점 가격 조사</h2>
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>새로고침</Button>
       </div>
-      <p className="text-sm text-muted-foreground">네이버 공식 쇼핑검색 API로 후보를 찾고, 스마트스토어 상품 페이지에서 직접 확인한 옵션만 고정 패널에 등록해 가격을 손으로 기록합니다. 자동 수집·AI 요약은 하지 않습니다.</p>
+      <p className="text-sm text-muted-foreground">브라우저에서 찾은 스마트스토어·브랜드스토어 상품을 등록하고, 선택 옵션의 화면 텍스트로 가격 기록을 도와드립니다. 확인한 품종·크기 기준·중량이 같은 상품끼리 비교합니다.</p>
       {data && <p className="text-sm">고정 패널 {data.activeCount}곳 / 목표 {data.target}곳 · 기준 시각 {dateTime(data.asOf)}</p>}
       {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
       {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
       {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
     </section>
 
-    <CompetitorSearchPanel configured={data?.configured ?? false} latestSearch={data?.latestSearch ?? null} busy={busy || !data}
-      onSearch={query => void mutate({ action: "search", query }, "검색을 실행했습니다. 아래 후보는 검토용이며 패널에 자동 추가되지 않습니다.")}
+    <CompetitorSearchPanel latestSearch={data?.latestSearch ?? null} busy={busy || !data}
       onUseCandidate={useCandidate} />
 
     <CompetitorPanelForm key={form.key} initial={form.draft} busy={busy || !data} fromCandidate={form.fromCandidate}
@@ -103,14 +103,14 @@ export function CompetitorResearch() {
       {data && active.length === 0 && <p className="text-sm text-muted-foreground">아직 등록한 패널이 없습니다. 위 양식에서 확인한 상품을 추가하세요.</p>}
       {active.length > 0 && <ul className="space-y-3">
         {active.map(entry => <CompetitorEntryCard key={entry.id} entry={entry} busy={busy}
-          onRecord={request => void mutate(request, "관측을 기록했습니다.")}
+          onRecord={request => mutate(request, "관측을 기록했습니다.")}
           onArchive={request => void mutate(request, "패널에서 보관했습니다. 이력은 그대로 남습니다.")} />)}
       </ul>}
       {archived.length > 0 && <div className="space-y-3">
         <Button variant="ghost" size="sm" onClick={() => setShowArchived(current => !current)}>{showArchived ? "보관된 패널 숨기기" : `보관된 패널 ${archived.length}곳 보기`}</Button>
         {showArchived && <ul className="space-y-3">
           {archived.map(entry => <CompetitorEntryCard key={entry.id} entry={entry} busy={busy}
-            onRecord={request => void mutate(request, "관측을 기록했습니다.")}
+            onRecord={request => mutate(request, "관측을 기록했습니다.")}
             onArchive={request => void mutate(request, "패널에서 보관했습니다.")} />)}
         </ul>}
       </div>}

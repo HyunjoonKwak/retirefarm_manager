@@ -94,12 +94,12 @@ export function isSafeHttpUrl(value: string): boolean {
   } catch { return false; }
 }
 
-/** Mirrors the server's canonical rule: https smartstore.naver.com/<store>/products/<id> with no port or credentials. */
+/** Mirrors the server's canonical rule: https Naver smartstore/brand product URL with no port or credentials. */
 export const isSmartstoreProductUrl = (value: string): boolean => {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "https:" && parsed.hostname === "smartstore.naver.com" && parsed.port === "" && parsed.username === ""
-      && parsed.password === "" && /^\/[a-z0-9_-]{2,64}\/products\/\d+\/?$/i.test(parsed.pathname);
+    return parsed.protocol === "https:" && ["smartstore.naver.com", "brand.naver.com"].includes(parsed.hostname) && parsed.port === "" && parsed.username === ""
+      && parsed.password === "" && !["products", "main", "inflow", "category", "search", "api"].includes(parsed.pathname.split("/")[1]?.toLowerCase()) && /^\/[a-z0-9_-]{2,64}\/products\/\d+\/?$/i.test(parsed.pathname);
   } catch { return false; }
 };
 

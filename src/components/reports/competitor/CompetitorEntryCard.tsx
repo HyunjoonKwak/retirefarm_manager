@@ -6,16 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { qualityLabels, varietyLabels, type CompetitorEntry, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
+import { qualityLabels, varietyLabels, sizeLabels, type CompetitorEntry, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
 import {
   availabilityLabels, dateTime, deliveredPrice, fromDatetimeLocal, isSafeHttpUrl, kg, latestObservation, nativeSelectClass,
   parseMoney, perKg, shippingLabel, sortedObservations, toDatetimeLocal, won, type Availability,
 } from "./competitor-utils";
 
+import { VisiblePriceImport } from "./VisiblePriceImport";
+
 export type RecordRequest = Extract<CompetitorRequest, { action: "record" }>;
 export type ArchiveRequest = Extract<CompetitorRequest, { action: "archive" }>;
 
-interface Props { entry: CompetitorEntry; busy: boolean; onRecord: (request: RecordRequest) => void; onArchive: (request: ArchiveRequest) => void }
+interface Props { entry: CompetitorEntry; busy: boolean; onRecord: (request: RecordRequest) => Promise<boolean>; onArchive: (request: ArchiveRequest) => void }
 
 const groupLabel = (key: string, labels: Record<string, string>) => labels[key] ?? key;
 
@@ -28,7 +30,7 @@ export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props)
     <div className="flex flex-wrap items-start gap-2">
       <div className="flex-1 min-w-0 space-y-1">
         <p className="font-medium break-words">{entry.storeName} · {entry.productName}</p>
-        <p className="text-sm text-muted-foreground break-words">{entry.optionLabel} · {kg(entry.packageKg)} · {groupLabel(entry.varietyGroup, varietyLabels)} · {groupLabel(entry.qualityGroup, qualityLabels)}</p>
+        <p className="text-sm text-muted-foreground break-words">{entry.optionLabel} · {kg(entry.packageKg)} · {groupLabel(entry.varietyGroup, varietyLabels)} · {groupLabel(entry.qualityGroup, qualityLabels)} · {groupLabel(entry.sizeGrade ?? "UNKNOWN", sizeLabels)} · {entry.sizeCriteria || "크기 기준 미확인"}</p>
       </div>
       {archived ? <Badge variant="outline">보관됨</Badge> : <Badge variant="secondary">추적 중</Badge>}
     </div>
@@ -51,7 +53,7 @@ export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props)
       </ul>
     </details>}
     {!archived && <>
-      <RecordForm entryId={entry.id} busy={busy} onRecord={onRecord} />
+      <RecordForm entry={entry} busy={busy} onRecord={onRecord} />
       <ArchiveForm entryId={entry.id} busy={busy} onArchive={onArchive} />
     </>}
   </li>;
@@ -59,11 +61,13 @@ export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props)
 
 interface RecordDraft { observedAt: string; price: string; shippingFee: string; availability: Availability; notes: string }
 
-function RecordForm({ entryId, busy, onRecord }: { entryId: string; busy: boolean; onRecord: (request: RecordRequest) => void }) {
+function RecordForm({ entry, busy, onRecord }: { entry: CompetitorEntry; busy: boolean; onRecord: (request: RecordRequest) => Promise<boolean> }) {
+  const entryId = entry.id;
+  const [importKey, setImportKey] = useState(0);
   const [draft, setDraft] = useState<RecordDraft>(() => ({ observedAt: toDatetimeLocal(new Date()), price: "", shippingFee: "", availability: "IN_STOCK", notes: "" }));
   const [error, setError] = useState("");
   const update = (patch: Partial<RecordDraft>) => { setDraft(current => ({ ...current, ...patch })); setError(""); };
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const observedAt = fromDatetimeLocal(draft.observedAt);
     if (!observedAt) { setError("관측 시각을 확인해 주세요."); return; }
@@ -73,12 +77,16 @@ function RecordForm({ entryId, busy, onRecord }: { entryId: string; busy: boolea
     const shippingFee = parseMoney(draft.shippingFee); if (!shippingFee.ok) { setError(`배송비: ${shippingFee.error}`); return; }
     const notes = draft.notes.trim();
     if (notes.length > 1000) { setError("메모는 1,000자까지 입력할 수 있습니다."); return; }
-    onRecord({ action: "record", entryId, observedAt, price: price.value, shippingFee: shippingFee.value, availability: draft.availability, ...(notes ? { notes } : {}) });
+    const saved = await onRecord({ action: "record", entryId, observedAt, price: price.value, shippingFee: shippingFee.value, availability: draft.availability, ...(notes ? { notes } : {}) });
+    if (!saved) return;
+    setImportKey(current => current + 1);
     setDraft(current => ({ ...current, price: "", shippingFee: "", notes: "", observedAt: toDatetimeLocal(new Date()) }));
   };
   const id = (name: string) => `record-${entryId}-${name}`;
   return <form className="space-y-2" onSubmit={submit}>
     <p className="text-sm font-medium">가격 관측 기록</p>
+    <VisiblePriceImport key={importKey} entryId={entryId} optionLabel={entry.optionLabel} busy={busy}
+      onApply={values => update({ ...values, observedAt: toDatetimeLocal(new Date()) })} />
     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
       <div><Label htmlFor={id("at")}>관측 시각</Label>
         <Input id={id("at")} type="datetime-local" value={draft.observedAt} max={toDatetimeLocal(new Date())} disabled={busy} onChange={e => update({ observedAt: e.target.value })} /></div>

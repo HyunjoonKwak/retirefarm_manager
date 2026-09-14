@@ -10,41 +10,36 @@ import type { ShoppingCandidate } from "@/lib/briefing/naver-shopping";
 import { dateTime, describeSearchError, isSafeHttpUrl, kg, reviewReasonLabels, won } from "./competitor-utils";
 
 interface Props {
-  configured: boolean;
   latestSearch: CompetitorOverview["latestSearch"];
   busy: boolean;
-  onSearch: (query: string) => void;
   onUseCandidate: (candidate: ShoppingCandidate) => void;
 }
 
 const MAX_QUERY = 100;
 const searchStatusNames: Record<string, string> = { SUCCEEDED: "완료", FAILED: "실패", PENDING: "대기", RUNNING: "검색 중" };
 
-/** One bounded official-API search per explicit click; results are review candidates, never facts. */
-export function CompetitorSearchPanel({ configured, latestSearch, busy, onSearch, onUseCandidate }: Props) {
+/** Browser search discovers candidates; stored API snapshots remain historical evidence only. */
+export function CompetitorSearchPanel({ latestSearch, busy, onUseCandidate }: Props) {
   const [query, setQuery] = useState("");
   const [showExcluded, setShowExcluded] = useState(false);
   const trimmed = query.trim();
-  const canSearch = configured && !busy && trimmed.length > 0 && trimmed.length <= MAX_QUERY;
+  const searchUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(trimmed || "대추방울토마토")}`;
   const result = latestSearch?.result ?? null;
   const visible = result ? result.items.filter(item => showExcluded || !item.excluded) : [];
   return <section className="rounded-lg border p-4 space-y-3">
-    <div className="flex flex-wrap items-center gap-2">
-      <h3 className="font-semibold">네이버 쇼핑 검색 (공식 API)</h3>
-      <Badge variant={configured ? "secondary" : "outline"}>{configured ? "서버 자격증명 설정됨" : "서버 자격증명 없음"}</Badge>
-    </div>
-    {!configured && <p role="status" className="text-sm text-muted-foreground">네이버 개발자센터 Client ID·Secret은 서버 환경변수로만 설정합니다. 브라우저에서는 키를 입력하거나 저장하지 않습니다.</p>}
-    <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={event => { event.preventDefault(); if (canSearch) onSearch(trimmed); }}>
+    <h3 className="font-semibold">브라우저에서 판매처 찾기</h3>
+    <p className="text-sm text-muted-foreground">공식 쇼핑검색 API는 2026년 7월 31일 종료됐습니다. 키를 추가할 필요 없이 네이버 검색 화면에서 상품을 찾아 등록하세요.</p>
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
       <div className="flex-1">
         <Label htmlFor="competitor-query">검색어</Label>
-        <Input id="competitor-query" value={query} maxLength={MAX_QUERY} disabled={!configured || busy} placeholder="예: 대추방울토마토 2kg"
+        <Input id="competitor-query" value={query} maxLength={MAX_QUERY} placeholder="예: 대추방울토마토 2kg"
           onChange={event => setQuery(event.target.value)} />
       </div>
-      <Button type="submit" disabled={!canSearch}>검색 1회 실행</Button>
-    </form>
-    <p className="text-xs text-muted-foreground">버튼을 누를 때만 검색하며 한 번에 최대 100건(유사도순 1페이지)만 가져옵니다. 자동 검색·재시도·상품 페이지 수집은 하지 않습니다.</p>
+      <a href={searchUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline underline-offset-4">네이버 쇼핑에서 찾기</a>
+    </div>
+    <p className="text-xs text-muted-foreground">상품 페이지에서 옵션을 하나 선택하고 수량을 1로 맞추세요. 패널 등록 후 선택 옵션·총 금액·배송비 영역을 복사하면 기록 양식을 채울 수 있습니다.</p>
     {latestSearch && <div className="space-y-2">
-      <p className="text-sm">최근 검색: {searchStatusNames[latestSearch.status] ?? latestSearch.status} · {dateTime(latestSearch.createdAt)}
+      <p className="text-sm">이전 API 검색 기록 (현재 가격 아님): {searchStatusNames[latestSearch.status] ?? latestSearch.status} · {dateTime(latestSearch.createdAt)}
         {result && ` · "${result.query}" · 응답 ${result.items.length}건 (전체 ${result.total.toLocaleString("ko-KR")}건) · 제외 추정 ${result.excludedCount}건`}</p>
       {latestSearch.status === "FAILED" && <p role="alert" className="text-sm text-destructive">{describeSearchError(latestSearch.errorCode)}</p>}
       {result && result.excludedCount > 0 && <label className="flex items-center gap-2 text-sm">

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { qualityLabels, varietyLabels, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
+import { qualityLabels, varietyLabels, sizeLabels, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
 import { isSafeHttpUrl, isSmartstoreProductUrl, nativeSelectClass, parseKg } from "./competitor-utils";
 
 export type AddPanelRequest = Extract<CompetitorRequest, { action: "addPanel" }>;
@@ -14,14 +14,14 @@ type Quality = AddPanelRequest["qualityGroup"];
 
 export interface PanelDraft {
   storeName: string; productUrl: string; productName: string; varietyGroup: Variety; qualityGroup: Quality;
-  optionLabel: string; packageKg: string; confirmed: boolean;
+  optionLabel: string; sizeGrade: AddPanelRequest["sizeGrade"]; sizeCriteria: string; packageKg: string; confirmed: boolean;
 }
 
 /** productName is the comparison commodity label shared across stores, so it defaults to the farm's crop. */
 export const DEFAULT_PRODUCT_NAME = "토마토";
 
 export const emptyPanelDraft: PanelDraft = {
-  storeName: "", productUrl: "", productName: DEFAULT_PRODUCT_NAME, varietyGroup: "UNKNOWN", qualityGroup: "REGULAR", optionLabel: "", packageKg: "", confirmed: false,
+  storeName: "", productUrl: "", productName: DEFAULT_PRODUCT_NAME, varietyGroup: "UNKNOWN", qualityGroup: "REGULAR", optionLabel: "", sizeGrade: "UNKNOWN", sizeCriteria: "", packageKg: "", confirmed: false,
 };
 
 interface Props { initial: PanelDraft; busy: boolean; fromCandidate: boolean; onSubmit: (request: AddPanelRequest) => void; onReset: () => void }
@@ -31,14 +31,14 @@ function validate(draft: PanelDraft): { ok: true; request: AddPanelRequest } | {
   const productName = draft.productName.trim(); const optionLabel = draft.optionLabel.trim();
   if (!storeName || storeName.length > 100) return { ok: false, error: "판매처 이름을 1~100자로 입력해 주세요." };
   if (!isSafeHttpUrl(productUrl) || productUrl.length > 2000 || !isSmartstoreProductUrl(productUrl))
-    return { ok: false, error: "https://smartstore.naver.com/<store>/products/<id> 형식의 실제 상품 주소를 입력해 주세요." };
+    return { ok: false, error: "smartstore.naver.com 또는 brand.naver.com의 /<store>/products/<id> 상품 주소를 입력해 주세요." };
   if (!productName || productName.length > 100) return { ok: false, error: "비교 품목을 1~100자로 입력해 주세요." };
   if (!optionLabel || optionLabel.length > 200) return { ok: false, error: "상품 페이지에서 확인한 상품·옵션명을 1~200자로 입력해 주세요." };
   const weight = parseKg(draft.packageKg);
   if (!weight.ok) return { ok: false, error: weight.error };
   if (!draft.confirmed) return { ok: false, error: "상품 페이지에서 직접 확인했다는 체크가 필요합니다." };
   return { ok: true, request: { action: "addPanel", storeName, productUrl, productName, varietyGroup: draft.varietyGroup,
-    qualityGroup: draft.qualityGroup, optionLabel, packageKg: weight.value, confirmed: true } };
+    qualityGroup: draft.qualityGroup, sizeGrade: draft.sizeGrade, sizeCriteria: draft.sizeCriteria.trim(), optionLabel, packageKg: weight.value, confirmed: true } };
 }
 
 /** Every field is typed or confirmed by the user; search candidates only prefill, never submit. */
@@ -65,10 +65,10 @@ export function CompetitorPanelForm({ initial, busy, fromCandidate, onSubmit, on
       <div><Label htmlFor="panel-url">스마트스토어 상품 URL</Label>
         <Input id="panel-url" type="url" inputMode="url" value={draft.productUrl} maxLength={2000} disabled={busy} placeholder="https://smartstore.naver.com/<store>/products/<id>"
           onChange={e => update({ productUrl: e.target.value })} />
-        {urlTyped && !smartstore && <p className="text-xs text-destructive">스마트스토어 상품 주소(https://smartstore.naver.com/&lt;store&gt;/products/&lt;id&gt;)만 등록할 수 있습니다.</p>}</div>
+        {urlTyped && !smartstore && <p className="text-xs text-destructive">smartstore.naver.com 또는 brand.naver.com의 실제 상품 주소만 등록할 수 있습니다.</p>}</div>
       <div className="sm:col-span-2"><Label htmlFor="panel-name">비교 품목 (그룹 기준 라벨)</Label>
         <Input id="panel-name" value={draft.productName} maxLength={100} disabled={busy} placeholder={DEFAULT_PRODUCT_NAME} onChange={e => update({ productName: e.target.value })} />
-        <p className="text-xs text-muted-foreground">점포별 상품 제목이 아니라 비교 묶음 이름입니다. 품목·품종·품질·중량이 정확히 같은 항목끼리만 한 그룹으로 집계됩니다.</p></div>
+        <p className="text-xs text-muted-foreground">점포별 상품 제목이 아니라 비교 묶음 이름입니다. 품목·품종·품질·크기 기준·중량이 정확히 같은 항목끼리만 한 그룹으로 집계됩니다.</p></div>
       <div className="sm:col-span-2"><Label htmlFor="panel-option">상품·옵션명 (상품 페이지 표기 그대로)</Label>
         <Input id="panel-option" value={draft.optionLabel} maxLength={200} disabled={busy} placeholder="예: 대추방울토마토 2kg 로얄과" onChange={e => update({ optionLabel: e.target.value })} /></div>
       <div><Label htmlFor="panel-kg">포장 중량 (kg)</Label>
@@ -77,6 +77,13 @@ export function CompetitorPanelForm({ initial, busy, fromCandidate, onSubmit, on
         <select id="panel-variety" className={nativeSelectClass} value={draft.varietyGroup} disabled={busy} onChange={e => update({ varietyGroup: e.target.value as Variety })}>
           {(Object.keys(varietyLabels) as Variety[]).map(key => <option key={key} value={key}>{varietyLabels[key]}</option>)}
         </select></div>
+      <div><Label htmlFor="panel-size">크기 구분</Label>
+        <select id="panel-size" className={nativeSelectClass} value={draft.sizeGrade} disabled={busy} onChange={e => update({ sizeGrade: e.target.value as AddPanelRequest["sizeGrade"] })}>
+          {Object.entries(sizeLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select></div>
+      <div className="sm:col-span-2"><Label htmlFor="panel-size-criteria">크기 비교 기준 (판매자 표기 확인)</Label>
+        <Input id="panel-size-criteria" value={draft.sizeCriteria} maxLength={100} disabled={busy} placeholder="예: 지름 25~30mm / 개당 20~25g" onChange={e => update({ sizeCriteria: e.target.value })} />
+        <p className="text-xs text-muted-foreground">같은 ‘중과’라도 판매자 기준이 다를 수 있습니다. 확인한 수치·범위가 같은 상품에 동일하게 입력하세요. 크기 또는 기준 미확인 상품은 기록만 보관하고 대표 가격에서 제외합니다.</p></div>
       <div><Label htmlFor="panel-quality">품질 그룹</Label>
         <select id="panel-quality" className={nativeSelectClass} value={draft.qualityGroup} disabled={busy} onChange={e => update({ qualityGroup: e.target.value as Quality })}>
           {(Object.keys(qualityLabels) as Quality[]).map(key => <option key={key} value={key}>{qualityLabels[key]}</option>)}

@@ -12,7 +12,7 @@ vi.mock("@/lib/prisma", () => ({ default: new Proxy({}, { get: (_, key) => {
 } }) }));
 vi.mock("@/lib/auth/guards", () => ({ getSessionUser: m.user }));
 import { canonicalProductUrl, competitorOverview, mutateCompetitors } from "@/lib/briefing/competitors";
-import { competitorRequestSchema, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
+import { competitorRequestSchema, SEARCH_RETIRED_MESSAGE, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
 import { BriefingError } from "@/lib/briefing/queue";
 import { GET, POST } from "@/app/api/briefings/competitors/route";
 
@@ -21,18 +21,20 @@ const now = new Date("2026-09-14T03:00:00.000Z");
 const DAY = 86_400_000;
 const ago = (ms: number) => new Date(now.getTime() - ms);
 const product = (store: string, id = 1) => `https://smartstore.naver.com/${store}/products/${id}`;
+const brandProduct = (store: string, id = 1) => `https://brand.naver.com/${store}/products/${id}`;
 const panel = (store: string, overrides: Partial<Extract<CompetitorRequest, { action: "addPanel" }>> = {}): CompetitorRequest => ({
   action: "addPanel", storeName: `${store} 농장`, productUrl: product(store), productName: "토마토", varietyGroup: "JUJUBE",
-  qualityGroup: "REGULAR", optionLabel: "2kg 1박스", packageKg: 2, confirmed: true, ...overrides });
+  qualityGroup: "REGULAR", optionLabel: "2kg 1박스", packageKg: 2, sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", confirmed: true, ...overrides });
 const record = (entryId: string, overrides: Partial<Extract<CompetitorRequest, { action: "record" }>> = {}): CompetitorRequest => ({
   action: "record", entryId, observedAt: ago(DAY).toISOString(), price: 12000, shippingFee: 3000, availability: "IN_STOCK", ...overrides });
 // Requests pass through the route schema so service tests see exactly what the API hands over (trim, strict keys).
 const search = (query = "대추방울토마토"): CompetitorRequest => competitorRequestSchema.parse({ action: "search", query });
-const naverBody = (items: Record<string, unknown>[] = []) => ({ lastBuildDate: "x", total: items.length, start: 1, display: items.length, items });
-const naverItem = (id: string, store: string) => ({ productId: id, title: `<b>대추방울토마토</b> 2kg`, link: product(store), lprice: "12900",
-  mallName: `${store} 농장`, productType: "2", category1: "식품" });
-const okResponse = (items: Record<string, unknown>[] = [naverItem("1", "farm-a")]) =>
-  new Response(JSON.stringify(naverBody(items)), { status: 200, headers: { "content-type": "application/json" } });
+// A search row stored while the API was still alive; the retired search action must leave such history readable.
+const storedResult = (store = "farm-a") => ({ query: "대추방울토마토", sort: "sim", observedAt: ago(90 * DAY).toISOString(), total: 1, excludedCount: 0,
+  items: [{ productId: "1", title: "대추방울토마토 2kg", url: product(store), mallName: `${store} 농장`, listedPrice: 12900, rank: 1, productType: "2",
+    proposedPackageKg: 2, varietyGroup: "JUJUBE", reviewReasons: [], excluded: false, storeKey: store }] });
+const seedSearch = (userId: string, overrides: Record<string, unknown> = {}) => m.db.competitorSearch.create({ data: { userId, query: "대추방울토마토",
+  bucket: "legacy", status: "SUCCEEDED", response: JSON.stringify(storedResult()), createdAt: ago(90 * DAY), ...overrides } });
 const rejects = (promise: Promise<unknown>, status: number, pattern?: RegExp) =>
   promise.then(() => { throw new Error("expected rejection"); }, (error: unknown) => {
     expect(error).toBeInstanceOf(BriefingError); expect((error as BriefingError).status).toBe(status);
@@ -48,7 +50,7 @@ const post = (body: unknown) => POST(new Request("http://localhost/api/briefings
 beforeEach(async () => {
   vi.clearAllMocks(); vi.unstubAllEnvs();
   vi.stubEnv("NAVER_SHOPPING_CLIENT_ID", "client-id"); vi.stubEnv("NAVER_SHOPPING_CLIENT_SECRET", "client-secret");
-  vi.stubGlobal("fetch", m.fetch); m.fetch.mockImplementation(async () => okResponse());
+  vi.stubGlobal("fetch", m.fetch); m.fetch.mockImplementation(async () => { throw new Error("network must not be touched"); });
   dir = mkdtempSync(join(tmpdir(), "competitors-")); const file = join(dir, "db.sqlite");
   execFileSync("sqlite3", [file], { input: readdirSync("prisma/migrations").filter(s => /^\d/.test(s)).sort()
     .map(s => readFileSync(`prisma/migrations/${s}/migration.sql`, "utf8")).join("\n") });
@@ -66,13 +68,34 @@ describe("smartstore URL canonicalization", () => {
   });
   it("rejects anything that is not an https smartstore product page", () => {
     for (const url of ["http://smartstore.naver.com/farm/products/1", "https://m.smartstore.naver.com/farm/products/1",
-      "https://brand.naver.com/farm/products/1", "https://smartstore.naver.com.evil.test/farm/products/1", "https://smartstore.naver.com:8443/farm/products/1",
+      "https://smartstore.naver.com.evil.test/farm/products/1", "https://smartstore.naver.com:8443/farm/products/1",
       "https://user:pw@smartstore.naver.com/farm/products/1", "https://smartstore.naver.com/farm", "https://smartstore.naver.com/farm/products/abc",
       "https://smartstore.naver.com/farm/products/1/reviews", "https://smartstore.naver.com/f/products/1", "https://smartstore.naver.com/농장/products/1"])
       expect(() => canonicalProductUrl(url), url).toThrow(BriefingError);
   });
   it("refuses reserved path segments as store keys like the search adapter does", () => {
     expect(() => canonicalProductUrl("https://smartstore.naver.com/main/products/1")).toThrow(BriefingError);
+    expect(() => canonicalProductUrl("https://brand.naver.com/search/products/1")).toThrow(BriefingError);
+  });
+});
+
+describe("brand store URL canonicalization", () => {
+  it("accepts exact brand.naver.com product pages under a prefixed key that can never alias a smartstore slug", () => {
+    for (const url of ["https://BRAND.naver.com/Farm-A/products/77/", "https://brand.naver.com/farm-a/products/77?NaPm=x#top", "https://brand.naver.com:443/farm-a/products/77"])
+      expect(canonicalProductUrl(url)).toEqual({ storeKey: "brand:farm-a", productUrl: "https://brand.naver.com/farm-a/products/77" });
+    expect(canonicalProductUrl(product("farm-a")).storeKey).toBe("farm-a");
+    expect(canonicalProductUrl(brandProduct("farm-a")).storeKey).not.toBe(canonicalProductUrl(product("farm-a")).storeKey);
+  });
+  it("rejects hostile or look-alike brand hosts, other schemes, ports, credentials and non-product paths", () => {
+    for (const url of ["http://brand.naver.com/farm/products/1", "https://m.brand.naver.com/farm/products/1", "https://xbrand.naver.com/farm/products/1",
+      "https://brand.naver.com.evil.test/farm/products/1", "https://brand.naver.com.evil.test/brand.naver.com/products/1", "https://evil.test/brand.naver.com/farm/products/1",
+      "https://brand.naver.co/farm/products/1", "https://brand.naver.com:8443/farm/products/1", "https://user:pw@brand.naver.com/farm/products/1",
+      "https://brand.naver.com./farm/products/1", "https://brand.naver.com/farm", "https://brand.naver.com/farm/products/abc", "https://brand.naver.com/farm/products/1/reviews",
+      "https://brand.naver.com/f/products/1", "https://brand.naver.com/브랜드/products/1", "https://brand.naver.com/brand:farm/products/1",
+      "https://shopping.naver.com/farm/products/1", "https://naver.com/farm/products/1",
+      // Hosts that name Object.prototype members must not resolve through an inherited property.
+      "https://constructor/farm/products/1", "https://__proto__/farm/products/1", "https://hasownproperty/farm/products/1", "https://tostring/farm/products/1"])
+      expect(() => canonicalProductUrl(url), url).toThrow(BriefingError);
   });
 });
 
@@ -88,6 +111,31 @@ describe("panel registration and the one-active-store rule", () => {
     await rejects(mutateCompetitors("owner", panel("farm-a", { productUrl: "https://smartstore.naver.com/FARM-A/products/2" }), now), 409, /이미/);
     await rejects(mutateCompetitors("owner", panel("farm-a", { optionLabel: "5kg", packageKg: 5 }), now), 409);
     expect(await m.db.competitorPanelEntry.count()).toBe(1);
+  });
+  it("persists the confirmed size grade and criteria, and copies them into the created row verbatim", async () => {
+    const id = await add("owner", "farm-a", { sizeGrade: "LARGE", sizeCriteria: "직경 50mm 이상" });
+    expect(await m.db.competitorPanelEntry.findUniqueOrThrow({ where: { id } })).toMatchObject({ sizeGrade: "LARGE", sizeCriteria: "직경 50mm 이상" });
+    const overview = await competitorOverview("owner", now);
+    expect(overview.entries[0]).toMatchObject({ sizeGrade: "LARGE", sizeCriteria: "직경 50mm 이상" });
+  });
+  it("defaults omitted size fields to UNKNOWN and empty criteria through the API schema so old clients keep working", async () => {
+    const legacy = { ...panel("farm-a"), sizeGrade: undefined, sizeCriteria: undefined };
+    const parsed = competitorRequestSchema.parse(legacy);
+    expect(parsed).toMatchObject({ sizeGrade: "UNKNOWN", sizeCriteria: "" });
+    const created = await post(legacy);
+    expect(created.status).toBe(200);
+    const row = await m.db.competitorPanelEntry.findFirstOrThrow();
+    expect(row).toMatchObject({ sizeGrade: "UNKNOWN", sizeCriteria: "" });
+    expect((await competitorOverview("owner", now)).groups).toEqual([]);
+  });
+  it("keeps a brand store and a smartstore with the same slug as two separate active entries", async () => {
+    await add("owner", "farm-a");
+    const brand = await add("owner", "farm-a", { productUrl: brandProduct("farm-a", 5) });
+    expect(await m.db.competitorPanelEntry.findUniqueOrThrow({ where: { id: brand } })).toMatchObject({ storeKey: "brand:farm-a", activeStoreKey: "brand:farm-a",
+      productUrl: brandProduct("farm-a", 5) });
+    await rejects(mutateCompetitors("owner", panel("farm-a", { productUrl: "https://BRAND.naver.com/FARM-A/products/6" }), now), 409, /이미/);
+    expect(await m.db.competitorPanelEntry.count({ where: { userId: "owner" } })).toBe(2);
+    expect((await competitorOverview("owner", now)).activeCount).toBe(2);
   });
   it("lets another user track the same store independently", async () => {
     await add("owner", "farm-a");
@@ -194,7 +242,7 @@ describe("overview isolation and status", () => {
     await mutateCompetitors("other", record(theirs, { price: 99999 }), now);
     await m.db.competitorPriceObservation.create({ data: { userId: "owner", entryId: mine, observedAt: new Date(now.getTime() + DAY),
       price: 1, shippingFee: 0, availability: "IN_STOCK" } });
-    await mutateCompetitors("other", search(), now);
+    await seedSearch("other");
     const overview = await competitorOverview("owner", now);
     expect(overview.entries).toHaveLength(1);
     expect(overview.entries[0].observations.map(o => o.price)).toEqual([12000]);
@@ -202,13 +250,22 @@ describe("overview isolation and status", () => {
     expect(overview.activeCount).toBe(1);
     expect((await competitorOverview("other", now)).latestSearch?.status).toBe("SUCCEEDED");
   });
-  it("reports configuration from the environment and parses stored search results", async () => {
-    await mutateCompetitors("owner", search(), now);
-    const configured = await competitorOverview("owner", now);
-    expect(configured.configured).toBe(true);
-    expect(configured.latestSearch?.result?.items[0]).toMatchObject({ storeKey: "farm-a", listedPrice: 12900, title: "대추방울토마토 2kg" });
-    vi.stubEnv("NAVER_SHOPPING_CLIENT_SECRET", "   ");
+  it("never reports search as configured, even with server credentials present, while still parsing stored search history", async () => {
+    await seedSearch("owner");
+    const overview = await competitorOverview("owner", now);
+    expect(overview.configured).toBe(false);
+    expect(overview.searchRetiredOn).toBe("2026-07-31");
+    expect(overview.limitations[0]).toBe(SEARCH_RETIRED_MESSAGE);
+    expect(overview.latestSearch).toMatchObject({ status: "SUCCEEDED", errorCode: null });
+    expect(overview.latestSearch?.result?.items[0]).toMatchObject({ storeKey: "farm-a", listedPrice: 12900, title: "대추방울토마토 2kg" });
+    vi.stubEnv("NAVER_SHOPPING_CLIENT_ID", ""); vi.stubEnv("NAVER_SHOPPING_CLIENT_SECRET", "");
     expect((await competitorOverview("owner", now)).configured).toBe(false);
+  });
+  it("shows the newest stored search per user, including failed ones, without a parsed result for empty responses", async () => {
+    await seedSearch("owner", { createdAt: ago(100 * DAY) });
+    await seedSearch("owner", { query: "방울토마토", bucket: "legacy-2", status: "FAILED", errorCode: "UPSTREAM_ERROR", response: null, createdAt: ago(80 * DAY) });
+    expect((await competitorOverview("owner", now)).latestSearch).toMatchObject({ status: "FAILED", errorCode: "UPSTREAM_ERROR", result: null });
+    expect((await competitorOverview("other", now)).latestSearch).toBeNull();
   });
   it("keeps every active entry visible regardless of how many archived entries exist", async () => {
     const rows = Array.from({ length: 30 }, (_, i) => ({ userId: "owner", storeKey: `active${i}`, activeStoreKey: `active${i}`, storeName: "s",
@@ -220,78 +277,32 @@ describe("overview isolation and status", () => {
   });
 });
 
-describe("search reservation, cache and rate limits (mocked transport)", () => {
-  it("refuses without server credentials before any reservation or network call", async () => {
-    vi.stubEnv("NAVER_SHOPPING_CLIENT_ID", "");
-    await rejects(mutateCompetitors("owner", search(), now), 503, /쇼핑검색 키/);
+describe("retired search action", () => {
+  it("answers 410 before any network call or database write even when server credentials are present", async () => {
+    await rejects(mutateCompetitors("owner", search("  대추방울  토마토 "), now), 410, /2026-07-31/);
+    await rejects(mutateCompetitors("owner", search(), now), 410, new RegExp(SEARCH_RETIRED_MESSAGE));
     expect(m.fetch).not.toHaveBeenCalled();
     expect(await m.db.competitorSearch.count()).toBe(0);
   });
-  it("calls the official endpoint once with header credentials and never follows redirects", async () => {
-    expect(await mutateCompetitors("owner", search("  대추방울  토마토 "), now)).toEqual({ ok: true, cached: false });
-    expect(m.fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = m.fetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toMatch(/^https:\/\/openapi\.naver\.com\/v1\/search\/shop\.json\?query=/);
-    expect(init.redirect).toBe("error");
-    expect(init.headers).toMatchObject({ "X-Naver-Client-Id": "client-id", "X-Naver-Client-Secret": "client-secret" });
-    const row = await m.db.competitorSearch.findFirstOrThrow();
-    expect(row).toMatchObject({ userId: "owner", query: "대추방울 토마토", status: "SUCCEEDED", errorCode: null });
-    expect(row.response).not.toContain("client-secret");
+  it("answers 410 without credentials too, so the retirement is not mistaken for a configuration problem", async () => {
+    vi.stubEnv("NAVER_SHOPPING_CLIENT_ID", ""); vi.stubEnv("NAVER_SHOPPING_CLIENT_SECRET", "");
+    await rejects(mutateCompetitors("owner", search(), now), 410);
+    expect(m.fetch).not.toHaveBeenCalled();
+    expect(await m.db.competitorSearch.count()).toBe(0);
   });
-  it("serves a repeat of the same normalized query from the five-minute bucket without fetching", async () => {
-    await mutateCompetitors("owner", search("대추방울 토마토"), now);
-    const cached = await mutateCompetitors("owner", search("대추방울   토마토"), new Date(now.getTime() + 60_000));
-    expect(cached).toEqual({ ok: true, cached: true });
-    expect(m.fetch).toHaveBeenCalledTimes(1);
-    expect(await m.db.competitorSearch.count()).toBe(1);
+  it("leaves stored search history untouched and per user after a retired search attempt", async () => {
+    const mine = await seedSearch("owner"); await seedSearch("other", { query: "남의 검색" });
+    await rejects(mutateCompetitors("owner", search(), now), 410);
+    await rejects(mutateCompetitors("owner", search("대추방울토마토"), new Date(now.getTime() + 600_000)), 410);
+    expect(await m.db.competitorSearch.count()).toBe(2);
+    expect((await competitorOverview("owner", now)).latestSearch?.id).toBe(mine.id);
+    expect((await competitorOverview("other", now)).latestSearch?.result?.query).toBe("대추방울토마토");
   });
-  it("keeps caches and quotas per user", async () => {
-    await mutateCompetitors("owner", search(), now);
-    expect(await mutateCompetitors("other", search(), now)).toEqual({ ok: true, cached: false });
-    expect(m.fetch).toHaveBeenCalledTimes(2);
-  });
-  it("blocks a different query inside five minutes and the twenty-first search inside a day", async () => {
-    await mutateCompetitors("owner", search("토마토"), now);
-    await rejects(mutateCompetitors("owner", search("방울토마토"), new Date(now.getTime() + 299_000)), 429, /5분/);
-    expect(await mutateCompetitors("owner", search("방울토마토"), new Date(now.getTime() + 301_000))).toEqual({ ok: true, cached: false });
-    await m.db.competitorSearch.deleteMany();
-    await m.db.competitorSearch.createMany({ data: Array.from({ length: 20 }, (_, i) => ({ userId: "owner", query: `q${i}`, bucket: `b${i}`,
-      status: "SUCCEEDED", createdAt: ago(DAY - 60_000 - i) })) });
-    await rejects(mutateCompetitors("owner", search("새 검색"), now), 429, /20회/);
-    expect(await m.db.competitorSearch.count()).toBe(20);
-    expect(m.fetch).toHaveBeenCalledTimes(2);
-  });
-  it("records upstream failures as a failed reservation and refuses a retry inside the same bucket", async () => {
-    m.fetch.mockResolvedValueOnce(new Response("{}", { status: 500 }));
-    await rejects(mutateCompetitors("owner", search(), now), 502, /서버 오류/);
-    expect(await m.db.competitorSearch.findFirstOrThrow()).toMatchObject({ status: "FAILED", errorCode: "UPSTREAM_ERROR", response: null });
-    await rejects(mutateCompetitors("owner", search(), new Date(now.getTime() + 1000)), 409, /실패/);
-    expect(m.fetch).toHaveBeenCalledTimes(1);
-    expect((await competitorOverview("owner", now)).latestSearch).toMatchObject({ status: "FAILED", errorCode: "UPSTREAM_ERROR", result: null });
-  });
-  it("does not persist an oversized or malformed upstream body", async () => {
-    m.fetch.mockResolvedValueOnce(new Response("not json", { status: 200 }));
-    await rejects(mutateCompetitors("owner", search("a"), now), 502);
-    m.fetch.mockResolvedValueOnce(new Response("{}", { status: 200, headers: { "content-length": "9999999" } }));
-    await rejects(mutateCompetitors("owner", search("b"), new Date(now.getTime() + 600_000)), 502);
-    const rows = await m.db.competitorSearch.findMany({ orderBy: { createdAt: "asc" } });
-    expect(rows.map(r => r.errorCode)).toEqual(["INVALID_RESPONSE", "RESPONSE_TOO_LARGE"]);
-    expect(rows.every(r => r.response === null)).toBe(true);
-  });
-  it("performs exactly one upstream call for concurrent identical searches", async () => {
-    const results = await Promise.allSettled([mutateCompetitors("owner", search(), now), mutateCompetitors("owner", search(), now)]);
-    expect(m.fetch).toHaveBeenCalledTimes(1);
-    expect(await m.db.competitorSearch.count()).toBe(1);
-    expect(results.some(r => r.status === "fulfilled")).toBe(true);
-    for (const result of results) {
-      if (result.status === "rejected") { expect(result.reason).toBeInstanceOf(BriefingError); expect([409, 429]).toContain((result.reason as BriefingError).status); }
-      else expect(result.value.ok).toBe(true);
-    }
-  });
-  it("never lets concurrent different queries exceed one reservation per five minutes", async () => {
-    await Promise.allSettled([mutateCompetitors("owner", search("a"), now), mutateCompetitors("owner", search("b"), now), mutateCompetitors("owner", search("c"), now)]);
-    expect(await m.db.competitorSearch.count()).toBe(1);
-    expect(m.fetch).toHaveBeenCalledTimes(1);
+  it("does not consume any rate-limit or reservation state: many concurrent retired searches leave zero rows", async () => {
+    const results = await Promise.allSettled(["a", "b", "c", "a"].map(q => mutateCompetitors("owner", search(q), now)));
+    expect(results.every(r => r.status === "rejected" && r.reason instanceof BriefingError && r.reason.status === 410)).toBe(true);
+    expect(await m.db.competitorSearch.count()).toBe(0);
+    expect(m.fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -305,13 +316,15 @@ describe("API route", () => {
     const ok = await GET();
     expect(ok.status).toBe(200);
     expect(ok.headers.get("cache-control")).toBe("no-store");
-    expect(await ok.json()).toMatchObject({ configured: true, activeCount: 0, entries: [], groups: [], target: 30 });
+    expect(await ok.json()).toMatchObject({ configured: false, searchRetiredOn: "2026-07-31", activeCount: 0, entries: [], groups: [], target: 30 });
   });
   it("rejects invalid, unconfirmed, unknown-field and oversized bodies with 400 before touching the database", async () => {
     const unconfirmed = { ...panel("farm-a"), confirmed: undefined };
     for (const body of ["{", unconfirmed, { ...panel("farm-a"), extra: 1 }, { action: "record", entryId: "x" },
       { action: "search", query: "" }, { action: "search", query: "x".repeat(101) }, { ...panel("farm-a"), packageKg: 0.01 },
-      { ...panel("farm-a"), productUrl: "javascript:alert(1)" }, JSON.stringify({ action: "search", query: "x".repeat(9000) })]) {
+      { ...panel("farm-a"), productUrl: "javascript:alert(1)" }, JSON.stringify({ action: "search", query: "x".repeat(9000) }),
+      { ...panel("farm-a"), sizeGrade: "JUMBO" }, { ...panel("farm-a"), sizeGrade: "중과" }, { ...panel("farm-a"), sizeCriteria: "x".repeat(101) },
+      { ...panel("farm-a"), sizeCriteria: null }]) {
       const response = await post(body);
       expect(response.status, JSON.stringify(body).slice(0, 60)).toBe(400);
     }
@@ -327,10 +340,12 @@ describe("API route", () => {
     expect((await post({ ...panel("farm-b"), productUrl: "https://example.com/farm/products/1" })).status).toBe(400);
     expect((await post(record("missing"))).status).toBe(404);
     expect((await post(record(id))).status).toBe(200);
-    vi.stubEnv("NAVER_SHOPPING_CLIENT_ID", "");
-    const unconfigured = await post(search());
-    expect(unconfigured.status).toBe(503);
-    expect(await unconfigured.json()).toEqual({ error: "서버에 네이버 공식 쇼핑검색 키를 설정해야 합니다." });
+    const retired = await post(search());
+    expect(retired.status).toBe(410);
+    expect(await retired.json()).toEqual({ error: SEARCH_RETIRED_MESSAGE });
+    expect(m.fetch).not.toHaveBeenCalled();
+    expect(await m.db.competitorSearch.count()).toBe(0);
+    expect((await post({ ...panel("farm-c"), productUrl: brandProduct("farm-a") })).status).toBe(200);
     await m.db.$disconnect();
     m.db = new PrismaClient({ datasources: { db: { url: "file:/nonexistent/dir/db.sqlite" } } });
     const failed = await GET();
