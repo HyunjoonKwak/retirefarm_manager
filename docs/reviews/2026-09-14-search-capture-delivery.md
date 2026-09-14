@@ -40,3 +40,16 @@ Claude는 검색 출처 계약·기존 저장 호환성 및 추출기 테스트�
 - 확장 ZIP 7개 허용 파일로 재생성. manifest 1.1.0, 기존 activeTab/scripting/clipboardWrite 권한 유지.
 - 선택 정렬은 보이는 버튼의 본문·접근성 레이블에서 읽고 서로 충돌하면 UNKNOWN으로 남긴다.
 - 수집 방법별 실행 출처를 MANUAL_PUBLIC_SEARCH / EXTENSION_PUBLIC_SEARCH / MIXED_PUBLIC_SEARCH로 저장한다. DB 구조 변경 없음.
+
+## 운영 배포 결과 (2026-09-14 16:56 KST)
+
+- 코드 커밋: `0fc960f` (main push 완료).
+- 이미지: `ghcr.io/hyunjoonkwak/retirefarm-manager:search-0fc960f`.
+- 이미지 digest: `sha256:e82d3a17de2f3214e8eeb66895c5969a0d65c72cd9b1cd66803bbbef2db8a1a3`.
+- 배포 전 온라인 DB 백업: `backup_2026-09-14T07-50-12-743Z_2c0b9b8d-4566-4c43-afc3-24b373070ec8.db`, 430,723,072 bytes.
+- 운영 .env의 IMAGE_TAG만 변경하고 `.env.before-search-0fc960f`로 기존 설정을 보관했다. 롤백 이미지: `discovery-d97ba3a`.
+- 컨테이너 healthy. 초기 기동 중 ready 503 이후 ready / marketSchedulerReady / marketRecoveryReady 모두 true 확인.
+- 배포 ZIP SHA-256: `96cf6654c18a6f988ba9efc404d07995e3e019be0841bd1f24a2338227698968`, 로컬 검증 파일과 일치.
+- 운영 로그인 화면에서 경쟁점 조사 → 확장 1.1.0 시험 기능 안내·다운로드 링크·검색 후보 JSON 가져오기 경로 확인.
+- 후보 테이블은 0건 유지. 운영 검증을 위해 가상 후보나 가격 기록을 추가하지 않았다.
+- 네이버 탭은 여전히 보안 확인 상태. 사용자 확인을 이어갈 수 있도록 탭을 보존했다. 실사이트에서 설치 확장으로 수집·저장·가져오기 전체 흐름은 미검증이며 주간 무인 검색은 미구현·미활성 상태다.
