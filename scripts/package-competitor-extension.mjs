@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const SOURCE_DIR = path.join(ROOT, "browser-extension", "competitor-capture");
 export const DEFAULT_OUT = path.join(ROOT, "public", "downloads", "retirefarm-competitor-capture.zip");
 /** Explicit allowlist keeps the archive source-only; anything else in the folder is ignored. */
-export const PACKAGED_FILES = Object.freeze(["README.md", "capture.js", "manifest.json", "popup.css", "popup.html", "popup.js"]);
+export const PACKAGED_FILES = Object.freeze(["README.md", "capture.js", "manifest.json", "popup.css", "popup.html", "popup.js", "search-capture.js"]);
 const EXPECTED_PERMISSIONS = ["activeTab", "scripting", "clipboardWrite"];
 // 2026-09-01 00:00:00 in MS-DOS date/time encoding; constant so the archive never depends on mtimes.
 const DOS_DATE = ((2026 - 1980) << 9) | (9 << 5) | 1;

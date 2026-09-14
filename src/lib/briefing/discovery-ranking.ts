@@ -1,4 +1,4 @@
-import type { DiscoveryCandidate, DiscoveryEvidence, RankedDiscoveryCandidate } from "./discovery-contracts";
+import { normalizeDiscoveryQuery, type DiscoveryCandidate, type DiscoveryEvidence, type RankedDiscoveryCandidate } from "./discovery-contracts";
 /** Bump whenever eligibility, ordering or the review window changes so stored recommendations stay attributable. */
 export const DISCOVERY_POLICY_VERSION = "2026-09-14.manual-evidence.v2";
 export const DISCOVERY_RECOMMEND_LIMIT = 10;
@@ -11,8 +11,8 @@ export const PROCESSED_TITLE_PATTERNS: readonly RegExp[] = [
 const DAY_MS = 86_400_000;
 
 const time = (iso: string) => new Date(iso).getTime();
-/** Whitespace-only normalisation plus case folding: "대추방울토마토  2kg" and "대추방울토마토 2KG" are the same query. */
-export const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, " ").toLowerCase();
+/** Whitespace-only normalisation plus case folding: "대추방울토마토  2kg" and "대추방울토마토 2KG" are the same query. Search metadata never keys this map. */
+export const normalizeQuery = normalizeDiscoveryQuery;
 const byTime = (a: DiscoveryEvidence, b: DiscoveryEvidence) => time(b.observedAt) - time(a.observedAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 const byUrl = (a: DiscoveryCandidate, b: DiscoveryCandidate) => (a.productUrl < b.productUrl ? -1 : a.productUrl > b.productUrl ? 1 : 0);
 

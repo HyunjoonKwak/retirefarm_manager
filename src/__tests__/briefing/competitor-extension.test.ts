@@ -272,7 +272,7 @@ describe("package script", () => {
     const out = path.join(dir, "nested", "retirefarm-competitor-capture.zip");
     try {
       const stdout = execFileSync(process.execPath, [PACKAGE_SCRIPT, "--out", out], { encoding: "utf8" });
-      expect(stdout).toContain("Packaged 6 files");
+      expect(stdout).toContain("Packaged 7 files");
       expect(fs.readFileSync(out).equals(packageExtension())).toBe(true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

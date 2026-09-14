@@ -113,6 +113,96 @@ describe("import idempotence and deduplication", () => {
   });
 });
 
+describe("search-context metadata", () => {
+  const source = (query = "대추방울토마토 2kg", extra = "") => `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(query)}${extra}`;
+  const captured = (over: Evidence = {}) => evidence({ sourceUrl: source(), searchSort: "rel", searchEnvironment: "PC", collectionMethod: "EXTENSION", ...over });
+  it("records the run source for extension, manual and mixed batches", async () => {
+    const extension = await importAs("owner", [captured()]);
+    const manual = await importAs("owner", [evidence({ productUrl: product("farm-b") })]);
+    const mixed = await importAs("owner", [captured({ productUrl: product("farm-c") }), evidence({ productUrl: product("farm-d") })]);
+    for (const [id, sourceType] of [[extension.id, "EXTENSION_PUBLIC_SEARCH"], [manual.id, "MANUAL_PUBLIC_SEARCH"], [mixed.id, "MIXED_PUBLIC_SEARCH"]])
+      expect(await m.db.competitorDiscoveryRun.findUniqueOrThrow({ where: { id } })).toMatchObject({ source: sourceType });
+  });
+  /** Exact legacy payload spelling: the hash of manual evidence must not move when metadata support is added. */
+  const legacyPayload = (e: DiscoveryEvidenceInput) => JSON.stringify({ productUrl: e.productUrl, storeName: e.storeName, title: e.title, query: e.query,
+    observedAt: e.observedAt, position: e.position, adStatus: e.adStatus, relevance: e.relevance, purchaseLabel: e.purchaseLabel, reviewCount: e.reviewCount, reviewBasis: e.reviewBasis });
+
+  it("keeps legacy manual payloads byte-identical and idempotent while omitting every metadata key", async () => {
+    const legacy = evidence();
+    const first = await importAs("owner", [legacy]);
+    const stored = await m.db.competitorDiscoveryEvidence.findFirstOrThrow();
+    expect(stored.payload).toBe(legacyPayload(legacy));
+    expect(JSON.parse(stored.payload)).not.toHaveProperty("sourceUrl");
+    expect(JSON.parse(stored.payload)).not.toHaveProperty("collectionMethod");
+    // A pre-existing row written before metadata support is matched by a retry of the same manual evidence.
+    const retry = await importAs("owner", [legacy], new Date(now.getTime() + 1000));
+    expect(retry).toMatchObject({ id: first.id, duplicate: true });
+    expect(await counts()).toMatchObject({ runs: 1, evidence: 1 });
+    const viewed = (await discoveryOverview("owner", now)).candidates[0].evidence[0];
+    expect(viewed).not.toHaveProperty("sourceUrl");
+    expect(viewed).toMatchObject({ query: "대추방울토마토 2kg", position: 3 });
+  });
+  it("persists supplied metadata in a stable order, canonicalises the search URL and preserves it on the overview", async () => {
+    await importAs("owner", [captured({ sourceUrl: `${source("대추방울토마토  2KG", "&NaPm=ct%3Dx&pagingIndex=2&sort=rel")}#top` })]);
+    const stored = await m.db.competitorDiscoveryEvidence.findFirstOrThrow();
+    expect(Object.keys(JSON.parse(stored.payload))).toEqual(["productUrl", "storeName", "title", "query", "observedAt", "position", "adStatus", "relevance",
+      "purchaseLabel", "reviewCount", "reviewBasis", "sourceUrl", "searchSort", "searchEnvironment", "collectionMethod"]);
+    const canonical = `${source()}&sort=rel&pagingIndex=2`.replace("%20", "+");
+    expect(JSON.parse(stored.payload)).toMatchObject({ sourceUrl: canonical, searchSort: "rel", searchEnvironment: "PC", collectionMethod: "EXTENSION" });
+    const view = await discoveryOverview("owner", now);
+    expect(view.candidates[0].evidence[0]).toMatchObject({ sourceUrl: canonical, searchSort: "rel", searchEnvironment: "PC", collectionMethod: "EXTENSION" });
+    expect(view.candidates[0]).toMatchObject({ queryCount: 1, recommended: true });
+    // Partial manual metadata is stored only for the keys that were supplied.
+    await importAs("owner", [evidence({ query: "방울토마토 2kg", searchEnvironment: "MOBILE" })]);
+    const partial = await m.db.competitorDiscoveryEvidence.findFirstOrThrow({ where: { query: "방울토마토 2kg" } });
+    expect(Object.keys(JSON.parse(partial.payload)).slice(11)).toEqual(["searchEnvironment"]);
+  });
+  it("treats a retry with tracking parameters and different key order as the same run", async () => {
+    const first = await importAs("owner", [captured()]);
+    const retry = await importAs("owner", [{ collectionMethod: "EXTENSION", searchEnvironment: " PC ", searchSort: "rel", sourceUrl: source("대추방울토마토 2kg", "&frm=NVSHATC"),
+      ...evidence() }], new Date(now.getTime() + 1000));
+    expect(retry).toMatchObject({ id: first.id, duplicate: true, evidenceCount: 1 });
+    expect(await counts()).toMatchObject({ runs: 1, evidence: 1 });
+  });
+  it("never counts the same normalised query twice because of differing environments, and keeps only the latest observation", async () => {
+    await importAs("owner", [captured({ observedAt: ago(2 * DAY).toISOString(), position: 7 })]);
+    await importAs("owner", [captured({ observedAt: ago(DAY).toISOString(), position: 4, searchEnvironment: "MOBILE" })]);
+    await importAs("owner", [evidence({ observedAt: ago(3 * DAY).toISOString(), position: 2 })]);
+    const [ranked] = (await discoveryOverview("owner", now)).candidates;
+    expect(ranked).toMatchObject({ queryCount: 1, bestPosition: 4, recommended: true });
+    expect(ranked.evidence).toHaveLength(3);
+    expect(await counts()).toMatchObject({ runs: 3, candidates: 1, evidence: 3 });
+  });
+  it("answers 409 instead of merging when the same product, query and time carry different metadata or a legacy row already exists", async () => {
+    await importAs("owner", [captured({ position: 3 })]);
+    await rejects(importAs("owner", [captured({ position: 3, searchEnvironment: "MOBILE" })], new Date(now.getTime() + 1000)), 409, /같은 상품·검색어·시각/);
+    await rejects(importAs("owner", [captured({ position: 3, searchSort: "date" })], new Date(now.getTime() + 2000)), 409);
+    await rejects(importAs("owner", [evidence({ position: 3 })], new Date(now.getTime() + 3000)), 409);
+    await rejects(importAs("owner", [captured({ position: 3 }), captured({ position: 3, collectionMethod: "MANUAL" })], new Date(now.getTime() + 4000)), 409);
+    expect(await counts()).toMatchObject({ runs: 1, candidates: 1, evidence: 1 });
+    const stored = await m.db.competitorDiscoveryEvidence.findFirstOrThrow();
+    expect(JSON.parse(stored.payload)).toMatchObject({ searchEnvironment: "PC", collectionMethod: "EXTENSION" });
+  });
+  it("rejects a mismatched search query, a foreign search host and incomplete extension metadata at the service boundary without writing", async () => {
+    await rejects(importAs("owner", [captured({ sourceUrl: source("방울토마토 2kg") })]), 400);
+    await rejects(importAs("owner", [captured({ sourceUrl: "https://msearch.shopping.naver.com/search/all?query=%EB%8C%80%EC%B6%94%EB%B0%A9%EC%9A%B8%ED%86%A0%EB%A7%88%ED%86%A0%202kg" })]), 400);
+    await rejects(importAs("owner", [captured({ sourceUrl: source("대추방울토마토 2kg", "&pagingIndex=0") })]), 400);
+    await rejects(importAs("owner", [evidence({ collectionMethod: "EXTENSION" })]), 400);
+    const { searchSort, ...noSort } = captured(); void searchSort;
+    await rejects(importAs("owner", [noSort as DiscoveryEvidenceInput]), 400);
+    expect((await post({ action: "import", evidence: [captured({ observedAt: new Date(Date.now() - DAY).toISOString(), sourceUrl: source("다른 검색어") })] })).status).toBe(400);
+    expect(await counts()).toMatchObject({ runs: 0, candidates: 0, evidence: 0 });
+  });
+  it("does not let metadata change lastSeenAt, title or storeName rules for older observations", async () => {
+    await importAs("owner", [evidence({ observedAt: ago(DAY).toISOString(), title: "새 제목", storeName: "새 이름" })]);
+    await importAs("owner", [captured({ observedAt: ago(5 * DAY).toISOString(), title: "옛 제목", storeName: "옛 이름", query: "대추방울토마토 3kg", sourceUrl: source("대추방울토마토 3kg") })]);
+    expect(await candidateOf("owner", product("farm-a"))).toMatchObject({ title: "새 제목", storeName: "새 이름", lastSeenAt: ago(DAY) });
+    await importAs("owner", [captured({ observedAt: ago(DAY / 2).toISOString(), title: "확장 제목", storeName: "확장 이름" })]);
+    expect(await candidateOf("owner", product("farm-a"))).toMatchObject({ title: "확장 제목", storeName: "확장 이름", lastSeenAt: ago(DAY / 2) });
+    expect((await discoveryOverview("owner", now)).candidates[0]).toMatchObject({ queryCount: 2, bestPosition: 3 });
+  });
+});
+
 describe("conflicts and rollback", () => {
   it("rolls back the whole batch when two observations share product, query and time with different content", async () => {
     await rejects(importAs("owner", [evidence({ position: 3 }), evidence({ position: 5 }), evidence({ productUrl: product("farm-b") })]), 409, /같은 상품·검색어·시각/);

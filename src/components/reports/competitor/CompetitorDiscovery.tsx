@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { discoveryRequestSchema, type DiscoveryOverview, type DiscoveryRequest, type RankedDiscoveryCandidate } from "@/lib/briefing/discovery-contracts";
 import { dateTime, fromDatetimeLocal, nativeSelectClass, toDatetimeLocal } from "./competitor-utils";
 import { emptyPanelDraft, type PanelDraft } from "./CompetitorPanelForm";
+import { readSearchCapture, type SearchCapture } from "./search-capture";
+import { SearchCaptureReview } from "./SearchCaptureReview";
 
 const ENDPOINT = "/api/briefings/discovery";
 const adLabels = { ORGANIC: "비광고 확인", AD: "광고", UNKNOWN: "광고 여부 미확인" };
@@ -34,6 +36,7 @@ function CandidateCard({ candidate: c, busy, fixed, onUse, onDecision }: { candi
       <ul className="space-y-2 pt-2">{c.evidence.slice(0, 20).map(e => <li key={e.id}>
         {dateTime(e.observedAt)} · {e.query} · 위치 {e.position ?? "미확인"} · {adLabels[e.adStatus]} · {relevanceLabels[e.relevance]}
         <br />구매 표기: {e.purchaseLabel || "미확인"} · 리뷰: {e.reviewCount ?? "미확인"} ({e.reviewBasis === "CUMULATIVE" ? "누적" : e.reviewBasis === "ROLLING" ? "이동 기간" : "기준 미확인"})
+        {e.sourceUrl && <><br /><a href={e.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">검색 출처</a> · 정렬 {e.searchSort || "미확인"} · 검색 환경 {e.searchEnvironment === "BROWSER_UNSPECIFIED" ? "필터·개인화·배송지 미확인" : e.searchEnvironment || "미확인"}</>}
       </li>)}</ul>
       {c.evidence.length > 20 && <p>화면에는 최근 20건을 표시합니다.</p>}
     </details>
@@ -51,6 +54,7 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [capture, setCapture] = useState<SearchCapture | null>(null);
   const [filter, setFilter] = useState("RECOMMENDED");
   const [draft, setDraft] = useState({ storeName: "", productUrl: "", title: "", query: "대추방울토마토 2kg",
     observedAt: toDatetimeLocal(new Date()), position: "", adStatus: "UNKNOWN", relevance: "UNKNOWN", purchaseLabel: "", reviewCount: "", reviewBasis: "UNKNOWN" });
@@ -81,7 +85,9 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
     setError("");
     try {
       if (file.size > 256 * 1024) throw new Error("후보 파일은 256KB 이하만 가져올 수 있습니다.");
-      const parsed = discoveryRequestSchema.safeParse(JSON.parse(await file.text()));
+      const raw = JSON.parse(await file.text());
+      if (raw?.schemaVersion === "retirefarm-visible-search-v1") { setCapture(readSearchCapture(raw)); return; }
+      const parsed = discoveryRequestSchema.safeParse(raw);
       if (!parsed.success || parsed.data.action !== "import") throw new Error("검색 후보 파일 형식이 다릅니다. 상품 가격 수집 파일은 고정 패널에서 가져오세요.");
       await mutate(parsed.data);
     } catch (e) { setError(e instanceof Error ? e.message : "파일을 읽지 못했습니다."); }
@@ -89,7 +95,7 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
   const candidates = data?.candidates ?? [];
   const visible = candidates.filter(c => filter === "ALL" || (filter === "EXCLUDED" ? c.status === "EXCLUDED" : c.recommended));
   return <div className="space-y-4 pt-3">
-    <p className="text-sm">확인한 검색 근거를 저장하면 최근 7일 자료로 최대 10개 판매처를 추천합니다. 검색어별 반복 노출과 관측 위치를 사용하며, 판매량·검색량 순위는 아닙니다. 자동 검색·주간 예약은 아직 준비 중입니다.</p>
+    <p className="text-sm">확인한 검색 근거를 저장하면 최근 7일 자료로 최대 10개 판매처를 추천합니다. 검색어별 반복 노출과 관측 위치를 사용하며, 판매량·검색량 순위는 아닙니다. 검색 화면 수집 파일을 검토해 가져올 수 있으며 자동 검색·주간 예약은 아직 준비 중입니다.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {notice && <p role="status" className="text-sm">{notice}</p>}
     <details>
@@ -111,8 +117,9 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
         <Button type="submit" disabled={busy}>근거 저장·추천 갱신</Button>
       </form>
       <div className="mt-4 space-y-2"><Label htmlFor="discovery-file">검색 후보 JSON 파일 가져오기</Label><Input id="discovery-file" type="file" accept=".json,application/json" disabled={busy} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; void importFile(file); }} />
-        <p className="text-xs text-muted-foreground">검색 후보 자료 전용입니다. 현재 상품 가격 수집 확장의 JSON과는 형식이 다릅니다.</p></div>
+        <p className="text-xs text-muted-foreground">네이버플러스 검색 화면에서 수집 도구를 실행해 저장한 JSON을 선택하세요. 상품 가격 수집 파일은 고정 패널에서 가져옵니다.</p></div>
     </details>
+    {capture && <SearchCaptureReview key={`${capture.sourceUrl}-${capture.capturedAt}`} capture={capture} busy={busy} onSave={mutate} onCancel={() => setCapture(null)} />}
     <div className="flex flex-wrap items-center gap-3">
       <Label htmlFor="discovery-filter">후보 보기</Label><select id="discovery-filter" className={`${nativeSelectClass} max-w-xs`} value={filter} onChange={e => setFilter(e.target.value)}><option value="RECOMMENDED">추천 후보 ({data?.recommendedCount ?? 0}곳)</option><option value="ALL">전체 후보 ({candidates.length}개 상품)</option><option value="EXCLUDED">사용자 제외</option></select>
       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void load()}>추천 다시 확인</Button>

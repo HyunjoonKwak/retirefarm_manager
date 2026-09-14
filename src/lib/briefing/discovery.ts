@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import prisma from "@/lib/prisma";
 import { BriefingError } from "./queue";
-import { discoveryRequestSchema, parseDiscoveryProductUrl, type DiscoveryCandidate, type DiscoveryEvidenceInput, type DiscoveryOverview, type DiscoveryRequest } from "./discovery-contracts";
+import { discoveryRequestSchema, normalizeDiscoveryQuery, parseDiscoveryProductUrl, type DiscoveryCandidate, type DiscoveryEvidenceInput, type DiscoveryOverview, type DiscoveryRequest } from "./discovery-contracts";
 import { DISCOVERY_POLICY_VERSION, rankDiscoveryCandidates } from "./discovery-ranking";
 
 const DAY = 86_400_000;
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+const SEARCH_METADATA_KEYS = ["sourceUrl", "searchSort", "searchEnvironment", "collectionMethod"] as const;
+/** Search-context keys are appended only when supplied, so legacy manual payloads keep their historical hash and stay idempotent. */
+const searchMetadata = (e: DiscoveryEvidenceInput) => Object.fromEntries(SEARCH_METADATA_KEYS.flatMap(key => e[key] === undefined ? [] : [[key, e[key]]]));
 
 export async function discoveryOverview(userId: string, now = new Date()): Promise<DiscoveryOverview> {
   const [rows, latestRun, fixed] = await Promise.all([
@@ -47,13 +50,14 @@ export async function mutateDiscovery(userId: string, request: DiscoveryRequest,
   });
 
   const evidence = input.evidence.map(e => ({ ...e, ...parseDiscoveryProductUrl(e.productUrl)!,
-    query: e.query.replace(/\s+/g, " ").trim().toLowerCase(), observedAt: new Date(e.observedAt).toISOString() }));
+    query: normalizeDiscoveryQuery(e.query), observedAt: new Date(e.observedAt).toISOString() }));
   if (evidence.some(e => new Date(e.observedAt).getTime() > now.getTime() || new Date(e.observedAt).getTime() < now.getTime() - 30 * DAY))
     throw new BriefingError(400, "최근 30일 안에 실제 확인한 시각을 입력해 주세요. 미래 시각은 사용할 수 없습니다.");
   // Stable key order and canonical dates/URLs make retries independent of input order and tracking parameters.
   const normalized = evidence.map(({ storeKey, ...e }) => ({ storeKey, e, payload: JSON.stringify({ productUrl: e.productUrl,
     storeName: e.storeName, title: e.title, query: e.query, observedAt: e.observedAt, position: e.position,
-    adStatus: e.adStatus, relevance: e.relevance, purchaseLabel: e.purchaseLabel, reviewCount: e.reviewCount, reviewBasis: e.reviewBasis }) }));
+    adStatus: e.adStatus, relevance: e.relevance, purchaseLabel: e.purchaseLabel, reviewCount: e.reviewCount, reviewBasis: e.reviewBasis,
+    ...searchMetadata(e) }) }));
   const unique = [...new Map(normalized.map(e => [e.payload, e])).values()].sort((a, b) => a.payload.localeCompare(b.payload));
   const contentHash = hash(unique.map(e => e.payload).join("\n"));
   return prisma.$transaction(async tx => {
@@ -61,7 +65,9 @@ export async function mutateDiscovery(userId: string, request: DiscoveryRequest,
     if (existingRun) return { ok: true, id: existingRun.id, duplicate: true, evidenceCount: existingRun.evidenceCount };
     if (await tx.competitorDiscoveryRun.count({ where: { userId, createdAt: { gte: new Date(now.getTime() - DAY) } } }) >= 60)
       throw new BriefingError(429, "하루 자료 저장 한도에 도달했습니다. 다음 날 다시 진행해 주세요.");
-    const run = await tx.competitorDiscoveryRun.create({ data: { userId, contentHash, evidenceCount: 0, policyVersion: DISCOVERY_POLICY_VERSION, createdAt: now } });
+    const extensionCount = unique.filter(item => item.e.collectionMethod === "EXTENSION").length;
+    const source = extensionCount === unique.length ? "EXTENSION_PUBLIC_SEARCH" : extensionCount ? "MIXED_PUBLIC_SEARCH" : "MANUAL_PUBLIC_SEARCH";
+    const run = await tx.competitorDiscoveryRun.create({ data: { userId, contentHash, evidenceCount: 0, source, policyVersion: DISCOVERY_POLICY_VERSION, createdAt: now } });
     let added = 0;
     for (const { e, payload, storeKey } of unique) {
       let candidate = await tx.competitorDiscoveryCandidate.findUnique({ where: { userId_productUrl: { userId, productUrl: e.productUrl } } });
