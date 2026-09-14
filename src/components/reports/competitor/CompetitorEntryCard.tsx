@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { qualityLabels, varietyLabels, sizeLabels, type CompetitorEntry, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
+import { qualityLabels, varietyLabels, sizeLabels, colorLabels, mixtureLabels, processingLabels, type CompetitorEntry, type CompetitorRequest } from "@/lib/briefing/competitor-contracts";
 import {
   availabilityLabels, dateTime, deliveredPrice, fromDatetimeLocal, isSafeHttpUrl, kg, latestObservation, nativeSelectClass,
   parseMoney, perKg, shippingLabel, sortedObservations, toDatetimeLocal, won, type Availability,
@@ -31,6 +31,7 @@ export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props)
       <div className="flex-1 min-w-0 space-y-1">
         <p className="font-medium break-words">{entry.storeName} · {entry.productName}</p>
         <p className="text-sm text-muted-foreground break-words">{entry.optionLabel} · {kg(entry.packageKg)} · {groupLabel(entry.varietyGroup, varietyLabels)} · {groupLabel(entry.qualityGroup, qualityLabels)} · {groupLabel(entry.sizeGrade ?? "UNKNOWN", sizeLabels)} · {entry.sizeCriteria || "크기 기준 미확인"}</p>
+        <p className="text-sm text-muted-foreground break-words">품종명 {entry.cultivarName || "미확인"} · 색상 {groupLabel(entry.color ?? "UNKNOWN", colorLabels)} · {groupLabel(entry.mixture ?? "UNKNOWN", mixtureLabels)} · 가공 {groupLabel(entry.processing ?? "UNKNOWN", processingLabels)}</p>
       </div>
       {archived ? <Badge variant="outline">보관됨</Badge> : <Badge variant="secondary">추적 중</Badge>}
     </div>

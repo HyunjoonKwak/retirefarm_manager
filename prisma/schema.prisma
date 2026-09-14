@@ -572,6 +572,10 @@ model CompetitorPanelEntry {
   packageKg Float
   sizeGrade String @default("UNKNOWN")
   sizeCriteria String @default("")
+  cultivarName String @default("")
+  color String @default("UNKNOWN")
+  mixture String @default("UNKNOWN")
+  processing String @default("UNKNOWN")
   createdAt DateTime @default(now())
   archivedAt DateTime?
   archiveReason String?

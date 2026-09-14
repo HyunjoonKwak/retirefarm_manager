@@ -82,7 +82,7 @@ export function CompetitorResearch() {
         <h2 className="font-semibold">경쟁점 가격 조사</h2>
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>새로고침</Button>
       </div>
-      <p className="text-sm text-muted-foreground">브라우저에서 찾은 스마트스토어·브랜드스토어 상품을 등록하고, 선택 옵션의 화면 텍스트로 가격 기록을 도와드립니다. 확인한 품종·크기 기준·중량이 같은 상품끼리 비교합니다.</p>
+      <p className="text-sm text-muted-foreground">브라우저에서 찾은 스마트스토어·브랜드스토어 상품을 등록하고, 선택 옵션의 화면 텍스트로 가격 기록을 도와드립니다. 확인한 품종명·색상·가공·크기 기준·중량이 같은 단일 품종 상품끼리 비교합니다.</p>
       {data && <p className="text-sm">고정 패널 {data.activeCount}곳 / 목표 {data.target}곳 · 기준 시각 {dateTime(data.asOf)}</p>}
       {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
       {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}

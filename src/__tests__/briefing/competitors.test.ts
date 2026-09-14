@@ -24,7 +24,8 @@ const product = (store: string, id = 1) => `https://smartstore.naver.com/${store
 const brandProduct = (store: string, id = 1) => `https://brand.naver.com/${store}/products/${id}`;
 const panel = (store: string, overrides: Partial<Extract<CompetitorRequest, { action: "addPanel" }>> = {}): CompetitorRequest => ({
   action: "addPanel", storeName: `${store} 농장`, productUrl: product(store), productName: "토마토", varietyGroup: "JUJUBE",
-  qualityGroup: "REGULAR", optionLabel: "2kg 1박스", packageKg: 2, sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", confirmed: true, ...overrides });
+  qualityGroup: "REGULAR", optionLabel: "2kg 1박스", packageKg: 2, sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm",
+  cultivarName: "대저", color: "RED", mixture: "SINGLE", processing: "FRESH", confirmed: true, ...overrides });
 const record = (entryId: string, overrides: Partial<Extract<CompetitorRequest, { action: "record" }>> = {}): CompetitorRequest => ({
   action: "record", entryId, observedAt: ago(DAY).toISOString(), price: 12000, shippingFee: 3000, availability: "IN_STOCK", ...overrides });
 // Requests pass through the route schema so service tests see exactly what the API hands over (trim, strict keys).
@@ -127,6 +128,54 @@ describe("panel registration and the one-active-store rule", () => {
     const row = await m.db.competitorPanelEntry.findFirstOrThrow();
     expect(row).toMatchObject({ sizeGrade: "UNKNOWN", sizeCriteria: "" });
     expect((await competitorOverview("owner", now)).groups).toEqual([]);
+  });
+  it("persists the confirmed cultivar, color, mixture and processing verbatim (trimmed) and serializes them in the overview", async () => {
+    // Trimming is the route schema's job, exactly like sizeCriteria; the service copies whatever the schema hands over.
+    const request = competitorRequestSchema.parse(panel("farm-a", { cultivarName: "  스텔라 ", color: "ORANGE", mixture: "SINGLE", processing: "STEVIA" }));
+    const { id } = await mutateCompetitors("owner", request, now) as { id: string };
+    const expected = { cultivarName: "스텔라", color: "ORANGE", mixture: "SINGLE", processing: "STEVIA" };
+    expect(await m.db.competitorPanelEntry.findUniqueOrThrow({ where: { id } })).toMatchObject(expected);
+    expect((await competitorOverview("owner", now)).entries[0]).toMatchObject(expected);
+    const created = await post(panel("farm-b", { cultivarName: "\t대저 ", color: "BROWN", processing: "XYLITOL" }));
+    expect(created.status).toBe(200);
+    expect(await m.db.competitorPanelEntry.findFirstOrThrow({ where: { storeKey: "farm-b" } })).toMatchObject({ cultivarName: "대저", color: "BROWN", mixture: "SINGLE", processing: "XYLITOL" });
+  });
+  it("defaults omitted identity fields to empty/UNKNOWN through the API schema and keeps such rows out of statistics", async () => {
+    const legacy = { ...panel("farm-a"), cultivarName: undefined, color: undefined, mixture: undefined, processing: undefined };
+    expect(competitorRequestSchema.parse(legacy)).toMatchObject({ cultivarName: "", color: "UNKNOWN", mixture: "UNKNOWN", processing: "UNKNOWN" });
+    expect((await post(legacy)).status).toBe(200);
+    const row = await m.db.competitorPanelEntry.findFirstOrThrow();
+    expect(row).toMatchObject({ cultivarName: "", color: "UNKNOWN", mixture: "UNKNOWN", processing: "UNKNOWN", sizeGrade: "MEDIUM" });
+    await mutateCompetitors("owner", record(row.id), now);
+    for (const store of ["farm-b", "farm-c"]) await mutateCompetitors("owner", record(await add("owner", store, { cultivarName: "" })), now);
+    const overview = await competitorOverview("owner", now);
+    expect(overview.activeCount).toBe(3);
+    expect(overview.groups).toEqual([]);
+    expect(overview.limitations.some(text => text.includes("보관 처리하고 다시 등록"))).toBe(true);
+  });
+  it("leaves rows registered before the identity columns existed untouched at their defaults instead of backfilling them", async () => {
+    await m.db.competitorPanelEntry.create({ data: { userId: "owner", storeKey: "old", activeStoreKey: "old", storeName: "old", productUrl: product("old"),
+      varietyGroup: "JUJUBE", qualityGroup: "REGULAR", optionLabel: "2kg", packageKg: 2, sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", createdAt: ago(30 * DAY) } });
+    const before = await m.db.competitorPanelEntry.findFirstOrThrow({ where: { storeKey: "old" } });
+    expect(before).toMatchObject({ cultivarName: "", color: "UNKNOWN", mixture: "UNKNOWN", processing: "UNKNOWN" });
+    await mutateCompetitors("owner", record(before.id), now);
+    for (const store of ["farm-b", "farm-c"]) await mutateCompetitors("owner", record(await add("owner", store)), now);
+    const overview = await competitorOverview("owner", now);
+    expect(overview.entries.find(e => e.storeKey === "old")).toMatchObject({ cultivarName: "", color: "UNKNOWN", mixture: "UNKNOWN", processing: "UNKNOWN" });
+    expect(overview.groups[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
+    expect(await m.db.competitorPanelEntry.findUniqueOrThrow({ where: { id: before.id } })).toEqual(before);
+    expect(await m.db.competitorPriceObservation.count({ where: { entryId: before.id } })).toBe(1);
+  });
+  it("groups only stores whose identity matches exactly, so red and orange or fresh and stevia never share a representative price", async () => {
+    for (const store of ["r1", "r2", "r3"]) await mutateCompetitors("owner", record(await add("owner", store)), now);
+    for (const store of ["o1", "o2"]) await mutateCompetitors("owner", record(await add("owner", store, { color: "ORANGE" })), now);
+    await mutateCompetitors("owner", record(await add("owner", "s1", { processing: "STEVIA" })), now);
+    await mutateCompetitors("owner", record(await add("owner", "m1", { mixture: "MIXED" })), now);
+    const { groups } = await competitorOverview("owner", now);
+    const summary = groups.map(g => [g.color, g.processing, g.count, g.medianDeliveredPrice] as const);
+    expect(summary).toHaveLength(3);
+    expect(summary).toEqual(expect.arrayContaining([["RED", "FRESH", 3, 15000], ["ORANGE", "FRESH", 2, null], ["RED", "STEVIA", 1, null]]));
+    expect(groups.find(g => g.count === 3)?.label).toBe("토마토 · 대추방울 · 대저 · 빨강 · 단일 · 무가공 생과 · 일반 · 2kg · 중과 (직경 40~50mm)");
   });
   it("keeps a brand store and a smartstore with the same slug as two separate active entries", async () => {
     await add("owner", "farm-a");
@@ -324,7 +373,11 @@ describe("API route", () => {
       { action: "search", query: "" }, { action: "search", query: "x".repeat(101) }, { ...panel("farm-a"), packageKg: 0.01 },
       { ...panel("farm-a"), productUrl: "javascript:alert(1)" }, JSON.stringify({ action: "search", query: "x".repeat(9000) }),
       { ...panel("farm-a"), sizeGrade: "JUMBO" }, { ...panel("farm-a"), sizeGrade: "중과" }, { ...panel("farm-a"), sizeCriteria: "x".repeat(101) },
-      { ...panel("farm-a"), sizeCriteria: null }]) {
+      { ...panel("farm-a"), sizeCriteria: null },
+      { ...panel("farm-a"), cultivarName: "x".repeat(101) }, { ...panel("farm-a"), cultivarName: null }, { ...panel("farm-a"), cultivarName: 1 },
+      { ...panel("farm-a"), color: "PINK" }, { ...panel("farm-a"), color: "빨강" }, { ...panel("farm-a"), color: "red" }, { ...panel("farm-a"), color: null },
+      { ...panel("farm-a"), mixture: "single" }, { ...panel("farm-a"), mixture: "혼합" }, { ...panel("farm-a"), mixture: null },
+      { ...panel("farm-a"), processing: "SUGAR" }, { ...panel("farm-a"), processing: "생과" }, { ...panel("farm-a"), processing: null }]) {
       const response = await post(body);
       expect(response.status, JSON.stringify(body).slice(0, 60)).toBe(400);
     }

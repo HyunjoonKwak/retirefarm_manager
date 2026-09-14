@@ -10,7 +10,7 @@ const change = (pct: number | null, paired: number) =>
 
 /** Medians come from the server only; the browser never recomputes them from fewer stores. */
 export function CompetitorGroupSummary({ groups }: { groups: CompetitorGroup[] }) {
-  if (groups.length === 0) return <p className="text-sm text-muted-foreground">집계할 그룹이 아직 없습니다. 품종·품질·크기와 비교 기준이 확인된 패널만 집계합니다. 크기 미확인 자료는 패널의 관측 이력에서 볼 수 있습니다.</p>;
+  if (groups.length === 0) return <p className="text-sm text-muted-foreground">집계할 그룹이 아직 없습니다. 품종명·색상·가공·품질·중량·크기 기준이 확인된 단일 품종 패널만 집계합니다. 미확인·혼합 자료는 패널의 관측 이력에서 볼 수 있습니다.</p>;
   return <ul className="grid gap-2 sm:grid-cols-2">
     {groups.map(group => <li key={group.key} className="rounded-md border p-3 text-sm space-y-1">
       <p className="font-medium break-words">{group.label} <span className="text-muted-foreground font-normal">· 유효 점포 {group.count}곳</span></p>

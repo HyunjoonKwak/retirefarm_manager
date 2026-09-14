@@ -30,8 +30,10 @@ export async function competitorOverview(userId: string, now = new Date()): Prom
       result: search.response ? JSON.parse(search.response) as ShoppingSearchResult : null } : null,
     entries: serialized, groups: summarizeCompetitors(serialized, now),
     limitations: [SEARCH_RETIRED_MESSAGE,
-      "직접 확인해 기록한 동일 품목·품종군·품질군·중량·크기 등급·크기 기준만 비교합니다. 최근 7일 내 재고 있음·배송비 확인 관측이 서로 다른 3개 점포 이상이어야 대표 가격을 산출합니다.",
+      "직접 확인해 기록한 동일 품목·품종군·품종명·색상·구성·가공·품질군·중량·크기 등급·크기 기준만 비교합니다. 최근 7일 내 재고 있음·배송비 확인 관측이 서로 다른 3개 점포 이상이어야 대표 가격을 산출합니다.",
       "크기 등급이 미확인이거나 크기 기준(직경·과수 경계)을 기록하지 않은 점포는 통계에서 제외됩니다. 판매자 표기는 자동으로 등급에 대응시키지 않으니 직접 확인해 입력하세요.",
+      "품종명이 비어 있거나 색상·구성·가공이 미확인·기타인 점포, 혼합 구성 점포는 통계에서 제외됩니다. 품종명은 판매자 표기를 그대로 적고(앞뒤 공백만 제거) 별칭·유사 표기는 서로 다른 옵션으로 취급합니다.",
+      "이 항목이 추가되기 전에 등록한 점포는 품종명 없음·미확인으로 남아 통계에서 빠집니다. 자동으로 채우지 않으니 확인 후 보관 처리하고 다시 등록해야 비교에 포함됩니다.",
       "전주 변화는 현재와 7일 전 각각 최근 7일 내 기록이 있는 동일 옵션의 고정 점포끼리만 비교합니다. 할인·쿠폰 조건은 메모를 함께 확인하세요.",
       "최근 패널 200개와 패널별 최신 관측 60개를 표시합니다. 품절·미확인은 가격 0원이나 변화 없음이 아닙니다."],
   };
@@ -47,7 +49,8 @@ export async function mutateCompetitors(userId: string, input: CompetitorRequest
       if (await tx.competitorPanelEntry.findUnique({ where: { userId_activeStoreKey: { userId, activeStoreKey: storeKey } } }))
         throw new BriefingError(409, "이미 고정 비교군에 있는 점포입니다. 옵션 변경 시 기존 항목을 보관하고 다시 등록해 주세요.");
       const fields = { storeName: input.storeName, productName: input.productName, varietyGroup: input.varietyGroup, qualityGroup: input.qualityGroup,
-        optionLabel: input.optionLabel, packageKg: input.packageKg, sizeGrade: input.sizeGrade, sizeCriteria: input.sizeCriteria };
+        optionLabel: input.optionLabel, packageKg: input.packageKg, sizeGrade: input.sizeGrade, sizeCriteria: input.sizeCriteria,
+        cultivarName: input.cultivarName, color: input.color, mixture: input.mixture, processing: input.processing };
       const entry = await tx.competitorPanelEntry.create({ data: { ...fields, userId, productUrl, storeKey, activeStoreKey: storeKey } });
       return { ok: true, id: entry.id };
     });

@@ -15,14 +15,23 @@ function obs(daysAgo: number, price: number | null, shippingFee: number | null =
 function entry(storeKey: string, observations: CompetitorObservation[], overrides: Partial<CompetitorEntry> = {}): CompetitorEntry {
   return { id: `e-${storeKey}-${++seq}`, storeKey, storeName: storeKey, productUrl: `https://smartstore.naver.com/${storeKey}/products/1`,
     productName: "토마토", varietyGroup: "JUJUBE", qualityGroup: "REGULAR", optionLabel: "2kg", packageKg: 2,
-    sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", archivedAt: null, archiveReason: null, observations, ...overrides };
+    sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", cultivarName: "대저", color: "RED", mixture: "SINGLE", processing: "FRESH",
+    archivedAt: null, archiveReason: null, observations, ...overrides };
 }
-/** A row serialized before the size columns existed: no sizeGrade/sizeCriteria keys at all. */
+/** A row serialized before the size columns existed: no sizeGrade/sizeCriteria keys at all (identity keys are absent too). */
 function legacyEntry(storeKey: string, observations: CompetitorObservation[]): CompetitorEntry {
   const legacy: CompetitorEntry = { ...entry(storeKey, observations) };
   delete legacy.sizeGrade; delete legacy.sizeCriteria;
+  delete legacy.cultivarName; delete legacy.color; delete legacy.mixture; delete legacy.processing;
   return legacy;
 }
+/** A row serialized after the size columns but before the identity columns existed: size confirmed, identity keys absent. */
+function preIdentityEntry(storeKey: string, observations: CompetitorObservation[]): CompetitorEntry {
+  const row: CompetitorEntry = { ...entry(storeKey, observations) };
+  delete row.cultivarName; delete row.color; delete row.mixture; delete row.processing;
+  return row;
+}
+const LABEL = "토마토 · 대추방울 · 대저 · 빨강 · 단일 · 무가공 생과 · 일반 · 2kg · 중과 (직경 40~50mm)";
 /** Three healthy stores observed today and a week ago; the baseline for most cases. */
 function healthyPanel() {
   return [
@@ -36,8 +45,8 @@ describe("representative price threshold", () => {
   it("publishes median/min/max only with three distinct in-stock stores", () => {
     const [group] = summarizeCompetitors(healthyPanel(), now);
     expect(group).toMatchObject({ count: 3, medianDeliveredPrice: 15000, min: 13000, max: 17000, pairedCount: 3 });
-    expect(group.label).toBe("토마토 · 대추방울 · 일반 · 2kg · 중과 (직경 40~50mm)");
-    expect(group).toMatchObject({ sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm" });
+    expect(group.label).toBe(LABEL);
+    expect(group).toMatchObject({ sizeGrade: "MEDIUM", sizeCriteria: "직경 40~50mm", cultivarName: "대저", color: "RED", mixture: "SINGLE", processing: "FRESH" });
     const two = summarizeCompetitors(healthyPanel().slice(0, 2), now);
     expect(two[0]).toMatchObject({ count: 2, medianDeliveredPrice: null, min: null, max: null, previousWeekChangePct: null });
   });
@@ -102,6 +111,78 @@ describe("size grade and confirmed size criteria", () => {
     expect(summarizeCompetitors([...healthyPanel().slice(0, 2), innerSpacing], now)).toHaveLength(2);
     const upper = entry("c", [obs(2, 14000)], { sizeCriteria: "직경 40~50MM" });
     expect(summarizeCompetitors([...healthyPanel().slice(0, 2), upper], now)).toHaveLength(2);
+  });
+});
+
+describe("confirmed option identity (cultivar, color, mixture, processing)", () => {
+  it("excludes every row whose identity is not fully confirmed: legacy rows, pre-identity rows, empty cultivar, UNKNOWN/OTHER/MIXED codes", () => {
+    const excluded = [legacyEntry("d", [obs(0, 1000)]), preIdentityEntry("e", [obs(0, 1000)]),
+      entry("f", [obs(0, 1000)], { cultivarName: "" }), entry("g", [obs(0, 1000)], { cultivarName: "   \t" }), entry("h", [obs(0, 1000)], { cultivarName: undefined }),
+      entry("i", [obs(0, 1000)], { color: "UNKNOWN" }), entry("j", [obs(0, 1000)], { color: "OTHER" }), entry("k", [obs(0, 1000)], { color: undefined }),
+      entry("l", [obs(0, 1000)], { mixture: "UNKNOWN" }), entry("m", [obs(0, 1000)], { mixture: "MIXED" }), entry("n", [obs(0, 1000)], { mixture: undefined }),
+      entry("o", [obs(0, 1000)], { processing: "UNKNOWN" }), entry("p", [obs(0, 1000)], { processing: "OTHER" }), entry("q", [obs(0, 1000)], { processing: undefined }),
+      entry("r", [obs(0, 1000)], { color: "PINK" }), entry("s", [obs(0, 1000)], { mixture: "single" }), entry("t", [obs(0, 1000)], { processing: "SUGAR" }),
+      entry("u", [obs(0, 1000)], { color: "constructor" }), entry("v", [obs(0, 1000)], { mixture: "__proto__" }), entry("w", [obs(0, 1000)], { processing: "toString" })];
+    const groups = summarizeCompetitors([...healthyPanel(), ...excluded], now);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ count: 3, min: 13000 });
+    expect(summarizeCompetitors(excluded, now)).toEqual([]);
+  });
+  it("never lets an unconfirmed identity join a confirmed group even when the panel would otherwise reach three stores", () => {
+    const twoConfirmed = healthyPanel().slice(0, 2);
+    for (const third of [preIdentityEntry("c", [obs(2, 14000)]), entry("c", [obs(2, 14000)], { cultivarName: "" }),
+      entry("c", [obs(2, 14000)], { color: "OTHER" }), entry("c", [obs(2, 14000)], { mixture: "MIXED" }), entry("c", [obs(2, 14000)], { processing: "OTHER" })]) {
+      const groups = summarizeCompetitors([...twoConfirmed, third], now);
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
+    }
+  });
+  it("keeps red and orange fruit in separate groups even when every other attribute matches", () => {
+    const orange = [entry("o1", [obs(0, 5000)], { color: "ORANGE" }), entry("o2", [obs(0, 6000)], { color: "ORANGE" }), entry("o3", [obs(0, 7000)], { color: "ORANGE" })];
+    const groups = summarizeCompetitors([...healthyPanel(), ...orange], now);
+    expect(groups).toHaveLength(2);
+    expect(groups.map(g => [g.color, g.count, g.medianDeliveredPrice])).toEqual([["RED", 3, 15000], ["ORANGE", 3, 9000]]);
+    expect(groups[1].label).toBe("토마토 · 대추방울 · 대저 · 주황 · 단일 · 무가공 생과 · 일반 · 2kg · 중과 (직경 40~50mm)");
+    expect(new Set(groups.map(g => g.key)).size).toBe(2);
+  });
+  it("splits differing cultivar names instead of merging them, with no alias or similarity matching", () => {
+    const others = [entry("p", [obs(0, 1000)], { cultivarName: "스텔라" }), entry("q", [obs(0, 1000)], { cultivarName: "대저토마토" }), entry("r", [obs(0, 1000)], { cultivarName: "대 저" })];
+    const groups = summarizeCompetitors([...healthyPanel(), ...others], now);
+    expect(groups.map(g => [g.cultivarName, g.count])).toEqual([["대저", 3], ["스텔라", 1], ["대저토마토", 1], ["대 저", 1]]);
+    expect(new Set(groups.map(g => g.key)).size).toBe(4);
+  });
+  it("keeps fresh, stevia and xylitol processing apart as distinct comparable groups", () => {
+    const stevia = [entry("s1", [obs(0, 20000)], { processing: "STEVIA" }), entry("s2", [obs(0, 21000)], { processing: "STEVIA" }), entry("s3", [obs(0, 22000)], { processing: "STEVIA" })];
+    const xylitol = [entry("x1", [obs(0, 30000)], { processing: "XYLITOL" })];
+    const groups = summarizeCompetitors([...healthyPanel(), ...stevia, ...xylitol], now);
+    expect(groups.map(g => [g.processing, g.count, g.medianDeliveredPrice])).toEqual([["FRESH", 3, 15000], ["STEVIA", 3, 24000], ["XYLITOL", 1, null]]);
+    expect(groups[1].label).toContain("스테비아");
+    expect(groups[2].label).toContain("자일리톨");
+  });
+  it("accepts every specific color and only SINGLE mixture as comparable", () => {
+    const colors = ["RED", "ORANGE", "YELLOW", "GREEN", "BROWN"];
+    const groups = summarizeCompetitors(colors.map((color, i) => entry(`c${i}`, [obs(0, 1000)], { color })), now);
+    expect(groups.map(g => g.color)).toEqual(colors);
+    expect(groups.map(g => g.mixture)).toEqual(colors.map(() => "SINGLE"));
+    expect(groups[4].label).toContain("갈색");
+  });
+  it("normalizes the cultivar name by trimming surrounding whitespace only, never by case or inner spacing", () => {
+    const padded = entry("c", [obs(2, 14000), obs(9, 16000)], { cultivarName: "  대저\t" });
+    const groups = summarizeCompetitors([...healthyPanel().slice(0, 2), padded], now);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ count: 3, cultivarName: "대저" });
+    const innerSpacing = entry("c", [obs(2, 14000)], { cultivarName: "대 저" });
+    expect(summarizeCompetitors([...healthyPanel().slice(0, 2), innerSpacing], now)).toHaveLength(2);
+    const lower = [entry("a", [obs(0, 1000)], { cultivarName: "Stella" }), entry("b", [obs(0, 1000)], { cultivarName: "stella" })];
+    expect(summarizeCompetitors(lower, now)).toHaveLength(2);
+  });
+  it("still applies the three-store and paired-week thresholds inside an identity group", () => {
+    const [group] = summarizeCompetitors(healthyPanel(), now);
+    expect(group).toMatchObject({ count: 3, pairedCount: 3, medianDeliveredPrice: 15000 });
+    const twoPaired = [...healthyPanel().slice(0, 2), entry("c", [obs(0, 14000)])];
+    expect(summarizeCompetitors(twoPaired, now)[0]).toMatchObject({ count: 3, pairedCount: 2, previousWeekChangePct: null });
+    const dup = entry("a", [obs(0, 50000)]);
+    expect(summarizeCompetitors([...healthyPanel().slice(0, 2), dup], now)[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
   });
 });
 

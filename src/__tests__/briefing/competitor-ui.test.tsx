@@ -103,7 +103,7 @@ it("adds a panel only after explicit confirmation and refreshes from the server"
   fireEvent.click(screen.getByRole("button", { name: "패널에 추가" }));
   await screen.findByText(/고정 패널에 추가했습니다/);
   expect(postBodies(fetch)).toEqual([{ action: "addPanel", storeName: "농장C", productUrl: "https://smartstore.naver.com/farmc/products/77", productName: "대추방울토마토",
-    varietyGroup: "JUJUBE", qualityGroup: "GIFT", sizeGrade: "UNKNOWN", sizeCriteria: "", optionLabel: "2kg 로얄과", packageKg: 2, confirmed: true }]);
+    varietyGroup: "JUJUBE", qualityGroup: "GIFT", sizeGrade: "UNKNOWN", sizeCriteria: "", optionLabel: "2kg 로얄과", packageKg: 2, cultivarName: "", color: "UNKNOWN", mixture: "UNKNOWN", processing: "UNKNOWN", confirmed: true }]);
   expect(fetch.mock.calls.filter(call => call[1]?.method !== "POST")).toHaveLength(2);
   expect(screen.getByLabelText("판매처 이름")).toHaveValue("");
   expect(screen.getByLabelText("비교 품목 (그룹 기준 라벨)")).toHaveValue("토마토");
@@ -256,4 +256,38 @@ it("reads an exported JSON file into review without posting", async () => {
   fireEvent.click(screen.getByRole("button", { name: "가격 읽기" }));
   expect(await screen.findByText(/상품 주소 일치 확인/)).toBeInTheDocument();
   expect(postBodies(fetch)).toEqual([]);
+});
+
+
+it("requires renewed confirmation after option identity edits and submits the explicit attributes", async () => {
+  const fetch = stubFetch(() => ok(overview({})));
+  render(<CompetitorResearch />);
+  await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  expect(screen.getByLabelText("확인한 품종명")).toHaveValue("");
+  for (const label of ["과실 색상", "품종 혼합 여부", "가공 여부"]) expect(screen.getByLabelText(label)).toHaveValue("UNKNOWN");
+  fireEvent.change(screen.getByLabelText("판매처 이름"), { target: { value: "농장C" } });
+  fireEvent.change(screen.getByLabelText("스마트스토어 상품 URL"), { target: { value: "https://smartstore.naver.com/farmc/products/77" } });
+  fireEvent.change(screen.getByLabelText("상품·옵션명 (상품 페이지 표기 그대로)"), { target: { value: "루체 주황 2kg" } });
+  fireEvent.change(screen.getByLabelText("포장 중량 (kg)"), { target: { value: "2" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "상품 페이지에서 직접 확인함" }));
+  expect(screen.getByRole("button", { name: "패널에 추가" })).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("확인한 품종명"), { target: { value: "  루체  " } });
+  expect(screen.getByRole("checkbox", { name: "상품 페이지에서 직접 확인함" })).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "패널에 추가" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("과실 색상"), { target: { value: "ORANGE" } });
+  fireEvent.change(screen.getByLabelText("품종 혼합 여부"), { target: { value: "SINGLE" } });
+  fireEvent.change(screen.getByLabelText("가공 여부"), { target: { value: "FRESH" } });
+  expect(postBodies(fetch)).toEqual([]);
+  fireEvent.click(screen.getByRole("checkbox", { name: "상품 페이지에서 직접 확인함" }));
+  fireEvent.click(screen.getByRole("button", { name: "패널에 추가" }));
+  await waitFor(() => expect(postBodies(fetch)).toHaveLength(1));
+  expect(postBodies(fetch)[0]).toMatchObject({ cultivarName: "루체", color: "ORANGE", mixture: "SINGLE", processing: "FRESH", packageKg: 2 });
+});
+
+it("renders legacy identity as unknown without inventing a cultivar or processing type", async () => {
+  stubFetch(() => ok(overview({ entries: [entry({})], groups: [] })));
+  render(<CompetitorResearch />);
+  await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  expect(screen.getByText(/품종명 미확인 · 색상 미확인/)).toBeInTheDocument();
+  expect(screen.getByText(/집계할 그룹이 아직 없습니다/)).toHaveTextContent(/단일 품종/);
 });
