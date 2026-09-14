@@ -45,7 +45,8 @@ export async function buildSnapshot(userId: string, filters: SnapshotFilters, no
     periodStart: start.toISOString(), periodEnd: end.toISOString(), generatedAt: now.toISOString(),
     sources: [
       { id: "market", title: "수집된 가락시장 경매 원자료", url: null, status: rows.length ? "AVAILABLE" : "NOT_COLLECTED",
-        note: `법인 코드 ${corporations.join(", ")}. 동일 조건 내 수량 가중평균. 수집 완전성 미검증.` },
+        // Keep filters in the immutable input even when no matching trades exist.
+        note: `조회 조건 ${JSON.stringify({ productName: filters.productName, variety: filters.variety || null, origin: filters.origin || null })}. 법인 코드 ${corporations.join(", ")}. 동일 조건 내 수량 가중평균. 수집 완전성 미검증.` },
       ...[ ["cultivation", "재배·기상"], ["commerce", "판매·물류"], ["competitors", "경쟁점 가격"] ].map(([id, title]) => ({
         id, title, url: null, status: "NOT_COLLECTED", note: "자동 자료 수집 연결 전입니다. 변화 없음으로 해석하지 않습니다.",
       })),

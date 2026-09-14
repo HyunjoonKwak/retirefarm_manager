@@ -69,7 +69,7 @@ class FakeChild extends EventEmitter {
 type SpawnCall = { command: string; args: string[]; options: Record<string, unknown>; child: FakeChild };
 type ExecScript = (child: FakeChild, args: string[]) => void | Promise<void>;
 type FetchCall = { url: string; init: RequestInit; body: Record<string, unknown> };
-type Responder = (body: Record<string, unknown>, call: number) => Response | Promise<Response> | Error;
+type Responder = (body: Record<string, unknown>, call: number) => Response | Promise<Response | Error> | Error;
 
 function jsonResponse(data: unknown, status = 200) { return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } }); }
 const lastMessagePath = (args: string[]) => args[args.indexOf('--output-last-message') + 1];
@@ -246,6 +246,96 @@ describe('validateBriefingResult', () => {
 });
 
 describe('runOnce', () => {
+  it('persists before sending and replays the same completion after restart without any CLI calls', async () => {
+    const firstFetch = makeFetch({ claim: claimJob(), complete: async body => {
+      const file = path.join(`${tokenFile}.state`, 'pending.json');
+      const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+      expect(saved.payload).toEqual(body);
+      expect((await fs.stat(file)).mode & 0o077).toBe(0);
+      return new TypeError('connection lost after server commit');
+    } });
+    expect((await run({ spawn: makeSpawn({ exec: execSuccess(VALID_RESULT) }), fetch: firstFetch })).code).toBe(EXIT.deliveryUncertain);
+    const spawn = makeSpawn({ loginOutput: 'Not logged in' });
+    const fetch = makeFetch({ complete: () => jsonResponse({ ok: true }) });
+    const replay = await run({ spawn, fetch });
+    expect(replay.code).toBe(EXIT.ok);
+    expect(spawn.calls).toHaveLength(0);
+    expect(fetch.actions()).toEqual(['complete']);
+    expect(fetch.calls[0].body).toEqual(firstFetch.calls.find(c => c.body.action === 'complete')!.body);
+    await expect(fs.readdir(`${tokenFile}.state`)).resolves.toEqual([]);
+    expect(JSON.stringify(replay.entries)).not.toMatch(/lease-abc|rfw_|farm\.example/);
+  });
+
+  it('keeps rejected saved results blocking new claims across invocations', async () => {
+    const spawn = makeSpawn({ exec: execSuccess(VALID_RESULT) });
+    const first = makeFetch({ claim: claimJob(), complete: () => jsonResponse({}, 409) });
+    expect((await run({ spawn, fetch: first })).code).toBe(EXIT.deliveryUncertain);
+    const replaySpawn = makeSpawn({});
+    const replayFetch = makeFetch({ complete: () => jsonResponse({}, 409) });
+    expect((await run({ spawn: replaySpawn, fetch: replayFetch })).code).toBe(EXIT.deliveryUncertain);
+    expect(replaySpawn.calls).toHaveLength(0);
+    expect(replayFetch.actions()).toEqual(['complete']);
+    await expect(fs.stat(path.join(`${tokenFile}.state`, 'pending.json'))).resolves.toBeDefined();
+  });
+
+  it('blocks a changed server or token from receiving a saved completion', async () => {
+    await run({ spawn: makeSpawn({ exec: execSuccess(VALID_RESULT) }), fetch: makeFetch({ claim: claimJob(), complete: () => new Error('offline') }) });
+    const spawn = makeSpawn({}); const fetch = makeFetch({});
+    expect((await run({ spawn, fetch, env: { ...env, BRIEFING_SERVER_URL: 'https://other.example.test' } })).code).toBe(EXIT.deliveryUncertain);
+    await fs.writeFile(tokenFile, `rfw_${'b'.repeat(64)}`);
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    expect(fetch.calls).toHaveLength(0); expect(spawn.calls).toHaveLength(0);
+  });
+
+  it('does not run a second local worker while inference holds the lock', async () => {
+    let release: () => void = () => undefined;
+    const spawn = makeSpawn({ exec: async (child, args) => {
+      await new Promise<void>(resolve => { release = resolve; });
+      await execSuccess(VALID_RESULT)(child, args);
+    } });
+    const first = run({ spawn, fetch: makeFetch({ claim: claimJob() }) });
+    await vi.waitFor(() => expect(spawn.execCalls()).toHaveLength(1));
+    const secondSpawn = makeSpawn({}); const secondFetch = makeFetch({});
+    const second = await run({ spawn: secondSpawn, fetch: secondFetch });
+    expect(second.code).toBe(EXIT.deliveryUncertain);
+    expect(secondFetch.calls).toHaveLength(0); expect(secondSpawn.calls).toHaveLength(0);
+    release(); expect((await first).code).toBe(EXIT.ok);
+  });
+
+  it('blocks interrupted generation instead of claiming again after an uncertain fail', async () => {
+    await run({ spawn: makeSpawn({ exec: execSuccess({ ...VALID_RESULT, summary: '' }) }), fetch: makeFetch({ claim: claimJob(), fail: () => new Error('offline') }) });
+    const spawn = makeSpawn({}); const fetch = makeFetch({});
+    const retry = await run({ spawn, fetch });
+    expect(retry.code).toBe(EXIT.deliveryUncertain);
+    expect(fetch.calls).toHaveLength(0); expect(spawn.calls).toHaveLength(0);
+    expect(retry.entries.some(e => e.message.includes('interrupted generation'))).toBe(true);
+  });
+
+  it('blocks corrupt or unsafe pending files without inference', async () => {
+    await run({ spawn: makeSpawn({ exec: execSuccess(VALID_RESULT) }), fetch: makeFetch({ claim: claimJob(), complete: () => new Error('offline') }) });
+    const pending = path.join(`${tokenFile}.state`, 'pending.json');
+    const spawn = makeSpawn({}); const fetch = makeFetch({});
+    await fs.chmod(pending, 0o644);
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    await fs.chmod(pending, 0o600); await fs.writeFile(pending, '{invalid');
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    await fs.unlink(pending); await fs.symlink(tokenFile, pending);
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    expect(fetch.calls).toHaveLength(0); expect(spawn.calls).toHaveLength(0);
+  });
+
+  it('requires inspection for an abandoned lock or interrupted atomic write', async () => {
+    const state = `${tokenFile}.state`;
+    await fs.mkdir(state, { mode: 0o700 });
+    const spawn = makeSpawn({}); const fetch = makeFetch({});
+    await fs.writeFile(path.join(state, 'worker.lock'), '{"pid":99999999}', { mode: 0o600 });
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    await fs.unlink(path.join(state, 'worker.lock'));
+    await fs.writeFile(path.join(state, 'pending.next'), 'interrupted', { mode: 0o600 });
+    expect((await run({ spawn, fetch })).code).toBe(EXIT.deliveryUncertain);
+    expect(fetch.calls).toHaveLength(0); expect(spawn.calls).toHaveLength(0);
+  });
+
   it('runs one job end to end: claim → isolated codex → validated complete with usage', async () => {
     const spawn = makeSpawn({ exec: execSuccess(VALID_RESULT) });
     const fetch = makeFetch({ claim: claimJob() });
@@ -272,7 +362,8 @@ describe('runOnce', () => {
       expect(exec.child.stdinText).not.toContain(secret);
       expect(JSON.stringify(entries)).not.toContain(secret);
     }
-    await expect(fs.readdir(dir)).resolves.toEqual(['token']);
+    await expect(fs.readdir(dir)).resolves.toEqual(['token', 'token.state']);
+    await expect(fs.readdir(`${tokenFile}.state`)).resolves.toEqual([]);
   });
 
   it('exits 0 without spawning codex exec when there is no job', async () => {
@@ -416,6 +507,7 @@ describe('runOnce', () => {
 
   it('resends the identical complete payload on network loss or missing ok, never re-runs codex, never sends fail', async () => {
     for (const responder of [() => new TypeError('fetch failed'), () => jsonResponse({ ok: false })] as Responder[]) {
+      await fs.rm(`${tokenFile}.state`, { recursive: true, force: true });
       const spawn = makeSpawn({ exec: execSuccess(VALID_RESULT) });
       const fetch = makeFetch({ claim: claimJob(), complete: responder });
       const { code, entries } = await run({ spawn, fetch });
@@ -444,18 +536,20 @@ describe('runOnce', () => {
     const spawn = makeSpawn({ exec: execSuccess({ ...VALID_RESULT, summary: '' }) });
     const fetch = makeFetch({ claim: claimJob(), fail: () => new TypeError('fetch failed') });
     const { code } = await run({ spawn, fetch });
-    expect(code).toBe(EXIT.jobFailed);
+    expect(code).toBe(EXIT.deliveryUncertain);
     expect(failCalls(fetch)).toHaveLength(1);
   });
 
   it('does not resend complete after 401/409 and does not follow redirects', async () => {
     for (const status of [401, 409]) {
+      await fs.rm(`${tokenFile}.state`, { recursive: true, force: true });
       const spawn = makeSpawn({ exec: execSuccess(VALID_RESULT) });
       const fetch = makeFetch({ claim: claimJob(), complete: () => jsonResponse({}, status) });
       const { code } = await run({ spawn, fetch });
-      expect(code).toBe(EXIT.jobFailed);
+      expect(code).toBe(EXIT.deliveryUncertain);
       expect(fetch.actions()).toEqual(['claim', 'complete']);
     }
+    await fs.rm(`${tokenFile}.state`, { recursive: true, force: true });
     const opaque = { type: 'opaqueredirect', status: 0, ok: false, body: null, text: async () => '' } as unknown as Response;
     for (const redirect of [() => new Response(null, { status: 302, headers: { location: 'https://evil.example/login' } }), () => opaque]) {
       const spawn = makeSpawn({});

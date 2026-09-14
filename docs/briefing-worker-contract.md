@@ -33,5 +33,11 @@ sections는 각 key 정확히 한 번 총4개, actions 정확히3개. summary 1~
 - 전용 임시 작업 디렉터리, stdin prompt, shell:false, `exec --ignore-user-config --ignore-rules --ephemeral --sandbox read-only --skip-git-repo-check --json --output-schema ... --output-last-message ... -` 사용. 기본 프로젝트/사용자 MCP·hooks·도구가 상속되지 않도록 CLI 설정 확인. CLI가 격리 플래그 미지원이면 실패시키며 느슨한 명령으로 우회하지 않는다.
 - AI에는 운영 URL·worker token·운영 DB 파일을 주지 않는다. prompt에는 snapshot만 넣고 외부 도구 사용 금지, 사실/지시 분리 명시.
 - 실행 시간 최대6분, stdout/stderr 누적 크기 상한, 한 번에 작업1개. 재시도 loop 없음. 서버 실패는 안전한 code만 기록.
-- complete 응답 유실이면 AI 재실행하지 않는다. 실패를 덮어쓰지 말고 결과 전달 불명확 표시 후 종료. 서버는 같은 lease/input/result의 완료 재전송을 멱등 처리한다.
+- complete 응답 유실이면 AI 재실행하지 않는다. 완료 요청을 로컬에 먼저 저장하고 전달 불명확 표시 후 종료한다. 다음 실행은 저장 결과를 먼저 재전송하며 새 작업은 받지 않는다. 서버는 같은 lease/input/result의 완료 재전송을 멱등 처리한다.
 - 단위 테스트는 mock child process와 mock fetch로 검증하며 실제 모델 호출·예약·인증 파일 복사를 하지 않는다. 별도 수동 CLI 연결 검증은 가상 입력을 사용하고 운영 저장·발송과 분리한다.
+
+## 늦은 완료와 로컬 복구
+
+complete는 RUNNING 상태·같은 credential/lease/inputHash를 유지하는 동안에는 lease 시간이 지났어도 원자적으로 수락한다. heartbeat/fail은 계속 유효 시간 안에서만 허용한다. 재할당·회전·폐기·재시도로 소유권이나 상태가 바뀌면 늦은 완료는 409/401이며 저장 결과를 새 lease에 붙이지 않는다.
+
+Mac은 토큰 파일 옆 비공개 `.state` 폴더를 사용한다. 실행 잠금, 작성 시작 체크포인트, 완료 요청 저장을 통해 불확실한 재실행을 차단한다. 같은 입력의 동시 enqueue는 기존 작업을 재사용하며 사용자별 활성 작업 상한은 트랜잭션에서 검사한다.

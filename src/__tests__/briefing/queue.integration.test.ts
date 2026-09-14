@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ vi.mock("@/lib/prisma", () => ({ default: new Proxy({}, { get: (_, key) => {
   const value = Reflect.get(m.db, key); return typeof value === "function" ? value.bind(m.db) : value;
 } }) }));
 vi.mock("@/lib/auth/guards", () => ({ getSessionUser: m.user }));
-import { authenticateWorker, enqueueBriefing, handleWorker, issueWorkerToken } from "@/lib/briefing/queue";
+import { authenticateWorker, enqueueBriefing, handleWorker, hash, issueWorkerToken } from "@/lib/briefing/queue";
 import { buildSnapshot, previousWeek } from "@/lib/briefing/snapshot";
 import { resultSchema, type BriefingResult } from "@/lib/briefing/contracts";
 import { POST as workerPost } from "@/app/api/briefing-worker/route";
@@ -45,6 +45,17 @@ async function claim(credential: NonNullable<Awaited<ReturnType<typeof authentic
 it("uses the previous completed KST week including Sunday night at the UTC boundary", () => {
   expect(previousWeek(now)).toEqual({ start: new Date("2026-09-06T15:00:00Z"), end: new Date("2026-09-13T15:00:00Z") });
   expect(previousWeek(new Date("2026-09-13T14:59:59Z")).end.toISOString()).toBe("2026-09-06T15:00:00.000Z");
+});
+it("keeps empty result requests distinct by filter while deduplicating equivalent empty filters", async () => {
+  const first = await buildSnapshot("owner", { productName: "토마토", origin: "평택" }, now);
+  const second = await buildSnapshot("owner", { productName: "토마토", origin: "장수" }, now);
+  const equivalent = await buildSnapshot("owner", { productName: "토마토", origin: "평택", variety: "" }, now);
+  expect(first.metrics).toHaveLength(0); expect(second.metrics).toHaveLength(0);
+  const a = await enqueueBriefing("owner", first);
+  const b = await enqueueBriefing("owner", second);
+  const c = await enqueueBriefing("owner", equivalent);
+  expect(a.id).not.toBe(b.id); expect(c.id).toBe(a.id);
+  expect(await m.db.briefingRun.count()).toBe(2);
 });
 it("migrates all tables and weights full transactions only inside identical groups", async () => {
   const base = { productName: "토마토", variety: "대추", origin: "평택", grade: "특", unit: "3kg", corporation: "서울청과", corporationCode: "11000101", auctionDate: new Date("2026-09-07T15:00:00Z") };
@@ -144,4 +155,93 @@ it("completes the HTTP claim-to-draft flow and never returns bearer or lease tok
   expect(listed.runs[0].briefing).toMatchObject({ status: "DRAFT", body: draft() });
   expect(listed.scheduleEnabled).toBe(false);
   expect(JSON.stringify(listed)).not.toContain(token); expect(JSON.stringify(listed)).not.toContain(job.leaseToken);
+});
+it("returns the same job to simultaneous identical enqueue requests instead of failing", async () => {
+  const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
+  const runs = await Promise.all(Array.from({ length: 6 }, (_, n) =>
+    enqueueBriefing("owner", { ...snapshot, generatedAt: new Date(now.getTime() + n).toISOString() })));
+  expect(new Set(runs.map(run => run.id)).size).toBe(1);
+  expect(await m.db.briefingRun.count()).toBe(1);
+});
+// Distinct inputs: without collected trades the filters do not reach the snapshot, so vary the limitations instead.
+const variants = (snapshot: Awaited<ReturnType<typeof buildSnapshot>>, count: number) =>
+  Array.from({ length: count }, (_, n) => ({ ...snapshot, limitations: [...snapshot.limitations, `변형 ${n}`] }));
+it("keeps at most three active jobs per user under simultaneous distinct enqueue requests", async () => {
+  const snapshots = variants(await buildSnapshot("owner", { productName: "토마토" }, now), 6);
+  const results = await Promise.allSettled(snapshots.map(snapshot => enqueueBriefing("owner", snapshot)));
+  const fulfilled = results.filter(result => result.status === "fulfilled");
+  const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  expect(fulfilled).toHaveLength(3); expect(rejected).toHaveLength(3);
+  for (const result of rejected) expect(result.reason).toMatchObject({ status: 409 });
+  expect(await m.db.briefingRun.count({ where: { userId: "owner", status: { in: ["PENDING", "RUNNING"] } } })).toBe(3);
+});
+it("returns the existing job for an identical request even when the user is at the active-job cap", async () => {
+  const snapshots = variants(await buildSnapshot("owner", { productName: "토마토" }, now), 4);
+  const [first] = await Promise.all(snapshots.slice(0, 3).map(snapshot => enqueueBriefing("owner", snapshot)));
+  await expect(enqueueBriefing("owner", snapshots[3])).rejects.toMatchObject({ status: 409 });
+  expect((await enqueueBriefing("owner", { ...snapshots[0], generatedAt: new Date().toISOString() })).id).toBe(first.id);
+  expect(await m.db.briefingRun.count()).toBe(3);
+});
+const prismaError = (code: string) => new Prisma.PrismaClientKnownRequestError(`simulated ${code}`, { code, clientVersion: "test" });
+it("returns the concurrent winner's job when the unique key race is lost inside the transaction", async () => {
+  const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
+  const tx = vi.spyOn(m.db, "$transaction").mockImplementationOnce(async () => {
+    // Another process commits the same key between this request's read and its insert.
+    await m.db.briefingRun.create({ data: { userId: "owner", weekStart: new Date(snapshot.periodStart),
+      inputHash: hash(JSON.stringify({ ...snapshot, generatedAt: undefined })), snapshot: JSON.stringify(snapshot) } });
+    throw prismaError("P2002");
+  });
+  const run = await enqueueBriefing("owner", snapshot);
+  expect(tx).toHaveBeenCalledTimes(1);
+  expect(await m.db.briefingRun.findMany()).toEqual([run]);
+});
+it("retries a timed-out transaction, still enforces the cap, and reports exhaustion as 503", async () => {
+  const [first, ...rest] = variants(await buildSnapshot("owner", { productName: "토마토" }, now), 5);
+  const tx = vi.spyOn(m.db, "$transaction");
+  tx.mockRejectedValueOnce(prismaError("P2028"));
+  expect((await enqueueBriefing("owner", first)).status).toBe("PENDING");
+  expect(tx).toHaveBeenCalledTimes(2);
+  await Promise.all(rest.slice(0, 2).map(snapshot => enqueueBriefing("owner", snapshot)));
+  await expect(enqueueBriefing("owner", rest[2])).rejects.toMatchObject({ status: 409 });
+  tx.mockClear(); tx.mockRejectedValue(prismaError("P2028"));
+  await expect(enqueueBriefing("owner", rest[3])).rejects.toMatchObject({ status: 503 });
+  expect(tx).toHaveBeenCalledTimes(3);
+  tx.mockRestore();
+  expect(await m.db.briefingRun.count()).toBe(3);
+});
+it("does not retry non-transient database errors", async () => {
+  const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
+  const tx = vi.spyOn(m.db, "$transaction").mockRejectedValueOnce(prismaError("P2003"));
+  await expect(enqueueBriefing("owner", snapshot)).rejects.toMatchObject({ code: "P2003" });
+  expect(tx).toHaveBeenCalledTimes(1);
+  expect(await m.db.briefingRun.count()).toBe(0);
+});
+it("accepts a late completion from the original lease holder after expiry without another attempt", async () => {
+  const { credential } = await setup(); const job = await claim(credential);
+  const later = new Date(now.getTime() + 11 * 60_000); const lease = { jobId: job.id, leaseToken: job.leaseToken };
+  await expect(handleWorker(credential, { action: "heartbeat", ...lease }, later)).rejects.toMatchObject({ status: 409 });
+  await expect(handleWorker(credential, { action: "fail", ...lease, code: "CODEX_FAILED" }, later)).rejects.toMatchObject({ status: 409 });
+  const input = { action: "complete" as const, ...lease, inputHash: job.inputHash, result: draft() };
+  expect(await handleWorker(credential, input, later)).toEqual({ ok: true });
+  expect(await handleWorker(credential, input, later)).toEqual({ ok: true });
+  expect(await m.db.briefingRun.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject({ status: "SUCCEEDED", attempts: 1 });
+  expect(await m.db.weeklyBriefing.count()).toBe(1);
+  expect(await handleWorker(credential, { action: "claim" }, later)).toEqual({ job: null });
+});
+it("rejects a late completion once the job was re-claimed, retried, or rotated away from the old lease", async () => {
+  const { credential, token } = await setup(); const old = await claim(credential);
+  const later = new Date(now.getTime() + 11 * 60_000);
+  const complete = (job: typeof old, at: Date, cred = credential) =>
+    handleWorker(cred, { action: "complete", jobId: job.id, leaseToken: job.leaseToken, inputHash: job.inputHash, result: draft() }, at);
+  const fresh = await claim(credential, later);
+  await expect(complete(old, later)).rejects.toMatchObject({ status: 409 });
+  await handleWorker(credential, { action: "fail", jobId: fresh.id, leaseToken: fresh.leaseToken, code: "RATE_LIMIT" }, later);
+  const retry = await POST(new Request("http://localhost/api/briefings", { method: "POST", body: JSON.stringify({ action: "retry", jobId: old.id }) }));
+  expect(retry.status).toBe(200);
+  await expect(complete(fresh, later)).rejects.toMatchObject({ status: 409 });
+  const third = await claim(credential, later);
+  await issueWorkerToken("owner"); expect(await authenticateWorker(`Bearer ${token}`)).toBeNull();
+  await expect(complete(third, later)).rejects.toMatchObject({ status: 401 });
+  expect(await m.db.weeklyBriefing.count()).toBe(0);
+  expect(await m.db.briefingRun.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ status: "BLOCKED", leaseToken: null });
 });

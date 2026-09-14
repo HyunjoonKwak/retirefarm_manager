@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { openOutbox } from './briefing-outbox.mjs';
 
 export const ENDPOINT_PATH = '/api/briefing-worker';
 export const FAIL_CODES = Object.freeze(['AUTH_REQUIRED', 'RATE_LIMIT', 'CODEX_FAILED', 'INVALID_OUTPUT', 'TIMEOUT']);
@@ -212,6 +213,12 @@ export const resultSchema = z.object({
     .length(4).refine((rows) => new Set(rows.map((row) => row.key)).size === SECTION_KEYS.length, { message: 'each section key exactly once' }),
   actions: z.array(z.object({ text: prose(500), sourceIds: z.array(id).max(20) }).strict()).length(3),
   limitations: z.array(prose(500)).max(20),
+}).strict();
+
+const completionSchema = z.object({
+  action: z.literal('complete'), jobId: id, leaseToken: z.string().min(1).max(1000),
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/), result: resultSchema,
+  usage: z.object({ inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(), cachedInputTokens: z.number().int().nonnegative() }).strict().optional(),
 }).strict();
 
 /** JSON Schema handed to `codex exec --output-schema` (strict shape only; counts and text rules are validated locally). */
@@ -518,24 +525,49 @@ export async function runOnce({ env = process.env, fetchImpl = globalThis.fetch,
     log('error', error instanceof WorkerConfigError ? error.message : 'configuration failed');
     return EXIT.usage;
   }
-  const childEnv = buildChildEnv(env);
-  const workDir = await fs.mkdtemp(path.join(tmpRoot, 'briefing-worker-'));
-  await fs.chmod(workDir, 0o700).catch(() => undefined);
+  let outbox;
+  try { outbox = await openOutbox({ tokenFile: env.BRIEFING_WORKER_TOKEN_FILE, ...config }); }
+  catch { log('error', 'worker state is locked or unavailable; no work claimed'); return EXIT.deliveryUncertain; }
+  let workDir;
   let keepWorkDir = false;
   try {
-    if (!(await precheckCodex({ config, childEnv, cwd: workDir, spawnImpl, limits, log }))) return EXIT.precheck;
     const client = createServerClient({ endpoint: config.endpoint, token: config.token, fetchImpl, limits });
-    const outcome = await processOneJob({ client, config, childEnv, workDir, spawnImpl, limits, log, sleep });
+    const pending = await outbox.read();
+    if (pending) {
+      if (pending.phase !== 'complete') {
+        log('error', 'interrupted generation requires inspection; no new inference');
+        return EXIT.deliveryUncertain;
+      }
+      const payload = completionSchema.parse(pending.payload);
+      const delivery = await deliver({ client, payload, attempts: limits.completeAttempts, sleep, delayMs: limits.completeRetryDelayMs, log });
+      if (delivery !== 'delivered') {
+        log('error', 'saved completion remains pending; no new inference', { jobId: payload.jobId, delivery });
+        return EXIT.deliveryUncertain;
+      }
+      await outbox.clear();
+      log('info', 'saved completion delivered without inference', { jobId: payload.jobId });
+      return EXIT.ok;
+    }
+    const childEnv = buildChildEnv(env);
+    workDir = await fs.mkdtemp(path.join(tmpRoot, 'briefing-worker-'));
+    await fs.chmod(workDir, 0o700);
+    if (!(await precheckCodex({ config, childEnv, cwd: workDir, spawnImpl, limits, log }))) return EXIT.precheck;
+    const outcome = await processOneJob({ client, config, childEnv, workDir, spawnImpl, limits, log, sleep, outbox });
     keepWorkDir = outcome === EXIT.deliveryUncertain;
     return outcome;
+  } catch {
+    keepWorkDir = true;
+    log('error', 'worker delivery state requires inspection; no new inference');
+    return EXIT.deliveryUncertain;
   } finally {
-    if (keepWorkDir) log('warn', 'work directory kept for inspection', { workDir });
-    else await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    if (workDir && keepWorkDir) log('warn', 'work directory kept for inspection', { workDir });
+    else if (workDir) await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    await outbox.close();
   }
 }
 
-/** @param {{ client: ReturnType<typeof createServerClient>, config: { codexBin: string }, childEnv: Record<string, string>, workDir: string, spawnImpl?: typeof nodeSpawn, limits: Limits, log: typeof defaultLog, sleep: (ms: number) => Promise<void> }} options */
-async function processOneJob({ client, config, childEnv, workDir, spawnImpl, limits, log, sleep }) {
+/** @param {{ client: ReturnType<typeof createServerClient>, config: { codexBin: string }, childEnv: Record<string, string>, workDir: string, spawnImpl?: typeof nodeSpawn, limits: Limits, log: typeof defaultLog, sleep: (ms: number) => Promise<void>, outbox: Awaited<ReturnType<typeof openOutbox>> }} options */
+async function processOneJob({ client, config, childEnv, workDir, spawnImpl, limits, log, sleep, outbox }) {
   let claim;
   try { claim = await client.call({ action: 'claim' }); } catch (error) {
     log('error', 'claim failed', { kind: error instanceof ServerError ? error.kind : 'unknown' });
@@ -554,6 +586,7 @@ async function processOneJob({ client, config, childEnv, workDir, spawnImpl, lim
   }
   const prompt = buildPrompt(snapshot.data);
   if (Buffer.byteLength(prompt) > limits.promptMaxBytes) { log('error', 'prompt exceeds size limit', { jobId }); await sendFail('CODEX_FAILED'); return EXIT.jobFailed; }
+  await outbox.save({ phase: 'generating', jobId, workDir });
   const abort = new AbortController();
   const stopHeartbeat = startHeartbeat({ client, jobId, leaseToken, intervalMs: limits.heartbeatIntervalMs, log, onFatal: () => abort.abort() });
   const startedAt = Date.now();
@@ -566,16 +599,19 @@ async function processOneJob({ client, config, childEnv, workDir, spawnImpl, lim
     stopHeartbeat();
     const failure = error instanceof JobFailure ? error : new JobFailure('CODEX_FAILED', 'codex_exit');
     log('error', 'job failed', { jobId, code: failure.code, reason: failure.reason, detail: failure.detail, durationMs: Date.now() - startedAt });
-    if (failure.code === 'LEASE_LOST') return EXIT.jobFailed;
-    await sendFail(FAIL_CODES.includes(failure.code) ? failure.code : 'CODEX_FAILED');
+    if (failure.code === 'LEASE_LOST') { await outbox.clear(); return EXIT.jobFailed; }
+    const failedDelivery = await sendFail(FAIL_CODES.includes(failure.code) ? failure.code : 'CODEX_FAILED');
+    if (failedDelivery === 'uncertain') return EXIT.deliveryUncertain;
+    await outbox.clear();
     return EXIT.jobFailed;
   }
   stopHeartbeat();
-  if (abort.signal.aborted) { log('error', 'lease lost before completion; result discarded', { jobId }); return EXIT.jobFailed; }
+  if (abort.signal.aborted) { await outbox.clear(); log('error', 'lease lost before completion; result discarded', { jobId }); return EXIT.jobFailed; }
   const payload = { action: 'complete', jobId, leaseToken, inputHash, result: result.value, ...(result.usage ? { usage: result.usage } : {}) };
+  await outbox.save({ phase: 'complete', payload });
   const delivery = await deliver({ client, payload, attempts: limits.completeAttempts, sleep, delayMs: limits.completeRetryDelayMs, log });
-  if (delivery === 'delivered') { log('info', 'job completed', { jobId, durationMs: Date.now() - startedAt }); return EXIT.ok; }
-  if (delivery === 'rejected') { log('error', 'complete rejected by server; result discarded', { jobId }); return EXIT.jobFailed; }
+  if (delivery === 'delivered') { await outbox.clear(); log('info', 'job completed', { jobId, durationMs: Date.now() - startedAt }); return EXIT.ok; }
+  if (delivery === 'rejected') log('error', 'complete rejected; saved result requires inspection', { jobId });
   await fs.writeFile(path.join(workDir, 'undelivered-result.json'), JSON.stringify(payload.result, null, 2), { mode: 0o600 }).catch(() => undefined);
   log('error', 'complete delivery uncertain; result NOT re-generated, no fail sent', { jobId });
   return EXIT.deliveryUncertain;
