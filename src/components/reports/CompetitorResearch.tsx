@@ -8,6 +8,7 @@ import { CompetitorCostScenario } from "./competitor/CompetitorCostScenario";
 import { CompetitorEntryCard } from "./competitor/CompetitorEntryCard";
 import { CompetitorGroupSummary } from "./competitor/CompetitorGroupSummary";
 import { CompetitorPanelForm, emptyPanelDraft, type PanelDraft } from "./competitor/CompetitorPanelForm";
+import { CaptureExtensionHelp } from "./competitor/CaptureExtensionHelp";
 import { CompetitorSearchPanel } from "./competitor/CompetitorSearchPanel";
 import { dateTime } from "./competitor/competitor-utils";
 
@@ -89,6 +90,8 @@ export function CompetitorResearch() {
 
     <CompetitorSearchPanel latestSearch={data?.latestSearch ?? null} busy={busy || !data}
       onUseCandidate={useCandidate} />
+
+    <CaptureExtensionHelp />
 
     <CompetitorPanelForm key={form.key} initial={form.draft} busy={busy || !data} fromCandidate={form.fromCandidate}
       onSubmit={request => void mutate(request, "고정 패널에 추가했습니다. 확인한 가격을 기록해 주세요.")} onReset={resetForm} />

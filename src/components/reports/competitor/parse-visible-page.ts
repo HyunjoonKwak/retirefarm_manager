@@ -4,7 +4,7 @@
 // field becomes null/UNKNOWN and a Korean hint explains why, so the operator can confirm
 // or correct the values in the record form before saving.
 
-export const VISIBLE_PAGE_PARSER_VERSION = "visible-page-v1";
+export const VISIBLE_PAGE_PARSER_VERSION = "visible-page-v2";
 export const MAX_VISIBLE_PAGE_CHARS = 30000;
 const MAX_AMOUNT = 10_000_000;
 
@@ -22,7 +22,7 @@ const EMPTY: VisiblePageParse = { price: null, shippingFee: null, availability: 
 
 const AMOUNT = "(\\d{1,3}(?:,\\d{3})+|\\d+)\\s*원";
 const TOTAL_LABEL = /^총\s*(?:상품\s*)?금액\s*[:：]?\s*/;
-const TOTAL_WITH_AMOUNT = new RegExp(`^총\\s*(?:상품\\s*)?금액\\s*[:：]?\\s*${AMOUNT}$`);
+const TOTAL_WITH_AMOUNT = new RegExp(`^총\\s*(?:상품\\s*)?금액\\s*(?:도움말\\s*)?[:：]?\\s*${AMOUNT}$`);
 const ONLY_AMOUNT = new RegExp(`^${AMOUNT}$`);
 const ANY_AMOUNT = new RegExp(AMOUNT);
 const COUPON_LINE = /쿠폰|포인트|적립/;
@@ -52,7 +52,8 @@ const amountAfterLabel = (lines: readonly string[], index: number, label: RegExp
   const inlineMatch = lines[index].match(inline);
   if (inlineMatch) return toAmount(inlineMatch[1]);
   if (!label.test(lines[index]) || lines[index].replace(label, "").length > 0) return null;
-  const next = lines[index + 1]?.match(ONLY_AMOUNT);
+  const amountIndex = lines[index + 1] === "도움말" ? index + 2 : index + 1;
+  const next = lines[amountIndex]?.match(ONLY_AMOUNT);
   return next ? toAmount(next[1]) : null;
 };
 
@@ -111,6 +112,7 @@ const optionCandidateAt = (lines: readonly string[], index: number): string | nu
     const inline = line.replace(OPTION_MARKER, "");
     return inline.length > 0 ? inline : (lines[index + 1] ?? null);
   }
+  if (line === "상품명" && ONLY_AMOUNT.test(lines[index + 2] ?? "")) return lines[index + 1] ?? null;
   const next = lines[index + 1];
   return next !== undefined && OPTION_DELETE_LINE.test(next) && !OPTION_DELETE_LINE.test(line) ? line : null;
 };
@@ -128,7 +130,7 @@ const parseOption = (lines: readonly string[]): Pick<VisiblePageParse, "optionLa
 
 // "수량 2" inline, or a bare "수량" label followed by a digits-only line.
 const quantityAt = (lines: readonly string[], index: number): string | undefined => {
-  const inline = lines[index].match(QUANTITY_LINE)?.[1];
+  const inline = lines[index].match(QUANTITY_LINE)?.[1] ?? lines[index].match(/^총\s*(\d+)\s*개$/)?.[1];
   if (inline !== undefined) return inline;
   return lines[index] === "수량" && /^\d+$/.test(lines[index + 1] ?? "") ? lines[index + 1] : undefined;
 };

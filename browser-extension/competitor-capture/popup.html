@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Retirefarm 경쟁 상품 화면 캡처</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <h1>경쟁 상품 화면 캡처</h1>
+    <p id="status" class="status" aria-live="polite">현재 탭을 확인하는 중…</p>
+    <p id="url" class="url" hidden></p>
+    <p class="hint">옵션을 고른 뒤 가격·옵션 영역을 드래그로 선택하면 가장 정확합니다. 선택이 없으면 '총 금액' 주변 영역만 캡처합니다.</p>
+    <button id="capture" type="button" class="primary" disabled>현재 화면 캡처</button>
+    <section id="preview" class="preview" hidden>
+      <h2>미리보기</h2>
+      <dl class="meta">
+        <dt>제목</dt><dd id="preview-title"></dd>
+        <dt>방식</dt><dd id="preview-method"></dd>
+        <dt>시각</dt><dd id="preview-time"></dd>
+        <dt>크기</dt><dd id="preview-size"></dd>
+      </dl>
+      <textarea id="preview-text" readonly rows="10" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="copy" type="button" class="primary">JSON 복사</button>
+        <button id="download" type="button">JSON 파일 저장</button>
+      </div>
+    </section>
+    <p class="footnote">캡처는 이 버튼을 누를 때만 실행되며 저장·전송되지 않습니다. 결과는 Retirefarm 앱의 경쟁 상품 입력에 붙여넣어 확인 후 등록합니다.</p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

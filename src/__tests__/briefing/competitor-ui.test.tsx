@@ -218,3 +218,42 @@ it("computes a local cost scenario without posting", async () => {
   expect(screen.getByText(/가격 차이 계산을 보류/)).toBeInTheDocument();
   expect(postBodies(fetch)).toEqual([]);
 });
+
+it("validates capture product identity and stores capture time rather than import time", async () => {
+  const fetch = stubFetch(() => ok(overview({ entries: [entry({ optionLabel: "중과 2kg" })] })));
+  render(<CompetitorResearch />);
+  await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  fireEvent.click(screen.getByText("상품 화면에서 가격 가져오기"));
+  const capturedAt = new Date(Date.now() - 20 * 60_000).toISOString();
+  const payload = { schemaVersion: "retirefarm-visible-product-v1", capturedAt, productUrl: "https://smartstore.naver.com/wrong/products/9", title: "토마토", method: "product-region",
+    text: "선택 옵션: 중과 2kg\n총 금액\n도움말\n18,500원\n무료배송" };
+  fireEvent.change(screen.getByLabelText("상품 화면 텍스트"), { target: { value: JSON.stringify(payload) } });
+  fireEvent.click(screen.getByRole("button", { name: "가격 읽기" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("다른 상품");
+  expect(screen.queryByRole("button", { name: "기록 양식에 채우기" })).not.toBeInTheDocument();
+  payload.productUrl = entry({}).productUrl;
+  fireEvent.change(screen.getByLabelText("상품 화면 텍스트"), { target: { value: JSON.stringify(payload) } });
+  fireEvent.click(screen.getByRole("button", { name: "가격 읽기" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /선택 옵션·수량 1과/ }));
+  fireEvent.click(screen.getByRole("button", { name: "기록 양식에 채우기" }));
+  expect(postBodies(fetch)).toEqual([]);
+  fireEvent.change(screen.getByLabelText("재고 상태"), { target: { value: "IN_STOCK" } });
+  fireEvent.click(screen.getByRole("button", { name: "관측 기록" }));
+  await waitFor(() => expect(postBodies(fetch)).toHaveLength(1));
+  expect(postBodies(fetch)[0]).toMatchObject({ observedAt: capturedAt, price: 18500, shippingFee: 0 });
+});
+
+it("reads an exported JSON file into review without posting", async () => {
+  const fetch = stubFetch(() => ok(overview({ entries: [entry({ optionLabel: "중과 2kg" })] })));
+  render(<CompetitorResearch />);
+  await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
+  fireEvent.click(screen.getByText("상품 화면에서 가격 가져오기"));
+  const payload = { schemaVersion: "retirefarm-visible-product-v1", productUrl: entry({}).productUrl, capturedAt: new Date(Date.now() - 1000).toISOString(),
+    title: "토마토", method: "selection", text: "선택 옵션: 중과 2kg\n총 금액 18,500원\n무료배송" };
+  const file = Object.assign(new File([JSON.stringify(payload)], "capture.json", { type: "application/json" }), { text: async () => JSON.stringify(payload) });
+  fireEvent.change(screen.getByLabelText("확장 프로그램 수집 파일 (.json)"), { target: { files: [file] } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "가격 읽기" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "가격 읽기" }));
+  expect(await screen.findByText(/상품 주소 일치 확인/)).toBeInTheDocument();
+  expect(postBodies(fetch)).toEqual([]);
+});

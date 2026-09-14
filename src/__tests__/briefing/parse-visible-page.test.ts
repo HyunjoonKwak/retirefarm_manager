@@ -25,7 +25,7 @@ N.대추방울토마토 중과 2kg
 
 describe("parseVisiblePage observed case", () => {
   it("exposes a stable parser version", () => {
-    expect(VISIBLE_PAGE_PARSER_VERSION).toBe("visible-page-v1");
+    expect(VISIBLE_PAGE_PARSER_VERSION).toBe("visible-page-v2");
     expect(MAX_VISIBLE_PAGE_CHARS).toBe(30000);
   });
   it("prefers the selected total over base and coupon prices", () => {
@@ -167,4 +167,19 @@ describe("input limits", () => {
 it("does not treat a separate conditional shipping line as free", () => {
   expect(parseVisiblePage("무료배송\n30,000원 이상 무료").shippingFee).toBeNull();
   expect(parseVisiblePage("배송비 3,000원\n제주 추가 비용 2,000원").shippingFee).toBeNull();
+});
+
+// Public product pricing regions read from Chrome DOM on 2026-09-14; shipping outside
+// these regions (e.g. island surcharges) still requires human confirmation.
+it("matches selected prices/options from three live product regions with help separators", async () => {
+  const { default: fixtures } = await import("./fixtures/naver-visible-products.json");
+  for (const sample of fixtures) {
+    expect(parseVisiblePage(sample.text), sample.store).toMatchObject({ price: sample.price, optionLabel: sample.optionLabel, shippingFee: 0, availability: "UNKNOWN" });
+    expect(parseVisiblePage(sample.text.replace("총 1개", "총 2개")).price).toBeNull();
+  }
+});
+
+it("does not skip arbitrary price labels between the total and amount", () => {
+  expect(parseVisiblePage("총 금액\n쿠폰 적용\n16,400원").price).toBeNull();
+  expect(parseVisiblePage("상품명\n중과 2kg\n다른 안내\n16,400원").optionLabel).toBeNull();
 });
