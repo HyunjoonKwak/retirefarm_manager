@@ -7,7 +7,7 @@
 | 항목 | 요구사항 | 확인 방법 |
 | --- | --- | --- |
 | Node.js | 20 이상 (개발·검증은 v22) | `node --version` |
-| Codex CLI | `exec --ignore-user-config --ignore-rules --ephemeral --output-schema --output-last-message` 지원 버전 (검증: codex-cli 0.154.0) | `codex --version`, `codex exec --help` |
+| Codex CLI | `exec --strict-config --ignore-user-config --ignore-rules --ephemeral --output-schema --output-last-message` 지원 버전 (검증: codex-cli 0.154.0) | `codex --version`, `codex exec --help` |
 | Codex 인증 | **ChatGPT 로그인**만 허용. API 키 로그인이면 워커가 작업을 받지 않고 종료 | `codex login status` 출력이 `Logged in using ChatGPT` |
 | 저장소 의존성 | `zod` (프로젝트 `node_modules`) | 저장소 루트에서 `npm ci` 완료 |
 | 서버 | HTTPS 주소. `http://`는 `localhost`·`127.0.0.1`·`[::1]`만 허용 | 앱 URL |
@@ -123,7 +123,7 @@ npx vitest run src/__tests__/briefing/worker.test.ts
 - `codex login status`의 문구(`Logged in using ChatGPT`)에 의존합니다. 문구가 바뀌면 워커는 `UNKNOWN`으로 판정하고 종료 코드 3으로 멈춥니다(작업을 받지 않음).
 - HTTPS 프록시 환경변수(`HTTPS_PROXY` 등)는 Codex 자식 프로세스에 전달하지 않습니다. 프록시가 필수인 네트워크에서는 Codex 자체 설정으로 처리해야 합니다.
 - snapshot 검증 실패는 계약에 전용 fail 코드가 없어 `CODEX_FAILED`로 보고합니다. 로그의 `message`가 `snapshot rejected by worker schema`이면 서버 측 입력 문제입니다.
-- 단위 테스트와 별도로 2026-09-14 실제 ChatGPT 로그인 CLI로 가상 자료 생성 두 회를 확인했습니다. 아래 검증 기록 참고. 운영 NAS 연결·실자료 보고서 품질은 별도 확인이 필요합니다.
+- 단위 테스트와 별도로 2026-09-14 실제 ChatGPT 로그인 CLI로 가상 자료 생성 두 회를 확인했습니다. 아래 검증 기록 참고. 운영 NAS 연결과 제한된 실자료 초안 한 건도 확인했습니다. 자세한 범위는 [배포 검증 기록](reviews/2026-09-14-briefing-deployment.md)을 참고하세요. 전체 보고서 품질 검증을 대신하지 않습니다.
 - 예약 실행, 다중 작업 처리, AI 재실행 루프는 포함하지 않았습니다. 결과 로컬 보관은 전달 불명확 시의 임시 사본만 제공합니다.
 
 ## 9. 실제 로그인 CLI 연결 검증 (2026-09-14)
@@ -136,3 +136,11 @@ Codex 인증은 기존 ChatGPT 로그인을 사용했다. 서버 HTTP는 메모�
 | 보고서 전용 지침·문맥 제한 | 21.4초 | 15,899 | 459 | 성공 |
 
 동일한 작은 가상 자료에서 입력 토큰이 약 25% 줄었다. 이는 본 검증 결과이며 실제 큰 보고서의 사용량을 보장하는 수치는 아니다. CLI 자체 문맥 비용은 남으므로 주차별 입력 중복 방지·한 작업씩 실행·본문 길이 제한·완료 결과 재사용을 함께 사용한다. 이 표는 Codex가 보고한 토큰 수이며 별도 API 청구 금액이 아니다.
+
+## 10. 운영 연결 검증
+
+2026-09-14 NAS 배포 후 HTTPS 서버와 이 Mac을 연결했다. 토마토(적색)·전라북도 장수군의 지난 완결 주 자료로 한 번 생성해 SUCCEEDED/DRAFT를 확인했다. 소요 37.8초, 입력 17,163 / 출력 894 / 캐시 0 토큰이다. 동일 입력을 다시 요청해도 작업은 한 건·시도 한 번으로 유지됐으며 워커는 추가 AI 호출 없이 종료했다.
+
+이 Mac에는 비공개 토큰 파일과 수동 실행기 `~/.config/retirefarm/run-briefing-worker.command`를 설치했다. 실행기는 현재 저장소와 Node/Codex 설치 경로를 참조하므로 경로 변경 시 갱신한다. 예약은 등록하지 않았다.
+
+종료 코드 4 뒤에는 먼저 앱의 저장 상태를 확인한다. 같은 실행 안에서는 결과만 재전송하지만, lease 만료 뒤 워커를 다시 실행하면 서버가 작업을 재할당해 AI를 다시 호출할 수 있다. 자동 반복 실행 전에 보관 결과 재전송 기능을 추가해야 한다.
