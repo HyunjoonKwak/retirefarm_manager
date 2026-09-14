@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { discoveryRequestSchema, normalizeDiscoveryQuery, type DiscoveryOverview, type DiscoveryRequest, type RankedDiscoveryCandidate } from "@/lib/briefing/discovery-contracts";
 import type { CollectionJob } from "@/lib/briefing/collection-contracts";
 import { CollectionQueue } from "./CollectionQueue";
@@ -19,6 +20,23 @@ async function readResponse(response: Response) {
   const body = await response.json();
   if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "후보 자료를 처리하지 못했습니다.");
   return body;
+}
+const MAX_CAPTURE_BYTES = 256 * 1024;
+const isSearchCapture = (raw: unknown) => typeof raw === "object" && raw !== null && (raw as { schemaVersion?: unknown }).schemaVersion === "retirefarm-visible-search-v1";
+// Shared by file import and pasted text: schema/freshness checks plus the selected-job query and start-time guard.
+function readJobCapture(raw: unknown, job: CollectionJob | null): SearchCapture {
+  const next = readSearchCapture(raw);
+  if (job && (normalizeDiscoveryQuery(next.query) !== normalizeDiscoveryQuery(job.query) || !job.startedAt || new Date(next.capturedAt) < new Date(job.startedAt)))
+    throw new Error("선택한 작업과 검색어가 같고 작업 시작·재개 후에 수집한 자료를 가져오세요.");
+  return next;
+}
+function parsePastedCapture(text: string): unknown {
+  if (!text.trim()) throw new Error("검색 화면 수집 JSON을 붙여넣어 주세요.");
+  if (new TextEncoder().encode(text).length > MAX_CAPTURE_BYTES) throw new Error("붙여넣은 자료는 256KB 이하만 미리볼 수 있습니다. 검색 화면을 다시 수집해 주세요.");
+  let raw: unknown;
+  try { raw = JSON.parse(text); } catch { throw new Error("붙여넣은 내용이 올바른 JSON이 아닙니다."); }
+  if (!isSearchCapture(raw)) throw new Error("붙여넣기는 검색 화면 수집 JSON(retirefarm-visible-search-v1)만 미리볼 수 있습니다. 다른 후보 파일은 파일 가져오기를 사용하세요.");
+  return raw;
 }
 
 function CandidateCard({ candidate: c, busy, fixed, onUse, onDecision }: { candidate: RankedDiscoveryCandidate; busy: boolean; fixed: boolean;
@@ -57,6 +75,7 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [capture, setCapture] = useState<SearchCapture | null>(null);
+  const [pasted, setPasted] = useState("");
   const [selectedJob, setSelectedJob] = useState<CollectionJob | null>(null);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const selectJob = useCallback((job: CollectionJob | null) => { setSelectedJob(job); setCapture(null); }, []);
@@ -90,19 +109,21 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
     if (!file) return;
     setError("");
     try {
-      if (file.size > 256 * 1024) throw new Error("후보 파일은 256KB 이하만 가져올 수 있습니다.");
+      if (file.size > MAX_CAPTURE_BYTES) throw new Error("후보 파일은 256KB 이하만 가져올 수 있습니다.");
       const raw = JSON.parse(await file.text());
-      if (raw?.schemaVersion === "retirefarm-visible-search-v1") {
-        const next = readSearchCapture(raw);
-        if (selectedJob && (normalizeDiscoveryQuery(next.query) !== normalizeDiscoveryQuery(selectedJob.query) || !selectedJob.startedAt || new Date(next.capturedAt) < new Date(selectedJob.startedAt)))
-          throw new Error("선택한 작업과 검색어가 같고 작업 시작·재개 후에 수집한 파일을 가져오세요.");
-        setCapture(next); return;
-      }
+      if (isSearchCapture(raw)) { setCapture(readJobCapture(raw, selectedJob)); return; }
       if (selectedJob) throw new Error("작업에 연결하려면 검색 화면 수집 파일을 가져오세요. 일반 입력은 작업 연결을 해제한 뒤 사용합니다.");
       const parsed = discoveryRequestSchema.safeParse(raw);
       if (!parsed.success || parsed.data.action !== "import") throw new Error("검색 후보 파일 형식이 다릅니다. 상품 가격 수집 파일은 고정 패널에서 가져오세요.");
       await mutate(parsed.data);
     } catch (e) { setError(e instanceof Error ? e.message : "파일을 읽지 못했습니다."); }
+  };
+  // Editing the pasted text drops any open preview so a stale capture can never be saved.
+  const editPasted = (value: string) => { setPasted(value); setCapture(null); setError(""); };
+  const previewPasted = () => {
+    setError(""); setNotice(""); setCapture(null);
+    try { setCapture(readJobCapture(parsePastedCapture(pasted), selectedJob)); setPasted(""); }
+    catch (e) { setError(e instanceof Error ? e.message : "붙여넣은 자료를 읽지 못했습니다."); }
   };
   const candidates = data?.candidates ?? [];
   const visible = candidates.filter(c => filter === "ALL" || (filter === "EXCLUDED" ? c.status === "EXCLUDED" : c.recommended));
@@ -135,6 +156,10 @@ function DiscoveryContent({ onUse, fixedStoreKeys }: { onUse: (draft: PanelDraft
       </form>
       <div className="mt-4 space-y-2"><Label htmlFor="discovery-file">검색 후보 JSON 파일 가져오기</Label><Input id="discovery-file" type="file" accept=".json,application/json" disabled={busy} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; void importFile(file); }} />
         <p className="text-xs text-muted-foreground">네이버플러스 검색 화면에서 수집 도구를 실행해 저장한 JSON을 선택하세요. 상품 가격 수집 파일은 고정 패널에서 가져옵니다.</p></div>
+      <div className="mt-4 space-y-2"><Label htmlFor="discovery-paste">검색 화면 수집 JSON 붙여넣기 (선택)</Label>
+        <Textarea id="discovery-paste" rows={4} disabled={busy} value={pasted} spellCheck={false} placeholder='{"schemaVersion":"retirefarm-visible-search-v1", ...}' onChange={e => editPasted(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" size="sm" disabled={busy || !pasted.trim()} onClick={previewPasted}>붙여넣은 자료 미리보기</Button>
+          <p className="text-xs text-muted-foreground">수집 도구에서 복사한 검색 자료를 붙여넣으세요. 미리보기에서 검토 후 저장할 수 있습니다. 미리보기를 열면 입력란을 비웁니다.</p></div></div>
     </details>
     {capture && <SearchCaptureReview key={`${capture.sourceUrl}-${capture.capturedAt}-${selectedJob?.id ?? ""}-${selectedJob?.version ?? ""}`} capture={capture} collectionJob={selectedJob ?? undefined} busy={busy} onSave={mutate} onCancel={() => setCapture(null)} />}
     <div className="flex flex-wrap items-center gap-3">
