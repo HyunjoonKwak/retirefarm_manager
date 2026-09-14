@@ -63,6 +63,7 @@ export function CompetitorPanelForm({ initial, busy, fromCandidate, onSubmit, on
       <h3 id="competitor-panel-heading" className="font-semibold">고정 패널 추가 (수동 확인)</h3>
       {fromCandidate && <span className="text-xs text-muted-foreground">검색 후보에서 채운 값입니다. 상품 페이지와 대조해 수정하세요.</span>}
     </div>
+    <p className="text-xs text-muted-foreground">판매처 30곳, 판매처마다 최대 10개 옵션을 추적합니다. 같은 상품 주소·옵션명·중량은 중복 등록할 수 없습니다. 기존 옵션의 비교 조건을 정정하려면 해당 옵션을 보관하고 다시 등록하세요.</p>
     <div className="grid gap-3 sm:grid-cols-2">
       <div><Label htmlFor="panel-store">판매처 이름</Label>
         <Input id="panel-store" value={draft.storeName} maxLength={100} disabled={busy} onChange={e => update({ storeName: e.target.value })} /></div>

@@ -50,7 +50,7 @@ describe("representative price threshold", () => {
     const two = summarizeCompetitors(healthyPanel().slice(0, 2), now);
     expect(two[0]).toMatchObject({ count: 2, medianDeliveredPrice: null, min: null, max: null, previousWeekChangePct: null });
   });
-  it("never counts the same store twice even if two entries slip through", () => {
+  it("never counts the same store twice even when it has several options in the group", () => {
     const dup = entry("a", [obs(0, 50000)]);
     const [group] = summarizeCompetitors([...healthyPanel().slice(0, 2), dup], now);
     expect(group.count).toBe(2);
@@ -183,6 +183,75 @@ describe("confirmed option identity (cultivar, color, mixture, processing)", () 
     expect(summarizeCompetitors(twoPaired, now)[0]).toMatchObject({ count: 3, pairedCount: 2, previousWeekChangePct: null });
     const dup = entry("a", [obs(0, 50000)]);
     expect(summarizeCompetitors([...healthyPanel().slice(0, 2), dup], now)[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
+  });
+});
+
+describe("one sample per store across several options", () => {
+  /** Two stores at the baseline plus one store with two options, so the chosen option decides count 3 and min/max. */
+  const two = () => healthyPanel().slice(0, 2);
+  it("chooses the option with the latest eligible observation, not the cheapest one", () => {
+    const cheapOld = entry("c", [obs(3, 5000)], { id: "e-c-cheap" });
+    const pricyNew = entry("c", [obs(1, 30000)], { id: "e-c-pricy" });
+    for (const order of [[cheapOld, pricyNew], [pricyNew, cheapOld]]) {
+      const [group] = summarizeCompetitors([...two(), ...order], now);
+      expect(group).toMatchObject({ count: 3, max: 33000, min: 13000, medianDeliveredPrice: 15000 });
+    }
+  });
+  it("breaks an observedAt tie by the smaller entry id regardless of input order or price", () => {
+    const smallerId = entry("c", [obs(1, 40000)], { id: "e-c-1" });
+    const largerId = entry("c", [obs(1, 20000)], { id: "e-c-2" });
+    for (const order of [[smallerId, largerId], [largerId, smallerId]]) {
+      const [group] = summarizeCompetitors([...two(), ...order], now);
+      expect(group).toMatchObject({ count: 3, max: 43000 });
+    }
+  });
+  it("lets a valid option stand in when the store's other option is out of stock, unknown, unpriced, stale or unrecorded", () => {
+    const valid = entry("c", [obs(2, 14000)], { id: "e-c-valid" });
+    const shadows = [entry("c", [obs(0, null, null, "OUT_OF_STOCK")], { id: "e-c-a" }), entry("c", [obs(0, 100, 0, "UNKNOWN")], { id: "e-c-b" }),
+      entry("c", [obs(0, 100, null)], { id: "e-c-c" }), entry("c", [obs(0, 0, 0)], { id: "e-c-d" }), entry("c", [obs(8, 100)], { id: "e-c-e" }),
+      entry("c", [], { id: "e-c-f" }), entry("c", [obs(-1, 99999)], { id: "e-c-g" })];
+    for (const shadow of shadows) {
+      const [group] = summarizeCompetitors([...two(), shadow, valid], now);
+      expect(group, shadow.id).toMatchObject({ count: 3, max: 17000, medianDeliveredPrice: 15000 });
+    }
+    const [group] = summarizeCompetitors([...two(), ...shadows, valid], now);
+    expect(group).toMatchObject({ count: 3, max: 17000 });
+    expect(summarizeCompetitors([...two(), ...shadows], now)[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
+  });
+  it("still lets a newer stock-out hide the older price of the same option", () => {
+    const soldOut = entry("c", [obs(0, null, null, "OUT_OF_STOCK"), obs(1, 14000)], { id: "e-c-soldout" });
+    expect(summarizeCompetitors([...two(), soldOut], now)[0]).toMatchObject({ count: 2, medianDeliveredPrice: null });
+    const sibling = entry("c", [obs(3, 14000)], { id: "e-c-sibling" });
+    expect(summarizeCompetitors([...two(), soldOut, sibling], now)[0]).toMatchObject({ count: 3, max: 17000 });
+  });
+  it("pairs the prior week with the very same selected option, never with a sibling option's prior", () => {
+    // Selected (latest) option has no prior; the sibling has one: the store must not be paired.
+    const selectedNoPrior = entry("c", [obs(0, 14000)], { id: "e-c-selected" });
+    const siblingWithPrior = entry("c", [obs(3, 14000), obs(7, 16000)], { id: "e-c-sibling" });
+    const [unpaired] = summarizeCompetitors([...two(), selectedNoPrior, siblingWithPrior], now);
+    expect(unpaired).toMatchObject({ count: 3, max: 17000, pairedCount: 2, previousWeekChangePct: null });
+    // Selected option has its own prior: paired with that prior, and the sibling's prior is ignored.
+    const selectedWithPrior = entry("c", [obs(0, 14000), obs(7, 16000)], { id: "e-c-selected" });
+    const siblingOtherPrior = entry("c", [obs(3, 14000), obs(7, 1000)], { id: "e-c-sibling" });
+    const [paired] = summarizeCompetitors([...two(), selectedWithPrior, siblingOtherPrior], now);
+    expect(paired).toMatchObject({ count: 3, pairedCount: 3 });
+    // current paired [13000,15000,17000] vs prior [12000,15000,19000] -> 0%, exactly like the healthy panel
+    expect(paired.previousWeekChangePct).toBeCloseTo(0);
+  });
+  it("selects per group, so one store can contribute to two different weight groups with different options", () => {
+    const heavy = [entry("a", [obs(0, 20000)], { packageKg: 5 }), entry("b", [obs(0, 22000)], { packageKg: 5 }), entry("c", [obs(0, 24000)], { packageKg: 5 })];
+    const groups = summarizeCompetitors([...healthyPanel(), ...heavy], now);
+    expect(groups.map(g => [g.packageKg, g.count, g.medianDeliveredPrice])).toEqual([[2, 3, 15000], [5, 3, 25000]]);
+  });
+  it("keeps identity gating per option: an unconfirmed sibling never joins, and a confirmed sibling of another identity forms its own group", () => {
+    const unconfirmed = entry("c", [obs(0, 14000)], { cultivarName: "", id: "e-c-unconfirmed" });
+    const orange = entry("c", [obs(0, 14000)], { color: "ORANGE", id: "e-c-orange" });
+    const groups = summarizeCompetitors([...two(), unconfirmed, orange], now);
+    expect(groups.map(g => [g.color, g.count, g.medianDeliveredPrice])).toEqual([["RED", 2, null], ["ORANGE", 1, null]]);
+  });
+  it("keeps the three-store threshold: three options of one store are still one store", () => {
+    const options = [entry("a", [obs(0, 10000)], { id: "e-a-1" }), entry("a", [obs(0, 12000)], { id: "e-a-2" }), entry("a", [obs(0, 14000)], { id: "e-a-3" })];
+    expect(summarizeCompetitors(options, now)[0]).toMatchObject({ count: 1, medianDeliveredPrice: null, pairedCount: 0 });
   });
 });
 

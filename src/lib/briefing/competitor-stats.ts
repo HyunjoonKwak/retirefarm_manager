@@ -32,16 +32,26 @@ function identityOf(entry: CompetitorEntry): OptionIdentity|null {
   if (!cultivarName || !COMPARABLE_COLORS.has(color) || !COMPARABLE_MIXTURES.has(mixture) || !COMPARABLE_PROCESSING.has(processing)) return null;
   return { cultivarName, color: color as keyof typeof colorLabels, mixture: mixture as keyof typeof mixtureLabels, processing: processing as keyof typeof processingLabels };
 }
+/** One option's eligible current sample plus the prior sample of that same option; never mixed with a sibling option. */
+interface Sample { entryId: string; observedAt: number; current: number; prior: number|null }
 interface GroupAccumulator {
   label: string; packageKg: number; sizeGrade: string; sizeCriteria: string; cultivarName: string; color: string; mixture: string; processing: string;
-  prices: number[]; current: number[]; prior: number[]; stores: Set<string>;
+  candidates: Map<string, Sample[]>;
+}
+/**
+ * A store contributes one sample per group: the option whose eligible current observation is the most recent, ties broken by the
+ * smaller entry id. Cheapness is never a criterion, and an ineligible sibling (stock-out, unknown shipping, no record) never shadows an eligible one.
+ */
+function selectSample(samples: Sample[]): Sample {
+  return samples.reduce((best, sample) =>
+    sample.observedAt > best.observedAt || (sample.observedAt === best.observedAt && sample.entryId < best.entryId) ? sample : best);
 }
 function labelOf(entry: CompetitorEntry, identity: OptionIdentity, size: NonNullable<ReturnType<typeof sizeOf>>): string {
   return [entry.productName, varietyLabels[entry.varietyGroup as keyof typeof varietyLabels], identity.cultivarName, colorLabels[identity.color],
     mixtureLabels[identity.mixture], processingLabels[identity.processing], qualityLabels[entry.qualityGroup as keyof typeof qualityLabels],
     `${entry.packageKg}kg`, `${sizeLabels[size.grade]} (${size.criteria})`].join(" · ");
 }
-/** Compare confirmed fixed options only. Stock-outs and unknown shipping never become zero. */
+/** Compare confirmed fixed options only. Stock-outs and unknown shipping never become zero; one sample per store per group. */
 export function summarizeCompetitors(entries: CompetitorEntry[], now = new Date()): CompetitorGroup[] {
   const at = now.getTime();
   const groups = new Map<string, GroupAccumulator>();
@@ -52,25 +62,25 @@ export function summarizeCompetitors(entries: CompetitorEntry[], now = new Date(
     if (!size || !identity) continue;
     const key = JSON.stringify([entry.productName, entry.varietyGroup, entry.qualityGroup, entry.packageKg, size.grade, size.criteria,
       identity.cultivarName, identity.color, identity.mixture, identity.processing]);
-    let group = groups.get(key);
-    if (!group) {
-      group = { label: labelOf(entry, identity, size), packageKg: entry.packageKg, sizeGrade: size.grade, sizeCriteria: size.criteria, ...identity,
-        prices: [], current: [], prior: [], stores: new Set() };
-      groups.set(key, group);
-    }
-    if (group.stores.has(entry.storeKey)) continue;
-    group.stores.add(entry.storeKey);
-    const current = delivered(latest(entry, at), at);
-    if (current === null) continue;
-    group.prices.push(current);
-    const prior = delivered(latest(entry, at-WEEK), at-WEEK);
-    if (prior !== null) { group.current.push(current); group.prior.push(prior); }
+    const group = groups.get(key) ?? { label: labelOf(entry, identity, size), packageKg: entry.packageKg, sizeGrade: size.grade, sizeCriteria: size.criteria,
+      ...identity, candidates: new Map<string, Sample[]>() };
+    groups.set(key, group);
+    const latestCurrent = latest(entry, at);
+    const current = delivered(latestCurrent, at);
+    if (current === null || !latestCurrent) continue;
+    const sample: Sample = { entryId: entry.id, observedAt: Date.parse(latestCurrent.observedAt), current, prior: delivered(latest(entry, at-WEEK), at-WEEK) };
+    group.candidates.set(entry.storeKey, [...(group.candidates.get(entry.storeKey) ?? []), sample]);
   }
-  return [...groups].map(([key,g]) => ({ key, label: g.label, packageKg: g.packageKg, sizeGrade: g.sizeGrade, sizeCriteria: g.sizeCriteria,
-    cultivarName: g.cultivarName, color: g.color, mixture: g.mixture, processing: g.processing, count: g.prices.length,
-    medianDeliveredPrice: g.prices.length >= 3 ? median(g.prices) : null,
-    min: g.prices.length >= 3 ? Math.min(...g.prices) : null, max: g.prices.length >= 3 ? Math.max(...g.prices) : null,
-    pairedCount: g.prior.length,
-    previousWeekChangePct: g.prior.length >= 3 ? (median(g.current)/median(g.prior)-1)*100 : null,
-  }));
+  return [...groups].map(([key,g]) => {
+    const chosen = [...g.candidates.values()].map(selectSample);
+    const prices = chosen.map(s => s.current);
+    const paired = chosen.filter((s): s is Sample & { prior: number } => s.prior !== null);
+    return { key, label: g.label, packageKg: g.packageKg, sizeGrade: g.sizeGrade, sizeCriteria: g.sizeCriteria,
+      cultivarName: g.cultivarName, color: g.color, mixture: g.mixture, processing: g.processing, count: prices.length,
+      medianDeliveredPrice: prices.length >= 3 ? median(prices) : null,
+      min: prices.length >= 3 ? Math.min(...prices) : null, max: prices.length >= 3 ? Math.max(...prices) : null,
+      pairedCount: paired.length,
+      previousWeekChangePct: paired.length >= 3 ? (median(paired.map(s => s.current))/median(paired.map(s => s.prior))-1)*100 : null,
+    };
+  });
 }

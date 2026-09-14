@@ -19,6 +19,14 @@ export const processingGroups = ["FRESH", "STEVIA", "XYLITOL", "OTHER", "UNKNOWN
 export type ProcessingGroup = (typeof processingGroups)[number];
 /** Seller-stated cultivar name (e.g. 대저, 스텔라) copied verbatim after trimming; empty means not confirmed. */
 export const CULTIVAR_NAME_MAX = 100;
+/** Panel caps: distinct active stores per user, and active options per store. Options are counted per store, never per user. */
+export const MAX_ACTIVE_STORES = 30;
+export const MAX_ACTIVE_OPTIONS_PER_STORE = 10;
+/** Overview read caps: active rows come first so every active option (at most 30 x 10) is always visible; the rest is archived history. */
+export const PANEL_READ_CAP = 500;
+export const PANEL_ACTIVE_READ_CAP = MAX_ACTIVE_STORES * MAX_ACTIVE_OPTIONS_PER_STORE;
+/** Active legacy rows are backfilled with this prefix + row id by the multi-option migration; they never collide with SHA-256 option keys. */
+export const LEGACY_OPTION_KEY_PREFIX = "legacy:";
 /** Naver's official Shopping Search API was terminated on this date; the search action is kept only to answer 410. */
 export const SEARCH_RETIRED_ON = "2026-07-31";
 export const SEARCH_RETIRED_MESSAGE = `네이버 공식 쇼핑검색 API가 ${SEARCH_RETIRED_ON}에 종료되어 새 검색은 지원하지 않습니다. 이전 검색 결과는 열람만 가능합니다.`;
@@ -53,6 +61,8 @@ export interface CompetitorEntry {
   sizeGrade?: string; sizeCriteria?: string;
   /** Optional for the same reason; missing values are treated as unconfirmed ("" / UNKNOWN). */
   cultivarName?: string; color?: string; mixture?: string; processing?: string;
+  /** Active markers: activeStoreKey is the legacy per-store marker, activeOptionKey the unique active option identity (both null once archived). */
+  activeStoreKey?: string|null; activeOptionKey?: string|null;
   archivedAt: string|null; archiveReason: string|null; observations: CompetitorObservation[];
 }
 export interface CompetitorGroup {
@@ -63,7 +73,9 @@ export interface CompetitorGroup {
 }
 export interface CompetitorOverview {
   /** Always false since the search API retirement; kept so older clients keep rendering the read-only search history. */
-  configured: boolean; searchRetiredOn: string; asOf: string; target: number; activeCount: number;
+  configured: boolean; searchRetiredOn: string; asOf: string; target: number;
+  /** Distinct active stores (the 30-store cap counts these); activeOptionCount is the number of active option rows across those stores. */
+  activeCount: number; activeOptionCount?: number;
   latestSearch: { id: string; createdAt: string; status: string; errorCode: string|null; result: ShoppingSearchResult|null }|null;
   entries: CompetitorEntry[]; groups: CompetitorGroup[];
   limitations: string[];

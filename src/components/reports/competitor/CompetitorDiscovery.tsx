@@ -61,7 +61,7 @@ function CandidateCard({ candidate: c, busy, fixed, onUse, onDecision }: { candi
       {c.evidence.length > 20 && <p>화면에는 최근 20건을 표시합니다.</p>}
     </details>
     <div className="flex flex-wrap gap-2">
-      <Button type="button" variant="outline" size="sm" disabled={busy || fixed || c.status === "EXCLUDED"} onClick={() => onUse({ ...emptyPanelDraft, storeName: c.storeName, productUrl: c.productUrl })}>비교 등록 양식 채우기</Button>
+      <Button type="button" variant="outline" size="sm" disabled={busy || c.status === "EXCLUDED"} onClick={() => onUse({ ...emptyPanelDraft, storeName: c.storeName, productUrl: c.productUrl })}>{fixed ? "다른 옵션 등록 양식 채우기" : "비교 등록 양식 채우기"}</Button>
       <Input aria-label={`${c.storeName} 선정·제외 사유`} value={reason} maxLength={500} disabled={busy} onChange={e => setReason(e.target.value)} placeholder="선정·제외 사유" className="max-w-xs" />
       <Button type="button" variant="ghost" size="sm" disabled={busy || !reason.trim()} onClick={() => void onDecision({ action: "decision", candidateId: c.id,
         status: c.status === "EXCLUDED" ? "WATCH" : "EXCLUDED", reason: reason.trim() }).then(ok => { if (ok) setReason(""); })}>{c.status === "EXCLUDED" ? "판매처 다시 검토" : "판매처 추천 제외"}</Button>

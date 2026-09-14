@@ -17,12 +17,12 @@ import { VisiblePriceImport } from "./VisiblePriceImport";
 export type RecordRequest = Extract<CompetitorRequest, { action: "record" }>;
 export type ArchiveRequest = Extract<CompetitorRequest, { action: "archive" }>;
 
-interface Props { entry: CompetitorEntry; busy: boolean; onRecord: (request: RecordRequest) => Promise<boolean>; onArchive: (request: ArchiveRequest) => void }
+interface Props { entry: CompetitorEntry; busy: boolean; onRecord: (request: RecordRequest) => Promise<boolean>; onArchive: (request: ArchiveRequest) => void; onAddOption?: () => void }
 
 const groupLabel = (key: string, labels: Record<string, string>) => labels[key] ?? key;
 
 /** One fixed panel: latest manual observation, full history, and the record/archive forms. */
-export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props) {
+export function CompetitorEntryCard({ entry, busy, onRecord, onArchive, onAddOption }: Props) {
   const latest = latestObservation(entry);
   const archived = entry.archivedAt !== null;
   const delivered = latest ? deliveredPrice(latest) : null;
@@ -54,6 +54,7 @@ export function CompetitorEntryCard({ entry, busy, onRecord, onArchive }: Props)
       </ul>
     </details>}
     {!archived && <>
+      {onAddOption && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onAddOption}>이 판매처의 다른 옵션 추가</Button>}
       <RecordForm entry={entry} busy={busy} onRecord={onRecord} />
       <ArchiveForm entryId={entry.id} busy={busy} onArchive={onArchive} />
     </>}

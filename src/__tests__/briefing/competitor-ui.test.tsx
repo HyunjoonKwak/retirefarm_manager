@@ -158,7 +158,7 @@ it("archives with a reason, keeps history visible, and surfaces server errors", 
   fireEvent.click(screen.getByRole("button", { name: "보관" }));
   await screen.findByText(/고정 패널 0곳 \/ 목표 30곳/);
   expect(postBodies(fetch)).toEqual([{ action: "archive", entryId: "e1", reason: "판매 종료" }]);
-  fireEvent.click(screen.getByRole("button", { name: "보관된 패널 1곳 보기" }));
+  fireEvent.click(screen.getByRole("button", { name: "보관된 옵션 1개 보기" }));
   const card = screen.getByText("보관됨").closest("li") as HTMLElement;
   expect(within(card).getByText(/사유: 판매 종료/)).toBeInTheDocument();
   expect(within(card).getByText("관측 이력 2건")).toBeInTheDocument();
@@ -290,4 +290,21 @@ it("renders legacy identity as unknown without inventing a cultivar or processin
   await screen.findByText(/고정 패널 1곳 \/ 목표 30곳/);
   expect(screen.getByText(/품종명 미확인 · 색상 미확인/)).toBeInTheDocument();
   expect(screen.getByText(/집계할 그룹이 아직 없습니다/)).toHaveTextContent(/단일 품종/);
+});
+
+
+it("counts stores separately from options and starts another option without copying its assumptions", async () => {
+  const fetch = stubFetch(() => ok(overview({ activeCount: 1, activeOptionCount: 2, entries: [entry({ cultivarName: "루체", color: "RED", processing: "FRESH", mixture: "SINGLE" }), entry({ id: "e2", packageKg: 3, optionLabel: "3kg", observations: [] })] })));
+  render(<CompetitorResearch />);
+  expect(await screen.findByText(/고정 패널 1곳 \/ 목표 30곳 · 추적 옵션 2개/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "추적 옵션 2개 · 점포 1곳" })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "이 판매처의 다른 옵션 추가" })[0]);
+  expect(screen.getByLabelText("판매처 이름")).toHaveValue("농장B");
+  expect(screen.getByLabelText("스마트스토어 상품 URL")).toHaveValue("https://smartstore.naver.com/farmb/products/9");
+  expect(screen.getByLabelText("상품·옵션명 (상품 페이지 표기 그대로)")).toHaveValue("");
+  expect(screen.getByLabelText("포장 중량 (kg)")).toHaveValue("");
+  expect(screen.getByLabelText("확인한 품종명")).toHaveValue("");
+  for (const label of ["과실 색상", "품종 혼합 여부", "가공 여부"]) expect(screen.getByLabelText(label)).toHaveValue("UNKNOWN");
+  expect(screen.getByRole("button", { name: "패널에 추가" })).toBeDisabled();
+  expect(postBodies(fetch)).toEqual([]);
 });

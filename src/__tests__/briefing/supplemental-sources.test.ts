@@ -40,3 +40,12 @@ describe("supplemental sources", () => {
     expect(result.sources[0].status).toBe("AVAILABLE");
   });
 });
+
+
+it("reports distinct stores and option counts without inflating the comparison sample", async () => {
+  mocks.overview.mockResolvedValue({ activeCount: 3, activeOptionCount: 9, groups: [{ label: "루체 빨강 2kg", count: 3, medianDeliveredPrice: 18000, previousWeekChangePct: null }] });
+  const result = await supplementalSources("owner", start, end, now);
+  expect(result.sources[0].note).toContain("활성 점포 3/30곳, 추적 옵션 9개");
+  expect(result.sources[0].note).toContain("그룹당 최신 유효 옵션 한 건");
+  expect(result.metrics.map(m => m.value)).toEqual([18000, 3]);
+});

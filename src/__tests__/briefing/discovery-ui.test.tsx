@@ -36,10 +36,10 @@ it("loads only when opened, shows honest automation state and prefills no option
   expect(bodies(fetch)).toEqual([]);
 });
 
-it("does not offer duplicate fixed-store registration", async () => {
+it("offers another option for an existing fixed store without preconfirming it", async () => {
   stub(); await open({ fixedStoreKeys: [candidate.storeKey] });
   await screen.findByText("고정 비교 중");
-  expect(screen.getByRole("button", { name: "비교 등록 양식 채우기" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "다른 옵션 등록 양식 채우기" })).toBeEnabled();
 });
 
 it("requires a reason before excluding a seller and sends only a decision", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { CompetitorOverview, CompetitorRequest } from "@/lib/briefing/competitor-contracts";
 import type { ShoppingCandidate } from "@/lib/briefing/naver-shopping";
@@ -44,6 +44,7 @@ export function CompetitorResearch() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<FormState>({ key: 0, draft: emptyPanelDraft, fromCandidate: false });
   const [showArchived, setShowArchived] = useState(false);
+  const panelFormRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -83,7 +84,7 @@ export function CompetitorResearch() {
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>새로고침</Button>
       </div>
       <p className="text-sm text-muted-foreground">브라우저에서 찾은 스마트스토어·브랜드스토어 상품을 등록하고, 선택 옵션의 화면 텍스트로 가격 기록을 도와드립니다. 확인한 품종명·색상·가공·크기 기준·중량이 같은 단일 품종 상품끼리 비교합니다.</p>
-      {data && <p className="text-sm">고정 패널 {data.activeCount}곳 / 목표 {data.target}곳 · 기준 시각 {dateTime(data.asOf)}</p>}
+      {data && <p className="text-sm">고정 패널 {data.activeCount}곳 / 목표 {data.target}곳 · 추적 옵션 {data.activeOptionCount ?? active.length}개 · 기준 시각 {dateTime(data.asOf)}</p>}
       {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
       {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
       {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
@@ -97,10 +98,11 @@ export function CompetitorResearch() {
     <CompetitorDiscovery fixedStoreKeys={active.map(entry => entry.storeKey)} onUse={draft => {
       setForm(current => ({ key: current.key + 1, draft, fromCandidate: true }));
       setNotice("추천 후보의 판매처와 주소를 채웠습니다. 상품 페이지에서 옵션·중량·크기 기준을 확인하고 등록하세요.");
+      panelFormRef.current?.scrollIntoView?.({ block: "start" });
     }} />
 
-    <CompetitorPanelForm key={form.key} initial={form.draft} busy={busy || !data} fromCandidate={form.fromCandidate}
-      onSubmit={request => void mutate(request, "고정 패널에 추가했습니다. 확인한 가격을 기록해 주세요.")} onReset={resetForm} />
+    <div ref={panelFormRef}><CompetitorPanelForm key={form.key} initial={form.draft} busy={busy || !data} fromCandidate={form.fromCandidate}
+      onSubmit={request => void mutate(request, "고정 패널에 추가했습니다. 확인한 가격을 기록해 주세요.")} onReset={resetForm} /></div>
 
     <section className="rounded-lg border p-4 space-y-3">
       <h3 className="font-semibold">그룹별 대표 가격</h3>
@@ -108,15 +110,20 @@ export function CompetitorResearch() {
     </section>
 
     <section className="space-y-3">
-      <h3 className="font-semibold">고정 패널 {active.length}곳</h3>
+      <h3 className="font-semibold">추적 옵션 {active.length}개 · 점포 {new Set(active.map(entry => entry.storeKey)).size}곳</h3>
       {data && active.length === 0 && <p className="text-sm text-muted-foreground">아직 등록한 패널이 없습니다. 위 양식에서 확인한 상품을 추가하세요.</p>}
       {active.length > 0 && <ul className="space-y-3">
         {active.map(entry => <CompetitorEntryCard key={entry.id} entry={entry} busy={busy}
+          onAddOption={() => {
+            setForm(current => ({ key: current.key + 1, draft: { ...emptyPanelDraft, storeName: entry.storeName, productUrl: entry.productUrl, productName: entry.productName }, fromCandidate: false }));
+            setNotice("같은 판매처의 다른 옵션을 등록할 준비가 됐습니다. 위 양식에서 새 옵션과 중량·비교 조건을 확인하세요.");
+            panelFormRef.current?.scrollIntoView?.({ block: "start" });
+          }}
           onRecord={request => mutate(request, "관측을 기록했습니다.")}
-          onArchive={request => void mutate(request, "패널에서 보관했습니다. 이력은 그대로 남습니다.")} />)}
+          onArchive={request => void mutate(request, "선택한 옵션을 보관했습니다. 다른 옵션과 관측 이력은 유지됩니다.")} />)}
       </ul>}
       {archived.length > 0 && <div className="space-y-3">
-        <Button variant="ghost" size="sm" onClick={() => setShowArchived(current => !current)}>{showArchived ? "보관된 패널 숨기기" : `보관된 패널 ${archived.length}곳 보기`}</Button>
+        <Button variant="ghost" size="sm" onClick={() => setShowArchived(current => !current)}>{showArchived ? "보관된 옵션 숨기기" : `보관된 옵션 ${archived.length}개 보기`}</Button>
         {showArchived && <ul className="space-y-3">
           {archived.map(entry => <CompetitorEntryCard key={entry.id} entry={entry} busy={busy}
             onRecord={request => mutate(request, "관측을 기록했습니다.")}

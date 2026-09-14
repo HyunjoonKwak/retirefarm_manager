@@ -562,7 +562,10 @@ model CompetitorPanelEntry {
   id String @id @default(cuid())
   userId String
   storeKey String
+  // Legacy per-store active marker (kept for older readers); several active options per store are allowed, so it is no longer unique.
   activeStoreKey String?
+  // SHA-256 of canonical productUrl + trimmed optionLabel + packageKg while active, "legacy:<id>" for rows backfilled by the migration, null once archived.
+  activeOptionKey String?
   storeName String
   productUrl String
   productName String @default("토마토")
@@ -581,7 +584,8 @@ model CompetitorPanelEntry {
   archiveReason String?
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   observations CompetitorPriceObservation[]
-  @@unique([userId, activeStoreKey])
+  @@unique([userId, activeOptionKey])
+  @@index([userId, activeStoreKey])
   @@index([userId, createdAt])
 }
 
