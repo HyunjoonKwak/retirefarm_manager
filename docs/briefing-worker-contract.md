@@ -41,3 +41,9 @@ sections는 각 key 정확히 한 번 총4개, actions 정확히3개. summary 1~
 complete는 RUNNING 상태·같은 credential/lease/inputHash를 유지하는 동안에는 lease 시간이 지났어도 원자적으로 수락한다. heartbeat/fail은 계속 유효 시간 안에서만 허용한다. 재할당·회전·폐기·재시도로 소유권이나 상태가 바뀌면 늦은 완료는 409/401이며 저장 결과를 새 lease에 붙이지 않는다.
 
 Mac은 토큰 파일 옆 비공개 `.state` 폴더를 사용한다. 실행 잠금, 작성 시작 체크포인트, 완료 요청 저장을 통해 불확실한 재실행을 차단한다. 같은 입력의 동시 enqueue는 기존 작업을 재사용하며 사용자별 활성 작업 상한은 트랜잭션에서 검사한다.
+
+## 선택적 수집 확인·기간 비교
+
+snapshot의 `analysis.version=1`은 기간별 수집 로그 확인과 동일 조건의 전주·직전 네 주 비교를 포함한다. 서버와 워커가 `scripts/briefing-analysis-schema.mjs`를 공유한다. 구버전 snapshot의 analysis 생략은 계속 허용한다. `changePct`는 비교 가능한 경우에만 제공하며 보류 상태에서 모델이 자체 계산하거나 시장 전체 추세로 일반화하지 않도록 지시한다. 상세 계산 규칙은 [기간 비교 기록](reviews/2026-09-14-briefing-comparison.md)을 따른다.
+
+사용자 API `POST /api/briefings`의 `{action:"preview",productName,variety?,origin?}`는 snapshot만 반환하고 작업·초안을 만들지 않는다. 기존 enqueue는 같은 분석을 입력에 포함한다. 기존 초안은 변경하지 않는다.
