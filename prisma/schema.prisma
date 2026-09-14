@@ -41,6 +41,8 @@ model User {
   competitorSearches CompetitorSearch[]
   competitorPanel CompetitorPanelEntry[]
   competitorObservations CompetitorPriceObservation[]
+  discoveryRuns CompetitorDiscoveryRun[]
+  discoveryCandidates CompetitorDiscoveryCandidate[]
 }
 
 // ==================== 스마트팜 준비 계획 ====================
@@ -592,4 +594,60 @@ model CompetitorPriceObservation {
   entry CompetitorPanelEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   @@index([userId, observedAt])
   @@index([entryId, observedAt])
+}
+
+model CompetitorDiscoveryRun {
+  id String @id @default(cuid())
+  userId String
+  contentHash String
+  evidenceCount Int
+  source String @default("MANUAL_PUBLIC_SEARCH")
+  policyVersion String
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidence CompetitorDiscoveryEvidence[]
+  @@unique([userId, contentHash])
+  @@index([userId, createdAt])
+}
+
+model CompetitorDiscoveryCandidate {
+  id String @id @default(cuid())
+  userId String
+  productUrl String
+  storeKey String
+  storeName String
+  title String
+  status String @default("WATCH")
+  decisionReason String?
+  lastSeenAt DateTime
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidence CompetitorDiscoveryEvidence[]
+  decisions CompetitorDiscoveryDecision[]
+  @@unique([userId, productUrl])
+  @@index([userId, lastSeenAt])
+}
+
+model CompetitorDiscoveryEvidence {
+  id String @id @default(cuid())
+  candidateId String
+  runId String
+  query String
+  observedAt DateTime
+  payload String
+  contentHash String
+  candidate CompetitorDiscoveryCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  run CompetitorDiscoveryRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@unique([candidateId, query, observedAt])
+  @@index([candidateId, observedAt])
+}
+
+model CompetitorDiscoveryDecision {
+  id String @id @default(cuid())
+  candidateId String
+  status String
+  reason String
+  createdAt DateTime @default(now())
+  candidate CompetitorDiscoveryCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  @@index([candidateId, createdAt])
 }

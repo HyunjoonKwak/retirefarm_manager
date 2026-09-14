@@ -9,6 +9,7 @@ import { CompetitorEntryCard } from "./competitor/CompetitorEntryCard";
 import { CompetitorGroupSummary } from "./competitor/CompetitorGroupSummary";
 import { CompetitorPanelForm, emptyPanelDraft, type PanelDraft } from "./competitor/CompetitorPanelForm";
 import { CaptureExtensionHelp } from "./competitor/CaptureExtensionHelp";
+import { CompetitorDiscovery } from "./competitor/CompetitorDiscovery";
 import { CompetitorSearchPanel } from "./competitor/CompetitorSearchPanel";
 import { dateTime } from "./competitor/competitor-utils";
 
@@ -92,6 +93,11 @@ export function CompetitorResearch() {
       onUseCandidate={useCandidate} />
 
     <CaptureExtensionHelp />
+
+    <CompetitorDiscovery fixedStoreKeys={active.map(entry => entry.storeKey)} onUse={draft => {
+      setForm(current => ({ key: current.key + 1, draft, fromCandidate: true }));
+      setNotice("추천 후보의 판매처와 주소를 채웠습니다. 상품 페이지에서 옵션·중량·크기 기준을 확인하고 등록하세요.");
+    }} />
 
     <CompetitorPanelForm key={form.key} initial={form.draft} busy={busy || !data} fromCandidate={form.fromCandidate}
       onSubmit={request => void mutate(request, "고정 패널에 추가했습니다. 확인한 가격을 기록해 주세요.")} onReset={resetForm} />
