@@ -34,6 +34,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { await m.db.$disconnect(); rmSync(dir, { recursive: true, force: true }); });
 async function setup() {
+  await m.db.auctionResult.create({ data: { productName: "토마토", variety: "대추", origin: "평택", grade: "특", unit: "3kg",
+    corporation: "서울청과", corporationCode: "11000101", price: 10000, quantity: 1, auctionDate: new Date("2026-09-08T00:00:00+09:00") } });
   const token = await issueWorkerToken("owner"); const credential = (await authenticateWorker(`Bearer ${token}`))!;
   const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
   const run = await enqueueBriefing("owner", snapshot);
@@ -301,4 +303,22 @@ it("rejects a late completion once the job was re-claimed, retried, or rotated a
   await expect(complete(third, later)).rejects.toMatchObject({ status: 401 });
   expect(await m.db.weeklyBriefing.count()).toBe(0);
   expect(await m.db.briefingRun.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ status: "BLOCKED", leaseToken: null });
+});
+
+it("rejects empty-data generation but preserves preview, and blocks legacy empty jobs without an AI attempt", async () => {
+  const response = await POST(new Request("http://localhost/api/briefings", { method: "POST", body: JSON.stringify({ action: "enqueue", productName: "토마토", variety: "없는 이름" }) }));
+  expect(response.status).toBe(400);
+  expect(await m.db.briefingRun.count()).toBe(0);
+  const token = await issueWorkerToken("owner");
+  const credential = (await authenticateWorker(`Bearer ${token}`))!;
+  const snapshot = await buildSnapshot("owner", { productName: "토마토" }, now);
+  const legacy = await enqueueBriefing("owner", snapshot);
+  expect(await handleWorker(credential, { action: "claim" }, now)).toEqual({ job: null });
+  expect(await m.db.briefingRun.findUniqueOrThrow({ where: { id: legacy.id } })).toMatchObject({
+    status: "BLOCKED", lastError: "NO_MARKET_DATA", attempts: 0, leaseToken: null, credentialId: null, snapshot: JSON.stringify(snapshot),
+  });
+  expect((await POST(new Request("http://localhost/api/briefings", { method: "POST", body: JSON.stringify({ action: "retry", jobId: legacy.id }) }))).status).toBe(409);
+  expect(await m.db.weeklyBriefing.count()).toBe(0);
+  const valid = await setup();
+  expect((await claim(valid.credential)).id).toBe(valid.run.id);
 });

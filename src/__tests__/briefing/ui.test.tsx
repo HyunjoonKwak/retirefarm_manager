@@ -139,3 +139,13 @@ it("renders model text as text and exposes missing data and retry status", async
   expect(screen.getByText("Codex 사용량 한도 회복 후 재시도해 주세요.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "연결 확인 후 재시도" })).toBeInTheDocument();
 });
+it("explains empty-data blocks and does not offer a retry of the same empty snapshot", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => ok(url.includes("/facets?") ? facetBody([], []) : {
+    ...emptyList, runs: [{ id: "empty", status: "BLOCKED", lastError: "NO_MARKET_DATA",
+      snapshot: { periodStart: "2026-09-06T15:00:00Z", limitations: [], sources: [], metrics: [] }, briefing: null }],
+  })));
+  render(<WeeklyBriefing />);
+  expect(await screen.findByText(/지난주 유효 거래가 없어 AI 작성을 보류/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /자료 확인 필요/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "연결 확인 후 재시도" })).not.toBeInTheDocument();
+});

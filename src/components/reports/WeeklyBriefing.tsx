@@ -14,7 +14,7 @@ interface Run { id: string; status: string; attempts: number; lastError: string 
   snapshot: BriefingSnapshot; briefing: { body: BriefingResult; status: string } | null }
 interface Data { runs: Run[]; worker: { configured: boolean; lastSeenAt: string | null } }
 const statusNames: Record<string, string> = { PENDING: "워커 대기", RUNNING: "작성 중", SUCCEEDED: "초안 저장됨", BLOCKED: "연결 확인 필요", FAILED: "작성 실패" };
-const errorNames: Record<string, string> = { AUTH_REQUIRED: "Mac의 ChatGPT 로그인 또는 워커 연결을 확인해 주세요.", RATE_LIMIT: "Codex 사용량 한도 회복 후 재시도해 주세요.",
+const errorNames: Record<string, string> = { NO_MARKET_DATA: "지난주 유효 거래가 없어 AI 작성을 보류했습니다. 위에서 관측된 산지·품종을 다시 선택하고 미리보기를 확인한 뒤 새로 요청하세요.", AUTH_REQUIRED: "Mac의 ChatGPT 로그인 또는 워커 연결을 확인해 주세요.", RATE_LIMIT: "Codex 사용량 한도 회복 후 재시도해 주세요.",
   CODEX_FAILED: "Mac 워커 실행을 확인해 주세요.", INVALID_OUTPUT: "보고서 형식 검증을 통과하지 못했습니다.", TIMEOUT: "제한 시간 안에 작성하지 못했습니다." };
 const sections: Record<string, string> = { market: "도매 시세", cultivation: "재배·기상", commerce: "판매·물류", competitors: "경쟁점" };
 const date = (value: string) => new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
@@ -85,12 +85,12 @@ export function WeeklyBriefing() {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {data?.runs.length === 0 && <p className="text-sm text-muted-foreground">아직 요청한 브리핑이 없습니다.</p>}
     {data?.runs.map(run => <article key={run.id} className="rounded-lg border p-4 space-y-3">
-      <h3 className="font-semibold">{new Date(run.snapshot.periodStart).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} 시작 주 · {statusNames[run.status] ?? run.status}</h3>
+      <h3 className="font-semibold">{new Date(run.snapshot.periodStart).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} 시작 주 · {run.lastError === "NO_MARKET_DATA" ? "자료 확인 필요" : statusNames[run.status] ?? run.status}</h3>
       {run.usage && <p className="text-xs text-muted-foreground">AI 사용량 · 입력 {run.usage.inputTokens.toLocaleString("ko-KR")} / 출력 {run.usage.outputTokens.toLocaleString("ko-KR")} 토큰 · 캐시 재사용 {run.usage.cachedInputTokens.toLocaleString("ko-KR")} 토큰</p>}
       {run.status === "PENDING" && <p className="text-sm">Mac 워커가 작업을 가져오기를 기다리고 있습니다.</p>}
       {run.status === "RUNNING" && run.leaseUntil && new Date(run.leaseUntil) < new Date() && <p className="text-sm">워커 응답이 늦어지고 있습니다. 다음 연결에서 복구를 시도합니다.</p>}
       {run.lastError && <p className="text-sm">{errorNames[run.lastError] ?? "워커 상태를 확인해 주세요."}</p>}
-      {["FAILED", "BLOCKED"].includes(run.status) && <Button variant="outline" disabled={busy} onClick={() => void post("/api/briefings", { action: "retry", jobId: run.id })}>연결 확인 후 재시도</Button>}
+      {run.lastError !== "NO_MARKET_DATA" && ["FAILED", "BLOCKED"].includes(run.status) && <Button variant="outline" disabled={busy} onClick={() => void post("/api/briefings", { action: "retry", jobId: run.id })}>연결 확인 후 재시도</Button>}
       <BriefingPriceAnalysis snapshot={run.snapshot} />
       {run.briefing && <><p className="font-medium">{run.briefing.body.summary}</p>
         {run.briefing.body.sections.map(section => <section key={section.key} className="space-y-1">

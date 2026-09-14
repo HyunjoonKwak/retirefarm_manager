@@ -36,13 +36,14 @@ export async function POST(request: Request) {
       const count = await prisma.$transaction(async tx => {
         if (await tx.briefingRun.count({ where: { userId: user.id, status: { in: ["PENDING", "RUNNING"] } } }) >= 3) return 0;
         return (await tx.briefingRun.updateMany({ where: { id: input.data.action === "retry" ? input.data.jobId : "", userId: user.id,
-          status: { in: ["FAILED", "BLOCKED"] } }, data: { status: "PENDING", attempts: 0, lastError: null,
+          status: { in: ["FAILED", "BLOCKED"] }, OR: [{ lastError: null }, { lastError: { not: "NO_MARKET_DATA" } }] }, data: { status: "PENDING", attempts: 0, lastError: null,
           leaseToken: null, leaseUntil: null, credentialId: null } })).count;
       });
       return NextResponse.json(count ? { ok: true } : { error: "재시도할 수 없는 작업이거나 대기 작업이 많습니다." }, { status: count ? 200 : 409 });
     }
     const snapshot = await buildSnapshot(user.id, input.data);
     if (input.data.action === "preview") return NextResponse.json({ snapshot }, { headers: { "Cache-Control": "no-store" } });
+    if (!snapshot.metrics.length) return NextResponse.json({ error: "선택 조건의 지난주 유효 거래가 없습니다. 산지·품종을 다시 선택하고 미리보기를 확인해 주세요." }, { status: 400 });
     const job = await enqueueBriefing(user.id, snapshot);
     return NextResponse.json({ jobId: job.id, status: job.status }, { status: 201 });
   } catch (error) {

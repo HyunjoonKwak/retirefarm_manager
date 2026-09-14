@@ -82,12 +82,19 @@ export async function handleWorker(credential: { id: string; userId: string; tok
       const where = { userId, attempts: { lt: 3 }, OR: [{ status: "PENDING" }, { status: "RUNNING", leaseUntil: { lte: now } }] };
       const job = await tx.briefingRun.findFirst({ where, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
       if (!job) return { job: null };
+      const snapshot = snapshotSchema.parse(JSON.parse(job.snapshot));
+      if (!snapshot.metrics.length) {
+        await tx.briefingRun.updateMany({ where: { ...where, id: job.id }, data: {
+          status: "BLOCKED", lastError: "NO_MARKET_DATA", leaseToken: null, leaseUntil: null, credentialId: null,
+        } });
+        return { job: null };
+      }
       const leaseToken = randomUUID(), leaseUntil = new Date(now.getTime() + LEASE_MS);
       const claimed = await tx.briefingRun.updateMany({ where: { ...where, id: job.id }, data: {
         status: "RUNNING", leaseToken, leaseUntil, credentialId: credential.id, attempts: { increment: 1 }, lastError: null,
       } });
       if (!claimed.count) return { job: null };
-      return { job: { id: job.id, leaseToken, leaseUntil, inputHash: job.inputHash, snapshot: snapshotSchema.parse(JSON.parse(job.snapshot)) } };
+      return { job: { id: job.id, leaseToken, leaseUntil, inputHash: job.inputHash, snapshot } };
     }
     const job = await tx.briefingRun.findFirst({ where: { id: input.jobId, userId, credentialId: credential.id, leaseToken: input.leaseToken } });
     if (!job) throw new BriefingError(409, "작업 소유권을 확인할 수 없습니다.");
