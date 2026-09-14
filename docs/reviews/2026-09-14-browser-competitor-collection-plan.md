@@ -93,3 +93,13 @@ Claude는 `store_manager` 스크레이퍼·확장과 이 프로젝트의 관측 
 - 전체 Vitest 61개 파일·563개 테스트 통과. 타입 검사 및 변경 파일 ESLint 통과.
 - Claude: 화면 텍스트 파서·테스트, 서버의 종료 응답·브랜드 URL·크기 분류·마이그레이션·테스트를 분담. Codex: UI 통합, 선택 옵션 확인, 저장 실패 초안 유지, 통합 검토·검증. 두 작업 모두 완료하고 작업 터미널을 정리했다.
 - 통합 검토에서 수량 1 초과의 총액을 미확인으로 처리하고, 배송 조건의 줄바꿈 및 호스트/등급 허용 목록의 상속 프로퍼티 문제를 보완했다.
+
+### 운영 배포 확인
+
+- 코드: `6899eba`, origin/main 반영. 이미지 `ghcr.io/hyunjoonkwak/retirefarm-manager:browser-6899eba`.
+- 이미지 digest: `sha256:fb715e0663d16b2ea1664cda7561d370c23a342e8eb1dee90df316e0adfde9b9`. linux/amd64 운영 빌드의 컴파일·타입·페이지 생성 통과.
+- 배포 전 온라인 백업: `backup_2026-09-14T06-33-17-742Z_d9e0129e-ee91-4039-9659-de1f6c4a5d84.db`, 430,657,536 bytes.
+- NAS에서 `20260914060000_competitor_size_grade` 마이그레이션 완료 및 두 컬럼을 읽기 전용 조회로 확인. readiness의 ready·marketSchedulerReady·marketRecoveryReady 모두 true.
+- 로그인된 운영 `/reports`의 경쟁점 조사 탭에서 API 종료 안내·활성 브라우저 검색 링크·크기 구분·크기 비교 기준·미확인 자료 제외 안내를 확인했다. 패널은 0곳을 유지했다. 실제 관측의 생성·저장 흐름은 자동화 테스트로 검증했으며 이번 배포 확인에서 가짜 운영 자료를 추가하지 않았다.
+- 이전 이미지 `briefing-7f05b05`, `.env.before-browser-6899eba`, `docker-compose.prod.yml.before-browser-6899eba`를 보존했다. 추가 컬럼을 삭제하지 않고 이전 앱 이미지로 복귀할 수 있다.
+- 실자료 3–5곳 대조, 확장 프로그램, 30곳 무인 반복 수집은 후속 작업이다.
