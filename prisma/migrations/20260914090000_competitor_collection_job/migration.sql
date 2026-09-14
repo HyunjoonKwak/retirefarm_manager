@@ -32,4 +32,3 @@ CREATE INDEX "CompetitorCollectionJob_userId_status_completedAt_idx" ON "Competi
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CompetitorCollectionJob_userId_weekStart_query_key" ON "CompetitorCollectionJob"("userId", "weekStart", "query");
-
