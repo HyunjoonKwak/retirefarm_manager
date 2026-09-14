@@ -35,3 +35,34 @@ describe("variety price distributions", () => {
     expect(packageKg("10kg 2상자")).toBeNull();
   });
 });
+
+it("keeps exact origins and corporation codes separate even with identical labels", () => {
+  const { summaries } = summarizeVarietyTrades([
+    trade({ corporationCode: "1" }), trade({ corporationCode: "2" }),
+    trade({ corporationCode: "1", origin: "논산시" }),
+  ]);
+  expect(summaries).toHaveLength(3);
+});
+it("flags outside the weighted IQR without deleting rows, and measures flagged volume", () => {
+  const rows = Array.from({ length: 20 }, (_, i) => trade({ id: String(i), price: i === 19 ? 100000 : 1000 + Math.floor(i / 5) * 100,
+    auctionDate: i % 2 ? "2026-09-06T00:00:00+09:00" : "2026-09-07T00:00:00+09:00" }));
+  const original = JSON.stringify(rows);
+  const result = summarizeVarietyTrades(rows).summaries[0];
+  expect(result).toMatchObject({ tradeCount: 20, quantity: 20, observedDays: 2, p25: 1000, p75: 1200, max: 100000,
+    review: { status: "READY", lower: 700, upper: 1500, count: 1, quantitySharePct: 5 } });
+  expect(result.review.samples.map(row => row.id)).toEqual(["19"]);
+  expect(result.mean).toBe(rows.reduce((sum, row) => sum + row.price, 0) / 20);
+  expect(JSON.stringify(rows)).toBe(original);
+});
+it("withholds flags for single-day, small, and zero-width populations", () => {
+  const rows = Array.from({ length: 20 }, (_, i) => trade({ id: String(i), price: i === 19 ? 100000 : 1000,
+    auctionDate: i % 2 ? "2026-09-06T00:00:00+09:00" : "2026-09-07T00:00:00+09:00" }));
+  expect(summarizeVarietyTrades(rows).summaries[0].review).toMatchObject({ status: "ZERO_IQR", lower: null, count: 0, quantitySharePct: null });
+  expect(summarizeVarietyTrades(rows.slice(0, 19)).summaries[0].review.status).toBe("LOW_SAMPLE");
+  expect(summarizeVarietyTrades(rows.map(row => ({ ...row, auctionDate: "2026-09-06" }))).summaries[0].review.status).toBe("LOW_SAMPLE");
+});
+it("counts Korean calendar days instead of UTC boundaries", () => {
+  const rows = Array.from({ length: 20 }, (_, i) => trade({ price: 1000 + i * 100,
+    auctionDate: i % 2 ? "2026-09-06T14:59:59Z" : "2026-09-06T15:00:00Z" }));
+  expect(summarizeVarietyTrades(rows).summaries[0]).toMatchObject({ observedDays: 2, review: { status: "READY" } });
+});

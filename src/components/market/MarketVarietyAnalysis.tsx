@@ -52,7 +52,7 @@ export function MarketVarietyAnalysis({ productName, origin, unit, grade, variet
         <Button size="sm" variant={perKg ? "outline" : "default"} aria-pressed={!perKg} onClick={() => setPerKg(false)}>포장 가격</Button>
         <Button size="sm" variant={perKg ? "default" : "outline"} aria-pressed={perKg} onClick={() => setPerKg(true)}>kg당 가격</Button>
       </div>
-      <p className="text-xs text-muted-foreground">품종·등급·포장 규격을 나눠 계산합니다. 중심 가격은 {STAT_LABELS.weightedMedian}(물량 기준), 주요 거래 구간은 P25~P75입니다. 카드·차트·주간표·일별 요약의 {STAT_LABELS.weightedMean}과 다른 통계입니다. 서로 다른 품종·등급의 가격 차이가 품질이나 수익성 순위를 의미하지는 않습니다.</p>
+      <p className="text-xs text-muted-foreground">품종·등급·포장 규격·산지·법인을 나눠 계산합니다. 중심 가격은 {STAT_LABELS.weightedMedian}(물량 기준), 주요 거래 구간은 P25~P75입니다. 카드·차트·주간표·일별 요약의 {STAT_LABELS.weightedMean}과 다른 통계입니다. 서로 다른 품종·등급의 가격 차이가 품질이나 수익성 순위를 의미하지는 않습니다.</p>
       {!current && <p role="status">분포를 확인하는 중입니다.</p>}
       {current?.error && <div role="alert">{current.error} <Button variant="outline" size="sm" onClick={() => setRetry(n => n + 1)}>다시 시도</Button></div>}
       {current?.data && <>
@@ -62,21 +62,36 @@ export function MarketVarietyAnalysis({ productName, origin, unit, grade, variet
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <caption className="text-xs text-left text-muted-foreground pb-2">수집된 {current.data.analyzedCount.toLocaleString()}행 기준 · 표본 5행 미만은 대표 가격 보류 · 20행 미만은 표본 적음</caption>
-              <thead><tr className="border-b">{["품종 / 등급 / 규격", "중심 가격", "주요 거래 구간", "거래량 / 행 수", "상세"].map(label => <th key={label} className="p-2 whitespace-nowrap">{label}</th>)}</tr></thead>
+              <thead><tr className="border-b">{["품종 / 등급 / 규격 / 산지 / 법인", "중심 가격", "주요 거래 구간", "거래량 / 행 수", "극단 가격 검토", "상세"].map(label => <th key={label} className="p-2 whitespace-nowrap">{label}</th>)}</tr></thead>
               <tbody>{summaries.map(row => {
                 const divisor = perKg ? row.kgPerPackage : 1;
-                return <tr key={JSON.stringify([row.variety, row.grade, row.unit])} className="border-b align-top">
-                  <td className="p-2"><span className="font-medium">{row.variety || "품종 미상"}</span><br />{row.grade || "등급 미상"} · {row.unit || "단위 미상"}</td>
+                return <tr key={JSON.stringify([row.variety, row.grade, row.unit, row.origin, row.corporationCode, row.corporation])} className="border-b align-top">
+                  <td className="p-2"><span className="font-medium">{row.variety || "품종 미상"}</span><br />{row.grade || "등급 미상"} · {row.unit || "단위 미상"}<br /><span className="text-xs text-muted-foreground">{row.origin || "산지 미상"} · {row.corporation || "법인 미상"}</span></td>
                   <td className="p-2 whitespace-nowrap">{!divisor ? "중량 확인 필요" : row.median === null ? "표본 부족" : `${money(row.median / divisor)}${perKg ? "/kg" : ""}`}{row.tradeCount < 20 && <p className="text-xs text-muted-foreground">표본 적음</p>}</td>
                   <td className="p-2 whitespace-nowrap">{divisor && row.p25 !== null && row.p75 !== null ? `${money(row.p25 / divisor)} ~ ${money(row.p75 / divisor)}` : "—"}</td>
-                  <td className="p-2 whitespace-nowrap">{row.kgPerPackage ? `${(row.quantity * row.kgPerPackage).toLocaleString("ko-KR")}kg` : `${row.quantity.toLocaleString()} 거래단위`}<br />{row.tradeCount.toLocaleString()}행</td>
-                  <td className="p-2 min-w-40"><details><summary className="cursor-pointer">최근 거래 보기</summary><ul className="text-xs space-y-2 mt-2">{row.samples.map(trade => <li key={trade.id}>{new Date(trade.auctionDate).toLocaleDateString("ko-KR")} · {trade.origin || "산지 미상"} · {trade.corporation}<br />{money(trade.price)} / {trade.unit} × {trade.quantity}</li>)}</ul><p className="text-xs mt-2">최근 최대 5행 · 극단 가격도 원본에 유지됩니다.</p></details></td>
+                  <td className="p-2 whitespace-nowrap">{row.kgPerPackage ? `${(row.quantity * row.kgPerPackage).toLocaleString("ko-KR")}kg` : `${row.quantity.toLocaleString()} 거래단위`}<br />{row.tradeCount.toLocaleString()}행 · {row.observedDays ?? 0}일</td>
+                  <td className="p-2 min-w-48"><PriceReview row={row} divisor={divisor} perKg={perKg} /></td>
+                  <td className="p-2 min-w-40"><details><summary className="cursor-pointer">최근 거래 보기</summary><ul className="text-xs space-y-2 mt-2">{row.samples.map(trade => <li key={trade.id}>{new Date(trade.auctionDate).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} · {trade.origin || "산지 미상"} · {trade.corporation}<br />{money(trade.price)} / {trade.unit} × {trade.quantity}</li>)}</ul><p className="text-xs mt-2">최근 최대 5행 · 극단 가격도 원본에 유지됩니다.</p></details></td>
                 </tr>;
               })}</tbody>
             </table>
           </div>}
-        <p className="text-xs text-muted-foreground">조회된 경매 자료의 분포이며 미래 가격 예측 범위가 아닙니다. 수집 누락이 있을 수 있습니다. 동일 가격에 물량이 몰리면 구간에 포함된 물량 비율은 정확히 50%가 아닐 수 있습니다.</p>
+        <p className="text-xs text-muted-foreground">극단 가격은 물량 기준 P25~P75 구간 폭의 1.5배를 벗어난 거래를 검토 후보로 표시합니다. 20행·2거래일 미만이거나 구간 폭이 0이면 판정을 보류합니다. 오류 판정이나 자동 제외가 아니며 전체 통계에 포함됩니다. 가격이 급변했다면 후보 날짜와 더 짧은 기간을 함께 확인하세요. 조회된 경매 자료의 분포이며 미래 가격 예측 범위가 아닙니다. 수집 누락이 있을 수 있습니다. 동일 가격에 물량이 몰리면 구간에 포함된 물량 비율은 정확히 50%가 아닐 수 있습니다.</p>
       </>}
     </CardContent>
   </Card>;
+}
+
+function PriceReview({ row, divisor, perKg }: { row: VarietyPriceSummary; divisor: number | null; perKg: boolean }) {
+  const review = row.review;
+  if (!review || review.status === "LOW_SAMPLE") return <span className="text-xs text-muted-foreground">판정 보류 · 20행·2거래일 필요</span>;
+  if (review.status === "ZERO_IQR") return <span className="text-xs text-muted-foreground">판정 보류 · 주요 거래 구간 폭이 0</span>;
+  return <div className="space-y-1 text-xs">
+    <p>{review.count.toLocaleString()}행 · 물량 {review.quantitySharePct!.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%</p>
+    {divisor && <p>검토 경계 {money(review.lower! / divisor)} ~ {money(review.upper! / divisor)}{perKg ? "/kg" : ""}</p>}
+    {review.count > 0 && <details><summary className="cursor-pointer">검토 후보 보기</summary>
+      <ul className="space-y-1 mt-2">{review.samples.map(trade => <li key={trade.id}>{new Date(trade.auctionDate).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })} · {money(trade.price)} / {trade.unit} × {trade.quantity}</li>)}</ul>
+      <p className="mt-1">최근 최대 5행 · 원본과 통계에 유지</p>
+    </details>}
+  </div>;
 }

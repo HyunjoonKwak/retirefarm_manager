@@ -22,15 +22,15 @@ export async function GET(request: NextRequest) {
   const since = marketWindowStart(days, asOf);
   try {
     const rows = await prisma.auctionResult.findMany({
-      where: { productName, auctionDate: { gte: since }, ...(origin ? { origin: { contains: origin } } : {}), ...(unit ? { unit } : {}), ...(grade ? { grade } : {}), ...(varieties ? { variety: { in: varieties.split(",").map(v => v.trim()).filter(Boolean) } } : {}) },
-      select: { id: true, variety: true, grade: true, unit: true, price: true, quantity: true, auctionDate: true, origin: true, corporation: true },
+      where: { productName, auctionDate: { gte: since, lte: asOf }, ...(origin ? { origin: { contains: origin } } : {}), ...(unit ? { unit } : {}), ...(grade ? { grade } : {}), ...(varieties ? { variety: { in: varieties.split(",").map(v => v.trim()).filter(Boolean) } } : {}) },
+      select: { id: true, variety: true, grade: true, unit: true, price: true, quantity: true, auctionDate: true, origin: true, corporation: true, corporationCode: true },
       orderBy: [{ auctionDate: "desc" }, { id: "asc" }], take: 20001,
     });
     return NextResponse.json({
       ...summarizeVarietyTrades(rows.slice(0, 20000)),
       truncated: rows.length > 20000, analyzedCount: Math.min(rows.length, 20000),
       scope: { productName, days, origin: origin || null, unit: unit || null, grade: grade || null, varieties: varieties?.split(",").map(v => v.trim()).filter(Boolean) ?? [] },
-      asOf: asOf.toISOString(), collectionState: "stored_records_only", statisticsVersion: 1,
+      asOf: asOf.toISOString(), collectionState: "stored_records_only", statisticsVersion: 2,
     });
   } catch (error) {
     logger.error("Market analysis failed", error);

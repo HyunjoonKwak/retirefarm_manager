@@ -53,3 +53,18 @@ it("등급을 고르지 않으면 grade 파라미터를 보내지 않는다", as
   expect(url.searchParams.has("grade")).toBe(false);
   expect(url.searchParams.has("varieties")).toBe(false);
 });
+it("shows review candidates separately while retaining the center price and source units", async () => {
+  const body = await response("완숙").json();
+  const row = { ...body.summaries[0], origin: "논산", corporation: "중앙청과", corporationCode: "1", observedDays: 2,
+    review: { status: "READY", lower: 6000, upper: 14000, count: 1, quantitySharePct: 5,
+      samples: [{ id: "flag", auctionDate: "2026-09-06", price: 100000, unit: "5kg", quantity: 1 }] } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ...body, summaries: [row] }) }));
+  render(<MarketVarietyAnalysis {...props} />);
+  expect(await screen.findByText("검토 후보 보기")).toBeInTheDocument();
+  expect(screen.getByText("1행 · 물량 5%")).toBeInTheDocument();
+  expect(screen.getByText("논산 · 중앙청과")).toBeInTheDocument();
+  expect(screen.getByText("10,000원")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "kg당 가격" }));
+  expect(screen.getByText("검토 경계 1,200원 ~ 2,800원/kg")).toBeInTheDocument();
+  expect(screen.getByText(/100,000원 \/ 5kg × 1/)).toBeInTheDocument();
+});

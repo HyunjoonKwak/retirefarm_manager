@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { BriefingResult, BriefingSnapshot } from "@/lib/briefing/contracts";
 import { BriefingPriceAnalysis } from "./BriefingPriceAnalysis";
+import { BriefingFilterPicker, type BriefingFilters } from "./BriefingFilterPicker";
+import { useBriefingFacets } from "./useBriefingFacets";
 
 interface Run { id: string; status: string; attempts: number; lastError: string | null; leaseUntil: string | null;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null;
@@ -20,9 +22,19 @@ export function WeeklyBriefing() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const [token, setToken] = useState("");
-  const [productName, setProductName] = useState("토마토");
+  const [filters, setFilters] = useState<BriefingFilters>({ productName: "토마토", origin: "", variety: "" });
   const [preview, setPreview] = useState<BriefingSnapshot | null>(null);
-  const [variety, setVariety] = useState(""); const [origin, setOrigin] = useState("");
+  const facets = useBriefingFacets(filters.productName, filters.origin);
+  const { productName, origin, variety } = filters;
+  // Once the response for the exact current inputs lands, drop choices the observed records do not offer.
+  useEffect(() => {
+    if (!facets.settled || !facets.facets) return;
+    const originValid = !origin || facets.facets.origins.some(item => item.origin === origin);
+    const varietyValid = !variety || facets.facets.varieties.some(item => item.variety === variety && item.observedForOrigin);
+    if (!originValid || !varietyValid) setFilters(current => ({ ...current, origin: originValid ? current.origin : "", variety: varietyValid ? current.variety : "" }));
+  }, [facets.settled, facets.facets, origin, variety]);
+  const changeFilters = (next: BriefingFilters) => { setFilters(next); setPreview(null); };
+  const canSubmit = !busy && !facets.loading && !!productName.trim();
   const load = useCallback(async () => {
     try {
       const response = await fetch("/api/briefings", { cache: "no-store" });
@@ -46,14 +58,10 @@ export function WeeklyBriefing() {
     <div className="rounded-lg border p-4 space-y-3">
       <h2 className="font-semibold">주간 농가 브리핑 초안</h2>
       <p className="text-sm text-muted-foreground">지난주 월요일부터 일요일까지의 시세로 초안을 만듭니다. 재배·물류·경쟁점 자료 연결과 자동 예약·알림은 준비 중입니다.</p>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div><Label htmlFor="brief-product">품목</Label><Input disabled={busy} id="brief-product" value={productName} maxLength={50} onChange={e => { setProductName(e.target.value); setPreview(null); }} /></div>
-        <div><Label htmlFor="brief-variety">품종 (선택)</Label><Input disabled={busy} id="brief-variety" value={variety} maxLength={50} onChange={e => { setVariety(e.target.value); setPreview(null); }} placeholder="시세에 표시된 정확한 이름" /></div>
-        <div><Label htmlFor="brief-origin">산지 (선택)</Label><Input disabled={busy} id="brief-origin" value={origin} maxLength={50} onChange={e => { setOrigin(e.target.value); setPreview(null); }} placeholder="시세에 표시된 정확한 이름" /></div>
-      </div>
+      <BriefingFilterPicker disabled={busy} filters={filters} facets={facets.facets} loading={facets.loading} error={facets.error} onChange={changeFilters} />
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" disabled={busy || !productName.trim()} onClick={() => void post("/api/briefings", { action: "preview", productName, variety, origin })}>시세 분석 미리보기</Button>
-        <Button disabled={busy || !productName.trim()} onClick={() => void post("/api/briefings", { action: "enqueue", productName, variety, origin })}>초안 생성 요청</Button>
+        <Button variant="outline" disabled={!canSubmit} onClick={() => void post("/api/briefings", { action: "preview", productName, variety, origin })}>시세 분석 미리보기</Button>
+        <Button disabled={!canSubmit} onClick={() => void post("/api/briefings", { action: "enqueue", productName, variety, origin })}>초안 생성 요청</Button>
         <Button variant="outline" disabled={busy} onClick={() => void load()}>상태 새로고침</Button>
       </div>
       <p className="text-sm text-muted-foreground">동일한 입력은 기존 작업을 표시합니다. 요청 후 Mac 워커가 실행되면 작성이 시작됩니다.</p>

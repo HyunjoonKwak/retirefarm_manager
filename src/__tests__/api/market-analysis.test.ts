@@ -33,3 +33,9 @@ it("does not disguise database failure as absent trades", async () => {
   mocks.rows.mockRejectedValue(new Error("offline"));
   expect((await request("productName=토마토")).status).toBe(500);
 });
+it("bounds analysis at the observation time and selects corporation identity", async () => {
+  await request("productName=토마토");
+  const query = mocks.rows.mock.calls[0][0];
+  expect(query.where.auctionDate.lte).toBeInstanceOf(Date);
+  expect(query.select.corporationCode).toBe(true);
+});
