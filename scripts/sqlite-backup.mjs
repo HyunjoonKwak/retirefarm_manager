@@ -78,6 +78,8 @@ export async function createBackup(prefix = 'backup') {
   try {
     await sqlite(db, [`.backup ${JSON.stringify(temporary)}`]);
     await fs.chmod(temporary, 0o600);
+    // The private snapshot must be a portable single file, independent of WAL sidecars.
+    await sqlite(temporary, ['PRAGMA journal_mode=DELETE;'], false);
     await validateDatabase(temporary);
     await fs.rename(temporary, destination);
     return { filename, size: (await fs.stat(destination)).size };

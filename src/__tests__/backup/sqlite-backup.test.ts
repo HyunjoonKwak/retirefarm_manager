@@ -84,3 +84,28 @@ it('scheduled retention removes ordinary old backups but preserves pre-restore s
   await expect(fs.access(path.join(backups, ordinary.filename))).rejects.toMatchObject({ code: 'ENOENT' });
   await expect(fs.access(path.join(backups, safety.filename))).resolves.toBeUndefined();
 });
+
+it('deployment backup uses the same online snapshot with WAL commits', async () => {
+  const bin = path.join(dir, 'bin'); await fs.mkdir(bin);
+  const script = path.resolve('scripts/sqlite-backup.mjs');
+  // Only the docker transport is replaced; the production backup command runs unchanged.
+  const shim = '#!/bin/sh\n[ "$1 $2 $3 $4 $5" = "exec retirefarm-app node scripts/sqlite-backup.mjs create" ] || exit 91\nexport BACKUP_DIR="$TEST_BACKUPS"\nexec "$TEST_NODE" "$TEST_BACKUP_SCRIPT" create\n';
+  await fs.writeFile(path.join(bin, 'docker'), shim, { mode: 0o700 });
+  const connection = new Database(db);
+  try {
+    connection.pragma('journal_mode = WAL'); connection.pragma('wal_autocheckpoint = 0');
+    connection.prepare("INSERT INTO User VALUES('deploy-wal','USER',NULL)").run();
+    const output = execFileSync('bash', [path.resolve('deploy.sh'), 'backup'], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_NODE: process.execPath, TEST_BACKUP_SCRIPT: script, TEST_BACKUPS: backups } });
+    const receipt = JSON.parse(output.split('\n').find(line => line.startsWith('{'))!);
+    expect(sql(path.join(backups, receipt.filename), 'SELECT count(*) FROM User')).toBe('2');
+    expect(sql(path.join(backups, receipt.filename), 'PRAGMA quick_check')).toBe('ok');
+    expect(sql(path.join(backups, receipt.filename), 'PRAGMA journal_mode')).toBe('delete');
+  } finally { connection.close(); }
+});
+it('deployment update stops before pulling or replacing the image if backup fails', async () => {
+  const bin = path.join(dir, 'bin'); await fs.mkdir(bin);
+  const calls = path.join(dir, 'calls');
+  await fs.writeFile(path.join(bin, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TEST_CALLS"\nexit 42\n', { mode: 0o700 });
+  expect(() => execFileSync('bash', [path.resolve('deploy.sh'), 'update'], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_CALLS: calls }, stdio: 'pipe' })).toThrow();
+  expect((await fs.readFile(calls, 'utf8')).trim()).toBe('exec retirefarm-app node scripts/sqlite-backup.mjs create');
+});

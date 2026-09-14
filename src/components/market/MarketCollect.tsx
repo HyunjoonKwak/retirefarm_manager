@@ -47,6 +47,8 @@ interface MarketSettings {
   corporationCodes: string[];
   targetProducts: string[];
   defaultViewDays: number;
+  retentionDays: number;
+  autoCleanupEnabled: boolean;
 }
 
 const AVAILABLE_PRODUCTS: readonly string[] = MARKET_PRODUCTS;

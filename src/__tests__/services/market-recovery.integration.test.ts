@@ -57,7 +57,7 @@ it("waits between failed attempts, caps at three across checks, and notifies onc
   expect(await m.db.marketRecoveryJob.findFirst()).toMatchObject({ status: "FAILED", attempts: 3 });
 });
 it("recovers an expired process lease and does not overlap a regular scheduled collection", async () => {
-  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", status: "RUNNING", attempts: 1, leaseToken: "old", leaseUntil: new Date(now.getTime() - 1000) } });
+  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", nextAttemptAt: now, status: "RUNNING", attempts: 1, leaseToken: "old", leaseUntil: new Date(now.getTime() - 1000) } });
   m.running.mockReturnValue(true); await checkMarketRecovery(now); expect(m.collect).not.toHaveBeenCalled();
   m.running.mockReturnValue(false); await checkMarketRecovery(now); expect(m.collect).toHaveBeenCalledOnce();
   expect(await m.db.marketRecoveryJob.findFirst()).toMatchObject({ status: "SUCCESS", attempts: 2 });
@@ -71,13 +71,13 @@ it("API rejects anonymous access and only returns jobs for the logged-in setting
   expect(data.jobs[0].nextAttemptAt).toBeNull();
 });
 it("re-enabling the same scope can resume a cancelled job without losing its date", async () => {
-  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", status: "CANCELLED", attempts: 0 } });
+  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", nextAttemptAt: now, status: "CANCELLED", attempts: 0 } });
   await checkMarketRecovery(now);
   expect(m.collect).toHaveBeenCalledOnce();
   expect(await m.db.marketRecoveryJob.findFirst()).toMatchObject({ status: "SUCCESS", attempts: 1 });
 });
 it("a process lost on its third attempt becomes failed and notifies instead of remaining RUNNING", async () => {
-  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", status: "RUNNING", attempts: 3, leaseToken: "old", leaseUntil: new Date(now.getTime() - 1000) } });
+  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", nextAttemptAt: now, status: "RUNNING", attempts: 3, leaseToken: "old", leaseUntil: new Date(now.getTime() - 1000) } });
   await checkMarketRecovery(now); await checkMarketRecovery(now);
   expect(m.collect).not.toHaveBeenCalled();
   expect(await m.db.marketRecoveryJob.findFirst()).toMatchObject({ status: "FAILED", leaseToken: null });
@@ -88,4 +88,15 @@ it("limits a large backlog to three collection calls per pass", async () => {
   await checkMarketRecovery(now);
   expect(m.collect).toHaveBeenCalledTimes(3);
   expect(await m.db.marketRecoveryJob.count({ where: { status: "PENDING" } })).toBe(4);
+});
+
+it("does not reset a persisted future retry when reconciling the same job", async () => {
+  const nextAttemptAt = new Date(now.getTime() + 60 * 60000);
+  await m.db.marketRecoveryJob.create({ data: { settingsId: setting.id, scope: recoveryScope(setting), targetDate: "2026-09-07", nextAttemptAt, status: "FAILED", attempts: 1 } });
+  await checkMarketRecovery(now);
+  expect(m.collect).not.toHaveBeenCalled();
+  expect(await m.db.marketRecoveryJob.findFirst()).toMatchObject({ nextAttemptAt, attempts: 1 });
+  vi.setSystemTime(nextAttemptAt);
+  await checkMarketRecovery(new Date());
+  expect(m.collect).toHaveBeenCalledOnce();
 });

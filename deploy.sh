@@ -234,34 +234,16 @@ logs() {
     docker-compose -f "$COMPOSE_FILE" logs -f --tail=100
 }
 
-# 백업 (SQLite - 호스트 디렉토리에서 직접 복사)
+# 백업 (SQLite 온라인 스냅샷)
 backup() {
-    log_info "데이터베이스 백업 중..."
+    log_info "SQLite 온라인 백업 생성 및 무결성 검증 중..."
 
-    mkdir -p "$BACKUP_DIR"
-
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.db"
-    DATA_DIR="${DATA_PATH:-$DEPLOY_DIR/data}"
-    SOURCE_DB="$DATA_DIR/$DB_FILE"
-
-    # 호스트 디렉토리에서 직접 복사
-    if [ -f "$SOURCE_DB" ]; then
-        cp "$SOURCE_DB" "$BACKUP_FILE"
+    # 실행 중인 앱과 같은 DB/볼륨을 사용한다. WAL의 미체크포인트 커밋도 포함한다.
+    # 백업 실패 시 update()의 set -e가 이미지 교체를 중단한다. 파일 복사로 우회하지 않는다.
+    if docker exec retirefarm-app node scripts/sqlite-backup.mjs create; then
+        log_success "온라인 백업 완료 (앱의 BACKUP_DIR에 저장)"
     else
-        log_error "데이터베이스 파일을 찾을 수 없습니다: $SOURCE_DB"
-        return 1
-    fi
-
-    if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
-        gzip "$BACKUP_FILE"
-        log_success "백업 완료: ${BACKUP_FILE}.gz"
-
-        # 30일 이상 된 백업 삭제
-        find "$BACKUP_DIR" -name "backup_*.db.gz" -mtime +30 -delete 2>/dev/null || true
-    else
-        rm -f "$BACKUP_FILE"
-        log_error "백업 실패"
+        log_error "온라인 백업 실패: 컨테이너 상태와 백업 볼륨을 확인하세요."
         return 1
     fi
 }

@@ -722,8 +722,13 @@ export async function collectAndSaveAuctionData(
  * 호출자는 수집이 완전 성공(result.complete)했을 때만 호출한다.
  */
 export async function cleanupOldAuctionData(): Promise<{ deletedCount: number; retentionDays: number }> {
-  const allSettings = await prisma.marketCollectionSettings.findMany({ select: { retentionDays: true } });
+  const allSettings = await prisma.marketCollectionSettings.findMany({ select: { retentionDays: true, autoCleanupEnabled: true } });
   const retentionDays = allSettings.length > 0 ? Math.max(...allSettings.map((s) => s.retentionDays)) : 90;
+
+  // Shared history must respect any user who opted out of automatic deletion.
+  if (!allSettings.length || allSettings.some((setting) => !setting.autoCleanupEnabled)) {
+    return { deletedCount: 0, retentionDays };
+  }
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - retentionDays);

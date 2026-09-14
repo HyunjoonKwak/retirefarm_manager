@@ -98,7 +98,7 @@ export async function checkMarketRecovery(now = new Date()): Promise<void> {
             data: { status: completed, lastError: null } });
           continue;
         }
-        const job = await prisma.marketRecoveryJob.upsert({ where: { settingsId_scope_targetDate: key }, create: key, update: {} });
+        const job = await prisma.marketRecoveryJob.upsert({ where: { settingsId_scope_targetDate: key }, create: { ...key, nextAttemptAt: new Date() }, update: {} });
         // 프로세스 중단으로 마지막 시도가 RUNNING에 남아도 재시도 상한 뒤 영원히 묶이지 않는다.
         if (job.status === "RUNNING" && job.leaseUntil && job.leaseUntil < now && job.attempts >= RECOVERY_MAX_ATTEMPTS) {
           await prisma.marketRecoveryJob.updateMany({ where: { id: job.id, leaseToken: job.leaseToken, leaseUntil: { lt: now } },

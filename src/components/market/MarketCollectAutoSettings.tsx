@@ -31,6 +31,8 @@ interface MarketSettings {
   corporationCodes: string[];
   targetProducts: string[];
   defaultViewDays: number;
+  retentionDays: number;
+  autoCleanupEnabled: boolean;
 }
 
 interface Corporation {
@@ -237,6 +239,25 @@ export function MarketCollectAutoSettings({
           </div>
         )}
 
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="market-auto-cleanup">오래된 원본 자동 정리</Label>
+            <Switch id="market-auto-cleanup" checked={settings.autoCleanupEnabled}
+              onCheckedChange={(checked) => onSettingsChange({ ...settings, autoCleanupEnabled: checked })} />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {settings.autoCleanupEnabled ? "보관 기간이 지난 원본을 자동 삭제합니다." : "정리 안 함 · 보관 기간을 넘긴 원본도 유지합니다."}
+          </p>
+          <Label htmlFor="market-retention-days">원본 보관 기간 (일)</Label>
+          <Input id="market-retention-days" type="number" min={7} max={365}
+            value={settings.retentionDays} disabled={!settings.autoCleanupEnabled}
+            onChange={(event) => onSettingsChange({ ...settings, retentionDays: Number(event.target.value) })} />
+          <p className="text-sm text-muted-foreground">7~365일. 기간을 늘려도 이미 삭제된 자료가 자동 복구되지는 않습니다.</p>
+          {settings.autoCleanupEnabled && <p role="alert" className="text-sm text-amber-700">
+            장기 집계 보관은 아직 제공되지 않습니다. 자동 정리를 켜면 오래된 가격 이력을 잃을 수 있습니다.
+          </p>}
+        </div>
+
         <div className="flex items-center justify-between pt-4">
           <div className="flex items-center gap-2">
             {hasUnsavedChanges && (
@@ -257,6 +278,7 @@ export function MarketCollectAutoSettings({
               onClick={onSave}
               disabled={
                 saving ||
+                !Number.isInteger(settings.retentionDays) || settings.retentionDays < 7 || settings.retentionDays > 365 ||
                 (settings.autoCollectEnabled && settings.corporationCodes.length === 0)
               }
             >
