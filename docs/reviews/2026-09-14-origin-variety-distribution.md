@@ -51,3 +51,5 @@ Claude가 브리핑 선택 서비스·API·UI와 관련 검증을, Codex가 가�
 ## 발견한 빈 자료 작업의 추가 차단
 
 위 운영 점검 직후 보강을 구현했다. 공개 생성 API는 유효 지표가 없는 스냅샷을 400으로 거절하며 미리보기는 계속 제공한다. 기존 빈 자료 대기 작업은 claim 트랜잭션에서 `BLOCKED / NO_MARKET_DATA`로 전환하고 lease·AI 작업을 발급하지 않으며 시도 횟수를 늘리지 않는다. 원본 스냅샷은 보존한다. 화면은 ‘자료 확인 필요’와 조건 재선택 안내를 표시하고 같은 빈 스냅샷 재시도는 서버와 UI에서 막는다. 전체 404개 테스트·타입 검사·변경 파일 lint를 통과했다. 취소/상세 복구 UX는 별도 후속 과제이며 이번에는 삭제 없이 처리한다.
+
+최종 운영 적용(13:28 KST): 이미지 `briefing-7ed2f89`, digest `sha256:0adf335c8f9cc4b4d51e294f27bfaff2cc58f449c3fc0ebd47776ab49a425cf4`. 프로덕션 빌드·배포 완료, readiness 세 항목 true / Docker healthy. 직전 `briefing-00d3db4` 및 환경 사본 `.env.before-empty-20260914`를 보존했다. 전용 인증으로 claim 한 번만 호출해 HTTP 200·job null을 확인했고 실제 AI 프로세스는 실행하지 않았다. 기존 빈 자료 작업은 BLOCKED/NO_MARKET_DATA·attempts 0·metrics 0이며 원래 스냅샷과 완료 초안 한 건을 유지한다. 운영 화면의 ‘자료 확인 필요’·조건 재선택 안내·동일 작업 재시도 버튼 부재를 확인했다.
